@@ -1,8 +1,11 @@
-// Fails if a publishable package imports a package it doesn't list in "dependencies" (it would break on npm).
+// Fails if a publishable package imports a package it doesn't list in "dependencies" (it would break on npm), or if a
+// browser-safe package (@paralock/zcash, @paralock/adaptor) imports a Node built-in.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const PACKAGES = ["zcash", "adaptor", "evm", "sdk", "lightwalletd"];
+const BROWSER_SAFE = new Set(["zcash", "adaptor"]);
+const NODE_BUILTINS = /^(node:|(assert|buffer|child_process|crypto|dns|events|fs|http|https|net|os|path|process|stream|tls|url|util|worker_threads|zlib)(\/|$))/;
 const IMPORT = /(?:from|import)\s+["']([^"'.][^"']*)["']/g;
 
 function sources(dir) {
@@ -19,7 +22,13 @@ for (const name of PACKAGES) {
   const used = new Set();
   for (const file of sources(join(root, "src"))) {
     for (const [, spec] of readFileSync(file, "utf8").matchAll(IMPORT)) {
-      if (spec.startsWith("node:")) continue;
+      if (NODE_BUILTINS.test(spec)) {
+        if (BROWSER_SAFE.has(name)) {
+          failed = true;
+          console.error(`@paralock/${name} must stay browser-safe but ${file} imports ${spec}`);
+        }
+        continue;
+      }
       used.add(spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0]);
     }
   }
@@ -30,4 +39,4 @@ for (const name of PACKAGES) {
   }
 }
 if (failed) process.exit(1);
-console.log("dependencies OK: every runtime import is declared");
+console.log("dependencies OK: every runtime import is declared; zcash and adaptor import no Node built-ins");
