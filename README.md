@@ -147,12 +147,22 @@ const claim = buildHtlcClaim({ htlc, utxo, key: maker, preimage: secret, to: mak
 
 ## Tests
 
-| Suite | What it covers |
-|---|---|
-| `packages/zcash` | ZIP 244 txid and all six transparent sighash types against the [official test vectors](https://github.com/zcash/zcash-test-vectors); live regtest: HTLC fund/claim/refund (refund rejected before the timeout), 2-of-2 claim with an adaptor-completed signature, pre-signed refund only after its lock time |
-| `packages/adaptor` | Pre-sign → pre-verify → adapt → valid ECDSA → extract, over random rounds; tampering rejected; EVM `ecrecover` compatible |
-| `contracts` | Both escrows: happy paths, wrong secret or signer, expiry edges, double claim, reuse, tampering, fuzzing, real TIP-20 tokens |
-| `packages/evm`, `packages/sdk` | Clients against local chains; policy, pricing and transport |
+**224 tests in total.**
+
+| Suite | Count | What it covers |
+|---|---|---|
+| `packages/zcash` | 15 | ZIP 244 txid and all six transparent sighash types against the [official test vectors](https://github.com/zcash/zcash-test-vectors); live regtest: HTLC fund/claim/refund (refund rejected before the timeout), 2-of-2 claim with an adaptor-completed signature, pre-signed refund only after its lock time, wrong secret rejected |
+| `packages/adaptor` | 30 | Pre-sign → pre-verify → adapt → valid ECDSA → extract, over random rounds; tampering rejected; EVM `ecrecover` compatible |
+| `contracts` | 146 | Both escrows: happy paths, wrong secret or signer, high-s, expiry edges, double claim, reuse, tampering, fuzzing, real TIP-20 tokens |
+| `packages/evm` | 20 | Both clients against local Tempo and plain EVM chains |
+| `packages/sdk` | 8 | Timeout policy, pricing, transport, privacy helpers, deterministic adaptor spends |
+
+End-to-end swaps verified on the devnet:
+- htlc mode on Tempo;
+- private mode on Tempo, Base and Ethereum;
+- fresh recipient plus relayed claim;
+- the maker-vanishes refund in both modes;
+- the taker-never-claims double refund.
 
 ## Roadmap
 
