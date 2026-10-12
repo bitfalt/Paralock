@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+out/
+cache/
+broadcast/
+*.log
+.env
+.env.*
+!.env.example
+.paralock/
+.DS_Store
+coverage/
+
+# Local devnet deployments are recreated by `paralock devnet up`
+contracts/deployments/31337.json
