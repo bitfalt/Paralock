@@ -10,7 +10,7 @@ import { DevnetBackend } from "./devnet-backend";
  * - `mock`: a simulated maker and chains (used for hosted previews).
  * Set PARALOCK_BACKEND to force one; by default the devnet is used when `.paralock/devnet.json` exists.
  */
-export type Backend = Pick<MockParalockClient, "getQuote" | "startSwap" | "getSwap" | "refund">;
+export type Backend = Pick<MockParalockClient, "chains" | "getQuote" | "startSwap" | "getSwap" | "refund">;
 
 const g = globalThis as typeof globalThis & { __paralockBackend?: Backend };
 

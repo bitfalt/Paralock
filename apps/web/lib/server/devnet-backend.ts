@@ -1,10 +1,23 @@
-import { createTempoHtlc } from "@paralock/tempo";
-import { DEVNET_POLICY, DevnetSwapRunner, HttpMakerApi, type DevnetFile, type Swap, loadDevnetFile } from "@paralock/sdk";
-import { ParalockError, type MockScenario } from "../mock-paralock";
+import { createAdaptorEscrow, createEvmHtlc } from "@paralock/evm";
+import {
+  DEVNET_POLICY,
+  type DevnetFile,
+  DevnetSwapRunner,
+  type EvmChain,
+  HttpMakerApi,
+  type PrivacyOptions,
+  type Swap,
+  type SwapMode,
+  loadDevnetFile,
+} from "@paralock/sdk";
+import { ParalockError } from "../mock-paralock";
 import type { ChainTips, Hex, QuoteView, SwapView } from "../types";
 
 const SPREAD_BPS = 50;
 const ZCASH_FEE_ZAT = 10_000n;
+const CHAIN_NAMES: Record<EvmChain, string> = { tempo: "Tempo", base: "Base", ethereum: "Ethereum" };
+
+export type Scenario = "cooperative" | "maker_silent" | "taker_misses_claim";
 
 async function rpc<T>(url: string, method: string, params: unknown[] = []): Promise<T> {
   const res = await fetch(url, {
@@ -19,25 +32,32 @@ async function rpc<T>(url: string, method: string, params: unknown[] = []): Prom
 }
 
 /**
- * The web app's swap engine on a local devnet (`paralock devnet up` + `paralock maker`): real Zcash regtest and
- * Tempo transactions through @paralock/sdk. The taker is ths account 1; the maker runs as its own process.
+ * The web app's swap engine on a local devnet (`paralock devnet up` + `paralock maker`): real Zcash regtest and EVM
+ * transactions through @paralock/sdk, on every devnet chain, in htlc or private (adaptor) mode.
  */
 export class DevnetBackend {
   private readonly runner: DevnetSwapRunner;
   private readonly maker: HttpMakerApi;
-  private readonly shield = new Map<string, boolean>();
 
   constructor(private readonly cfg: DevnetFile = loadDevnetFile()) {
     this.runner = new DevnetSwapRunner(cfg);
     this.maker = new HttpMakerApi(cfg.maker.url);
   }
 
-  async getQuote(zecAmountZat: bigint): Promise<QuoteView> {
+  chains() {
+    return (Object.keys(CHAIN_NAMES) as EvmChain[]).map((chain) => {
+      const net = this.cfg.evm[chain];
+      return { chain, name: CHAIN_NAMES[chain], token: net?.quoteToken ?? (chain === "tempo" ? "OUSD" : "USDC"), available: !!net };
+    });
+  }
+
+  async getQuote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<QuoteView> {
     if (zecAmountZat < 100_000n) throw new ParalockError(422, "amount_too_small", "Minimum swap is 0.001 ZEC.");
     if (zecAmountZat > 400_000_000n) throw new ParalockError(422, "amount_too_large", "The devnet maker fills up to 4 ZEC per swap.");
+    if (!this.cfg.evm[chain]) throw new ParalockError(422, "chain_unavailable", `This devnet doesn't run ${CHAIN_NAMES[chain]}.`);
     let quote;
     try {
-      quote = await this.runner.quote(zecAmountZat);
+      quote = await this.runner.quote(zecAmountZat, chain, mode);
     } catch (err) {
       throw new ParalockError(503, "maker_unavailable", `The maker is not reachable. Is \`paralock maker\` running? (${String(err)})`);
     }
@@ -48,18 +68,18 @@ export class DevnetBackend {
     };
   }
 
-  async startSwap(quoteId: string, opts: { shield: boolean; scenario?: MockScenario }): Promise<SwapView> {
+  async startSwap(quoteId: string, opts: { shield: boolean; scenario?: Scenario; privacy?: PrivacyOptions }): Promise<SwapView> {
     let swap: Swap;
     try {
       swap = this.runner.start(quoteId, {
         shield: opts.shield,
         makerOffline: opts.scenario === "maker_silent",
         skipClaim: opts.scenario === "taker_misses_claim",
+        privacy: opts.privacy,
       });
     } catch (err) {
       throw new ParalockError(410, "quote_expired", err instanceof Error ? err.message : String(err));
     }
-    this.shield.set(swap.id, opts.shield);
     return this.view(swap.id);
   }
 
@@ -84,54 +104,69 @@ export class DevnetBackend {
     const job = this.runner.get(id);
     if (!job) throw new ParalockError(404, "swap_not_found", "No swap with that id.");
     const { error: note, ...rest } = job;
-    const swap: SwapView & { note?: string } = { ...rest, events: [...job.events], shield: this.shield.get(id), note };
+    const swap: SwapView & { note?: string; releaseSignature?: string } = { ...rest, events: [...job.events], note };
 
-    // Merge what only the maker saw (its Tempo refund, or its ZEC claim) into the taker's timeline.
-    if (swap.hashlock !== "0x") {
-      const makerView = await this.maker.getSwap(swap.hashlock).catch(() => undefined);
+    // Merge what only the maker saw (its EVM refund, its ZEC claim, its lock tx) into the taker's timeline.
+    const makerId = swap.mode === "adaptor" ? swap.id : swap.hashlock;
+    if (makerId && swap.status !== "quoted") {
+      const makerView = await this.maker.getSwap(makerId).catch(() => undefined);
       for (const e of makerView?.events ?? []) {
-        if ((e.status === "refunded_tempo" || e.status === "completed") && !swap.events.some((x) => x.status === e.status)) {
+        if ((e.status === "refunded_evm" || e.status === "completed") && !swap.events.some((x) => x.status === e.status)) {
           swap.events.push(e);
         }
       }
       swap.events.sort((a, b) => a.at - b.at);
       const last = swap.events.at(-1);
       if (last && swap.status !== "failed") swap.status = last.status;
-      if (makerView?.tempo.refundTx) swap.tempo.refundTx = makerView.tempo.refundTx;
+      if (makerView?.evm.refundTx) swap.evm.refundTx = makerView.evm.refundTx;
       if (makerView?.zcash.claimTxid) swap.zcash.claimTxid = makerView.zcash.claimTxid;
-      if (makerView?.tempo.lockTx) {
-        swap.tempo.lockTx = makerView.tempo.lockTx;
-        const lockEvent = swap.events.find((e) => e.status === "tempo_locked");
-        if (lockEvent && !lockEvent.txid) lockEvent.txid = makerView.tempo.lockTx;
+      if (makerView?.evm.lockTx) {
+        swap.evm.lockTx = makerView.evm.lockTx;
+        const lockEvent = swap.events.find((e) => e.status === "evm_locked");
+        if (lockEvent && !lockEvent.txid) lockEvent.txid = makerView.evm.lockTx;
       }
-      if (swap.events.some((e) => e.status === "tempo_claimed")) swap.preimage = await this.revealedSecret(swap.hashlock);
     }
-    swap.tips = await this.tips().catch(() => undefined);
+    if (swap.events.some((e) => e.status === "evm_claimed")) {
+      if (swap.mode === "htlc" && swap.hashlock) swap.preimage = await this.revealedSecret(swap.evm.chain, swap.hashlock);
+      if (swap.mode === "adaptor" && swap.adaptor?.escrowId) swap.releaseSignature = await this.releaseSignature(swap.evm.chain, swap.adaptor.escrowId);
+    }
+    swap.tips = await this.tips(swap.evm.chain).catch(() => undefined);
     return swap;
   }
 
-  /** Reads the secret from the Tempo `Claimed` event, the same way the maker learns it. */
-  private async revealedSecret(hashlock: Hex): Promise<Hex | undefined> {
-    const htlc = createTempoHtlc({
-      rpcUrl: this.cfg.tempo.rpc,
-      chainId: this.cfg.tempo.chainId,
-      contract: this.cfg.tempo.htlc,
-      fromBlock: BigInt(this.cfg.startBlock),
-    });
+  /** htlc mode: reads the secret from the escrow's `Claimed` event, the same way the maker learns it. */
+  private async revealedSecret(chain: EvmChain, hashlock: Hex): Promise<Hex | undefined> {
+    const net = this.cfg.evm[chain];
+    if (!net) return undefined;
+    const htlc = createEvmHtlc({ rpcUrl: net.rpc, chainId: net.chainId, contract: net.htlc, fromBlock: BigInt(net.startBlock) });
     return htlc.waitForClaimPreimage(hashlock, { timeoutMs: 1_000 }).catch(() => undefined);
   }
 
-  private async tips(): Promise<ChainTips> {
+  /** adaptor mode: the release signature on-chain. Without the maker's pre-signature it reveals nothing. */
+  private async releaseSignature(chain: EvmChain, id: Hex): Promise<string | undefined> {
+    const net = this.cfg.evm[chain];
+    if (!net?.adaptorEscrow) return undefined;
+    const escrow = createAdaptorEscrow({ rpcUrl: net.rpc, chainId: net.chainId, contract: net.adaptorEscrow, fromBlock: BigInt(net.startBlock) });
+    const sig = await escrow.waitForClaimSignature(id, { timeoutMs: 1_000 }).catch(() => undefined);
+    return sig ? `${sig.r}${sig.s.slice(2)}${Number(sig.v).toString(16)}` : undefined;
+  }
+
+  private async tips(chain: EvmChain): Promise<ChainTips> {
+    const net = this.cfg.evm[chain];
     const [zcashHeight, block] = await Promise.all([
       rpc<number>(this.cfg.zcash.rpc, "getblockcount"),
-      rpc<{ number: string; timestamp: string }>(this.cfg.tempo.rpc, "eth_getBlockByNumber", ["latest", false]),
+      net ? rpc<{ number: string; timestamp: string }>(net.rpc, "eth_getBlockByNumber", ["latest", false]) : undefined,
     ]);
+    const evmBlock = block ? Number.parseInt(block.number, 16) : 0;
+    const evmTime = block ? Number.parseInt(block.timestamp, 16) : 0;
     return {
       zcashHeight,
       zcashBlockSeconds: DEVNET_POLICY.zcashBlockSeconds,
       zcashNetwork: this.cfg.zcash.network,
-      tempoBlock: Number.parseInt(block.number, 16),
-      tempoTime: Number.parseInt(block.timestamp, 16),
-    };
+      evmBlock,
+      evmTime,
+      tempoBlock: evmBlock,
+      tempoTime: evmTime,
+    } as ChainTips;
   }
 }
