@@ -7,13 +7,14 @@ The EVM leg of a Paralock swap, on Tempo (TIP-20) or any EVM chain (ERC-20: Base
 - `ParalockAdaptorEscrow` (adaptor / privacy mode): released by an ECDSA signature from a one-time `signer` over
   `claimDigest(id)`. No hashlock on-chain, so nothing links the two legs; the completed adaptor signature `(r, s)`
   published in `Claimed` gives the maker the secret for the Zcash side.
-- `MockUSD`: a 6-decimal "USDC" for the local Base / Ethereum devnets (mintable by the deployer only).
+- `MockUSD`: a 6-decimal "USDC" for the local plain-EVM devnets (mintable by the deployer only). It also stands in for
+  USDC on Robinhood Chain Testnet, which has none.
 
 ## Design
 
 - **One storage slot per swap.** Tempo charges ~250k gas for each new storage slot (TIP-1000), so the contract stores
   only `hashlock => keccak256(abi.encode(swap))`. Callers pass the full `Swap` back to `claim`/`refund`, and the
-  `Locked` event carries every field so watchers can rebuild it (`@paralock/tempo` does this for you).
+  `Locked` event carries every field so watchers can rebuild it (`@paralock/evm` does this for you).
 - **Hashlocks are single-use.** After a claim or refund the slot holds the `SETTLED` sentinel forever. The preimage is
   public once claimed, so re-locking under it would let anyone take the funds.
 - **Memo-tagged transfers.** On TIP-20 tokens every transfer uses `transferFromWithMemo`/`transferWithMemo` with

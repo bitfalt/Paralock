@@ -50,7 +50,8 @@ extract(pre, sig, point);                            // the maker recovers `secr
   nonce for two different messages, which would leak the key.
 - **Domain separation.** The DLEQ challenge is `sha256("paralock/adaptor/dleq/v1" ‖ G ‖ Y ‖ R' ‖ R ‖ T1 ‖ T2) mod n`
   over fixed-length compressed points: an injective, protocol-specific encoding. It is part of the wire format.
-- **Range checks.** Private keys, adaptor secrets and proof scalars must be in `[1, n)`; anything else is rejected.
+- **Range checks.** Private keys and adaptor secrets must be in `[1, n)`, and the DLEQ proof scalars `c` and `z` in
+  `[0, n)`; anything else is rejected.
 - **Always call `preVerify`** on a pre-signature you receive. `decodePreSignature` only parses.
 - ECDSA adaptor signatures have seen far less scrutiny than Schnorr ones.
 
