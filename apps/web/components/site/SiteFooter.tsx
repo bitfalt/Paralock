@@ -3,7 +3,8 @@ import { Logo } from "@/components/ui/Logo";
 
 const GITHUB = "https://github.com/bitfalt/Paralock";
 
-const COLUMNS: { title: string; links: { href: string; label: string; external?: boolean }[] }[] = [
+// `external` opens in a new tab; `file` is a plain link to a non-page route (llms.txt).
+const COLUMNS: { title: string; links: { href: string; label: string; external?: boolean; file?: boolean }[] }[] = [
   {
     title: "Product",
     links: [
@@ -16,9 +17,10 @@ const COLUMNS: { title: string; links: { href: string; label: string; external?:
   {
     title: "Developers",
     links: [
+      { href: "/docs", label: "Docs" },
       { href: GITHUB, label: "GitHub", external: true },
       { href: "https://www.npmjs.com/package/@paralock/sdk", label: "npm", external: true },
-      { href: `${GITHUB}#readme`, label: "Docs", external: true },
+      { href: "/llms.txt", label: "llms.txt", file: true },
       { href: `${GITHUB}/blob/main/docs/PRIVACY.md`, label: "Privacy design", external: true },
     ],
   },
@@ -42,6 +44,8 @@ export function SiteFooter() {
                     <a href={l.href} target="_blank" rel="noreferrer">
                       {l.label}
                     </a>
+                  ) : l.file ? (
+                    <a href={l.href}>{l.label}</a>
                   ) : (
                     <Link href={l.href}>{l.label}</Link>
                   )}
