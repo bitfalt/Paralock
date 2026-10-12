@@ -42,7 +42,7 @@ const { v, r, s } = await escrow.waitForClaimSignature(id, { timeoutMs: 60_000 }
 | Chains | `evmChain`, `tempoChain`, `plainEvmChain`, `isTempoChainId`, `TEMPO_CHAIN_IDS`, `TEMPO_TOKENS` |
 | Networks | `KNOWN_NETWORKS`, `knownNetwork(chainId)`, `knownNetworks(chain)`: Tempo, Base, Ethereum, Arbitrum, Robinhood Chain and HyperEVM mainnets and testnets (chain ids, official RPCs, explorers, stablecoins), each value checked against official docs |
 | Errors | `HtlcTimeoutError` (a waiter gave up), `SwapRefundedError` (refunded instead of claimed), `TransactionRevertedError` (mined but reverted, with `hash`) |
-| Deployment | `deployParalockHtlc`, `deployParalockAdaptorEscrow`, `deployMockUsd` (local chains and tests; use `contracts/script/Deploy.s.sol` for real networks), ABIs and bytecode |
+| Deployment | `deployParalockContracts` (a whole local deployment, like `Deploy.s.sol` on devnets; refuses public networks), `deployParalockHtlc`, `deployParalockAdaptorEscrow`, `deployMockUsd`; the embedded artifacts `PARALOCK_HTLC_ARTIFACT`, `PARALOCK_ADAPTOR_ESCROW_ARTIFACT`, `MOCK_USD_ARTIFACT` (also as language-neutral JSON in `artifacts/*.json`). Use `contracts/script/Deploy.s.sol` for real networks |
 
 The `@paralock/tempo`-era aliases (`createTempoHtlc`, `createTempoClients`, `TempoHtlc`, …) remain.
 

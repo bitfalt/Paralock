@@ -21,7 +21,7 @@ sides settle or both refund. No bridge, custodian or wrapped token.
 | `packages/evm` | `@paralock/evm`: viem clients for both escrows, verified network registry | Depends on viem only |
 | `packages/lightwalletd` | `@paralock/lightwalletd`: a `ZcashNode` over lightwalletd / Zaino gRPC (no full node) | Node only. Vendored protos in `proto/` |
 | `packages/sdk` | `@paralock/sdk`: `Maker` / `Taker` engines, factories, persistence, HTTP transport, devnet wiring | Node only |
-| `packages/cli` | `paralock` CLI: `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund` | Not published |
+| `packages/cli` | `paralock` CLI on npm (`npx paralock`): `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund` | Deploys from embedded artifacts; state dir rule in `packages/sdk/src/state-dir.ts` |
 | `contracts` | Foundry: `ParalockHTLC`, `ParalockAdaptorEscrow`, `MockUSD`, `script/Deploy.s.sol` | `contracts/lib` is vendored. Testnet addresses in `contracts/deployments/<chainId>.json` |
 | `apps/web` | Next.js landing page (`/`) and app (`/app`) | Has its own `AGENTS.md` (Next.js version notes) |
 | `examples/*` | Apps built with the SDK: quickstart, payroll, sell-a-secret, testnet | `testnet` runs on public testnets; the rest on the devnet |
@@ -36,7 +36,7 @@ Never import upward.
 
 ```sh
 pnpm install && pnpm build                 # build all packages (topological)
-pnpm paralock doctor                       # prerequisites: Node ≥ 20, pnpm, Docker/OrbStack, ths, Foundry ≥ 1.8, ports
+pnpm paralock doctor                       # prerequisites: Node ≥ 20, Docker/OrbStack, ths, anvil ≥ 1.8, ports (+ pnpm/builds in a checkout)
 pnpm paralock dev [--evm all] [--web]      # whole local stack (reuses anything already running)
 pnpm paralock devnet up|status|down        # Zcash regtest (ths) + EVM anvils + contracts → .paralock/devnet.json
 pnpm paralock maker                        # maker on :7420 (also mines a regtest block every 3s)

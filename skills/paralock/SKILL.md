@@ -114,15 +114,17 @@ explains the privacy levels.
 
 ## Testing locally
 
-From a clone of github.com/bitfalt/Paralock (needs Docker or OrbStack, Foundry ≥ 1.8, pnpm and `ths`):
+No clone needed (Node ≥ 20, Docker or OrbStack, `ths`, and Foundry's `anvil` ≥ 1.8):
 
 ```sh
-pnpm install && pnpm build
-pnpm paralock doctor          # checks prerequisites and prints a fix for each
-pnpm paralock dev --web       # Zcash regtest + EVM anvils + contracts + maker + web app
-pnpm paralock swap --zec 1 --chain base --private
-pnpm paralock pay --usd 25 --to 0x… --chain tempo
+npx paralock doctor           # checks prerequisites and prints a fix for each
+npx paralock dev --evm all    # Zcash regtest + six EVM chains + contracts + maker (state in ~/.paralock)
+npx paralock swap --zec 1 --chain base --private
+npx paralock pay --usd 25 --to 0x… --chain tempo
 ```
+
+From a clone of github.com/bitfalt/Paralock, the same commands run as `pnpm paralock …` after
+`pnpm install && pnpm build`, and `dev --web` also starts the web app.
 
 `examples/quickstart`, `examples/payroll` and `examples/sell-a-secret` are complete apps that use the public API.
 
