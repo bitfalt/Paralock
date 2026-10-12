@@ -2,7 +2,25 @@
   "name": "@paralock/adaptor",
   "version": "0.1.0",
   "description": "ECDSA adaptor signatures on secp256k1 (with DLEQ proofs) for scriptless atomic swaps.",
+  "keywords": [
+    "adaptor-signatures",
+    "ecdsa",
+    "secp256k1",
+    "scriptless-scripts",
+    "atomic-swap",
+    "dleq"
+  ],
   "license": "MIT",
+  "author": "Daniel Garbanzo",
+  "homepage": "https://github.com/bitfalt/Paralock#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitfalt/Paralock.git",
+    "directory": "packages/adaptor"
+  },
+  "bugs": {
+    "url": "https://github.com/bitfalt/Paralock/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,6 +29,17 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc -p .",

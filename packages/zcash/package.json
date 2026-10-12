@@ -2,7 +2,26 @@
   "name": "@paralock/zcash",
   "version": "0.1.0",
   "description": "Zcash transparent HTLCs in pure TypeScript: v5 transactions, ZIP-244 sighash, claim/refund for atomic swaps.",
+  "keywords": [
+    "zcash",
+    "htlc",
+    "atomic-swap",
+    "zip-244",
+    "transparent",
+    "bitcoin-script",
+    "typescript"
+  ],
   "license": "MIT",
+  "author": "Daniel Garbanzo",
+  "homepage": "https://github.com/bitfalt/Paralock#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitfalt/Paralock.git",
+    "directory": "packages/zcash"
+  },
+  "bugs": {
+    "url": "https://github.com/bitfalt/Paralock/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,6 +30,17 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc -p .",

@@ -2,7 +2,26 @@
   "name": "@paralock/sdk",
   "version": "0.1.0",
   "description": "Paralock swap SDK: trustless atomic swaps between Zcash and EVM chains (Tempo first).",
+  "keywords": [
+    "zcash",
+    "atomic-swap",
+    "cross-chain",
+    "evm",
+    "tempo",
+    "privacy",
+    "market-maker"
+  ],
   "license": "MIT",
+  "author": "Daniel Garbanzo",
+  "homepage": "https://github.com/bitfalt/Paralock#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitfalt/Paralock.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/bitfalt/Paralock/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,6 +30,17 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc -p .",
