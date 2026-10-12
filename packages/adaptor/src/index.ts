@@ -34,15 +34,24 @@ const NONCE_TAG = enc("paralock/adaptor/nonce/v1");
 const DLEQ_NONCE_TAG = enc("paralock/adaptor/dleq-nonce/v1");
 
 /**
+ * How many nonces a pre-signature may draw before giving up. Each draw fails (k = 0, r = 0 or s' = 0) with
+ * probability about 2⁻²⁵⁶, so a second failure means the RNG (or the hash) is broken, not unlucky: better to throw
+ * than to loop forever on it.
+ */
+const MAX_NONCE_ATTEMPTS = 8;
+
+/**
  * A hedged nonce: sha512(tag ‖ secret ‖ context ‖ 32 fresh random bytes) reduced mod n (512 bits, so the bias is
  * negligible). Fresh randomness makes every nonce unique; mixing in the secret and the message means a broken or
  * repeated RNG output still can't produce the same nonce for two different messages (which would leak the key).
+ * Throws after `MAX_NONCE_ATTEMPTS` zero nonces.
  */
 function hedgedNonce(tag: Uint8Array, secret: bigint, ...context: Uint8Array[]): bigint {
-  for (;;) {
+  for (let attempt = 0; attempt < MAX_NONCE_ATTEMPTS; attempt++) {
     const k = Fn.create(toInt(sha512(concatBytes(tag, toBytes32(secret), ...context, randomBytes(32)))));
     if (k !== 0n) return k;
   }
+  throw new Error(`no usable nonce after ${MAX_NONCE_ATTEMPTS} draws: the random number generator is broken`);
 }
 
 /** Parses a 32-byte scalar in [1, n). */
@@ -116,14 +125,15 @@ export function adaptorKeyPair(): { secret: Uint8Array; point: Uint8Array } {
 
 /**
  * Pre-signs a 32-byte digest with `privateKey`, encrypted to `adaptorPoint`. Each call uses a fresh hedged nonce
- * (random bytes mixed with the key, digest and adaptor point), so two pre-signatures never share a nonce.
+ * (random bytes mixed with the key, digest and adaptor point), so two pre-signatures never share a nonce. Throws if
+ * `MAX_NONCE_ATTEMPTS` nonces in a row are unusable (r = 0 or s' = 0), which only a broken RNG produces.
  */
 export function preSign(privateKey: Bytes, digest: Bytes, adaptorPoint: Bytes): PreSignature {
   const x = scalar(privateKey, "private key");
   const m = digestScalar(digest);
   const Y = point(adaptorPoint);
   Y.assertValidity();
-  for (;;) {
+  for (let attempt = 0; attempt < MAX_NONCE_ATTEMPTS; attempt++) {
     const k = hedgedNonce(NONCE_TAG, x, toBytes32(m), Y.toBytes(true));
     const R = Y.multiply(k);
     const r = Fn.create(R.x);
@@ -132,6 +142,7 @@ export function preSign(privateKey: Bytes, digest: Bytes, adaptorPoint: Bytes): 
     const Rp = G.multiply(k);
     return { R: R.toBytes(true), Rp: Rp.toBytes(true), s, proof: dleqProve(k, Rp, Y, R) };
   }
+  throw new Error(`no usable nonce after ${MAX_NONCE_ATTEMPTS} draws: the random number generator is broken`);
 }
 
 /** Checks that `pre` becomes a valid signature by `publicKey` on `digest` once the adaptor secret is applied. */
