@@ -11,7 +11,7 @@
  * EVM_MAKER_KEY, optional EVM_RELAYER_KEY) or, in a Paralock checkout, from .paralock/testnet-*.json.
  * Testnet blocks take ~75 s, so a swap takes a few minutes.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { LightwalletdClient } from "@paralock/lightwalletd";
 import { type Hex, type Swap, type TimeoutPolicy, createMaker, createTaker, zecUsdPrice } from "@paralock/sdk";
@@ -47,6 +47,7 @@ const TESTNET_POLICY: TimeoutPolicy = { zcashLockBlocks: 96, evmLockSeconds: 180
 
 // Keys: environment first, then the checkout's .paralock/ files (gitignored).
 const localDir = new URL("../../../.paralock/", import.meta.url);
+mkdirSync(localDir, { recursive: true, mode: 0o700 });
 const local = (file: string): string | undefined => {
   const url = new URL(file, localDir);
   return existsSync(url) ? JSON.parse(readFileSync(url, "utf8")).privateKey : undefined;
@@ -76,6 +77,8 @@ const maker = createMaker({
   evm: { tempo: { ...MODERATO, account: makerEvmKey, token: { address: OUSD, symbol: "OUSD" } } },
   price: zecUsdPrice(),
   policy: TESTNET_POLICY,
+  // Testnet amounts are small: accept swaps from 0.002 TAZ (the default minimum is 0.01).
+  limits: { minZecAmountZat: 200_000n },
   store: new URL("testnet-swaps/maker", localDir).pathname,
   log,
 });

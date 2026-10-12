@@ -12,6 +12,7 @@ This example runs a real Paralock swap on public test networks: Zcash testnet ZE
 pnpm --filter @paralock/example-testnet start -- --zec 0.2             # swap 0.2 TAZ (htlc mode)
 pnpm --filter @paralock/example-testnet start -- --zec 0.2 --private   # adaptor mode: nothing on-chain links the legs
 pnpm --filter @paralock/example-testnet start -- --pay 5 --to 0x…      # pay exactly 5 OUSD to someone else
+pnpm --filter @paralock/example-testnet start -- --zec 0.05 --fresh     # pay a new one-time address
 ```
 
 Testnet blocks come about every 75 s, and the maker waits for one confirmation, so a swap takes a few minutes. Every
@@ -21,10 +22,10 @@ step prints an explorer link.
 
 | | |
 |---|---|
-| `ZEC_TAKER_KEY` | A transparent testnet key holding TAZ. Testnet faucets often pay only shielded addresses, so send the TAZ from a testnet wallet to the key's `tm…` address. |
+| `ZEC_TAKER_KEY` | A transparent testnet key holding TAZ on the NU7 chain (the one `testnet.zec.rocks` follows). The [Valar faucet](https://faucet.testnet.valargroup.dev) pays transparent addresses directly: request TAZ to the key's `tm…` address. |
 | `ZEC_MAKER_KEY` | The maker's transparent key. Claimed TAZ goes to its address. |
 | `EVM_MAKER_KEY` | Holds OUSD on Moderato for the maker to lock, plus pathUSD for fees. |
-| `EVM_RELAYER_KEY` | Optional. Pays the claim fee, so the recipient needs no funds. It can't redirect the OUSD. |
+| `EVM_RELAYER_KEY` | Optional. Pays the claim fee in pathUSD, so the recipient needs no funds. It can't redirect the OUSD. Without it, the taker's own EVM key (created on first run) needs pathUSD to claim. |
 
 In a Paralock checkout, the example falls back to `.paralock/testnet-*.json` (gitignored) for any variable that isn't
 set. The taker's EVM key is created on first run.
