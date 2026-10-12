@@ -26,3 +26,6 @@ examples/*/receipts-*.json
 # Example state (keys and swap stores)
 examples/*/.quickstart/
 examples/*/.payroll/
+
+# Vercel CLI link
+.vercel
