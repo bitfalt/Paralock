@@ -24,8 +24,17 @@ export type SwapDirection = "ZEC_TO_USD";
 
 export type SwapMode = "htlc" | "adaptor";
 
-/** EVM chains a swap can settle on. */
-export type EvmChain = "tempo" | "base" | "ethereum";
+/** EVM chains a swap can settle on. Any EVM chain works; these are the ones the devnet and UI know by name. */
+export type EvmChain = "tempo" | "base" | "ethereum" | "arbitrum" | "robinhood" | "hyperevm";
+
+export const EVM_CHAIN_NAMES: Record<EvmChain, string> = {
+  tempo: "Tempo",
+  base: "Base",
+  ethereum: "Ethereum",
+  arbitrum: "Arbitrum",
+  robinhood: "Robinhood Chain",
+  hyperevm: "HyperEVM",
+};
 
 export type Chain = "zcash" | EvmChain;
 
@@ -62,6 +71,8 @@ export interface Quote {
   evmLockSeconds: number;
   /** Unix seconds after which the quote is no longer honored. */
   expiresAt: number;
+  /** Set when the quote was made for an exact dollar amount (a payment): `usdAmount` is fixed and ZEC rounds up. */
+  exactOut?: boolean;
 }
 
 export interface SwapEvent {
@@ -112,6 +123,8 @@ export interface Swap {
   evm: EvmLeg;
   /** adaptor mode: protocol data the two parties exchange. Safe to share; never published on-chain. */
   adaptor?: AdaptorSwapData;
+  /** Set when the stablecoins pay someone other than the taker (the Pay flow). */
+  payment?: { recipient: Hex; label?: string };
   events: SwapEvent[];
 }
 

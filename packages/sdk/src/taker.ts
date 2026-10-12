@@ -41,6 +41,8 @@ import type { EvmChain, Hex, Quote, Swap, SwapEvent, SwapMode, SwapStatus } from
 /** How the taker talks to a maker: in-process (`Maker`) or over HTTP (`HttpMakerApi`). */
 export interface MakerApi {
   quote(zecAmountZat: bigint, chain?: EvmChain, mode?: SwapMode): Promise<Quote>;
+  /** Quote for delivering an exact stablecoin amount (token base units). */
+  quoteExactOut(usdAmount: bigint, chain?: EvmChain, mode?: SwapMode): Promise<Quote>;
   accept(req: AcceptRequest): Promise<Swap>;
   getSwap(id: string): Promise<Swap | undefined>;
   proposeAdaptor(p: AdaptorProposal): Promise<AdaptorProposalAccepted>;
@@ -77,6 +79,10 @@ export interface SwapOptions {
   /** Demo of a taker who never claims: both sides end up refunding. */
   claim?: boolean;
   privacy?: PrivacyOptions;
+  /** Pay someone else: the stablecoins go to this address instead of the taker (the Pay flow). */
+  recipient?: Hex;
+  /** Optional label for the payment, e.g. a merchant name. */
+  label?: string;
 }
 
 interface AdaptorRefund {
@@ -121,7 +127,12 @@ export class Taker {
     return c;
   }
 
-  private recipientFor(swap: Swap, client: { address: Hex }, privacy: PrivacyOptions = {}): Hex {
+  private recipientFor(swap: Swap, client: { address: Hex }, privacy: PrivacyOptions = {}, payTo?: { recipient?: Hex; label?: string }): Hex {
+    if (payTo?.recipient) {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(payTo.recipient)) throw new Error("recipient must be a 0x address");
+      swap.payment = { recipient: payTo.recipient, label: payTo.label };
+      return payTo.recipient;
+    }
     if (!privacy.freshRecipient) return client.address;
     const account = freshEvmAccount();
     this.cfg.onFreshRecipient?.(account, swap);
@@ -140,7 +151,7 @@ export class Taker {
   // htlc mode
 
   private async swapHtlc(quote: Quote, opts: SwapOptions): Promise<Swap> {
-    const { swap, secret } = await this.fund(quote, opts.privacy);
+    const { swap, secret } = await this.fund(quote, opts.privacy, opts);
     try {
       return await this.completeHtlc(swap, secret, opts);
     } catch (err) {
@@ -180,14 +191,14 @@ export class Taker {
     this.update(swap, "evm_claimed", {
       chain: quote.chain,
       txid: swap.evm.claimTx,
-      detail: `Received ${usd(locked.amount)} ${quote.tokenSymbol}${claimer === c.htlc ? "" : " (claim relayed)"}; the secret is now public`,
+      detail: `${swap.payment ? "Recipient received" : "Received"} ${usd(locked.amount)} ${quote.tokenSymbol}${claimer === c.htlc ? "" : " (claim relayed)"}; the secret is now public`,
     });
     await this.followMaker(swap);
     return swap;
   }
 
   /** Funds the Zcash HTLC for an htlc-mode quote without contacting the maker yet. Keep the secret private. */
-  async fund(quote: Quote, privacy?: PrivacyOptions): Promise<{ swap: Swap; secret: Hex }> {
+  async fund(quote: Quote, privacy?: PrivacyOptions, payTo?: { recipient?: Hex; label?: string }): Promise<{ swap: Swap; secret: Hex }> {
     const { secret, hashlock } = newSecret();
     const htlc = createHtlc(
       {
@@ -206,7 +217,7 @@ export class Taker {
       amountZat: quote.zecAmountZat,
     }, c.htlc);
     swap.hashlock = hashlock;
-    swap.evm.recipient = this.recipientFor(swap, c.htlc, privacy);
+    swap.evm.recipient = this.recipientFor(swap, c.htlc, privacy, payTo);
 
     // 1. Lock ZEC in the HTLC: the maker can claim it only with our secret; we can refund after refundHeight.
     const funding = buildHtlcFunding({
@@ -226,15 +237,15 @@ export class Taker {
   }
 
   /** Funds the HTLC and stops there (e.g. to demo a refund when the maker never locks). */
-  async lockOnly(quote: Quote): Promise<Swap> {
-    if (quote.mode === "adaptor") return this.lockAdaptor(quote, {}).then((r) => r.swap);
-    return (await this.fund(quote)).swap;
+  async lockOnly(quote: Quote, payTo?: { recipient?: Hex; label?: string }): Promise<Swap> {
+    if (quote.mode === "adaptor") return this.lockAdaptor(quote, {}, payTo).then((r) => r.swap);
+    return (await this.fund(quote, undefined, payTo)).swap;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
   // adaptor mode
 
-  private async lockAdaptor(quote: Quote, privacy: PrivacyOptions) {
+  private async lockAdaptor(quote: Quote, privacy: PrivacyOptions, payTo?: { recipient?: Hex; label?: string }) {
     const c = this.chain(quote.chain);
     if (!c.adaptor) throw new Error(`private mode is not available on ${quote.chain}`);
     const adaptor = adaptorKeyPair();
@@ -261,7 +272,7 @@ export class Taker {
       fundingVout: 0,
     }, c.adaptor);
     swap.adaptorPoint = hex(adaptor.point);
-    swap.evm.recipient = this.recipientFor(swap, c.adaptor, privacy);
+    swap.evm.recipient = this.recipientFor(swap, c.adaptor, privacy, payTo);
 
     const accepted = await this.cfg.maker.proposeAdaptor({
       quoteId: quote.id,
@@ -303,7 +314,7 @@ export class Taker {
   }
 
   private async swapAdaptor(quote: Quote, opts: SwapOptions): Promise<Swap> {
-    const { swap, adaptor, multisigKey, spends, accepted } = await this.lockAdaptor(quote, opts.privacy ?? {});
+    const { swap, adaptor, multisigKey, spends, accepted } = await this.lockAdaptor(quote, opts.privacy ?? {}, opts);
     try {
       const c = this.chain(quote.chain);
       const escrow = c.adaptor!;
@@ -341,7 +352,7 @@ export class Taker {
       this.update(swap, "evm_claimed", {
         chain: quote.chain,
         txid: swap.evm.claimTx,
-        detail: `Received ${usd(locked.amount)} ${quote.tokenSymbol}${claimer === escrow ? "" : " (claim relayed)"}; no hash on either chain`,
+        detail: `${swap.payment ? "Recipient received" : "Received"} ${usd(locked.amount)} ${quote.tokenSymbol}${claimer === escrow ? "" : " (claim relayed)"}; no hash on either chain`,
       });
       await this.followMaker(swap);
       return swap;

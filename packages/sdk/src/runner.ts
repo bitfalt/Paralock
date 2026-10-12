@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { type DevnetFile, devnetTaker } from "./devnet.js";
 import type { PrivacyOptions } from "./privacy.js";
 import { SwapFailedError } from "./taker.js";
-import type { EvmChain, Quote, Swap, SwapEvent, SwapMode } from "./types.js";
+import type { EvmChain, Hex, Quote, Swap, SwapEvent, SwapMode } from "./types.js";
 
 /** Finds `.paralock/devnet.json` in `start` or any parent directory. */
 export function devnetFilePath(start = process.cwd()): string {
@@ -35,6 +35,9 @@ export interface RunOptions {
   /** Demo: the maker locks, but the taker never claims, so both sides refund. */
   skipClaim?: boolean;
   privacy?: PrivacyOptions;
+  /** Pay someone else (the Pay flow). */
+  recipient?: Hex;
+  label?: string;
 }
 
 interface Job {
@@ -65,6 +68,14 @@ export class DevnetSwapRunner {
   async quote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
     const { maker } = await devnetTaker(this.cfg);
     const quote = await maker.quote(zecAmountZat, chain, mode);
+    this.quotes.set(quote.id, quote);
+    return quote;
+  }
+
+  /** Quote for paying exactly `usdAmount` (token base units). */
+  async quoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
+    const { maker } = await devnetTaker(this.cfg);
+    const quote = await maker.quoteExactOut(usdAmount, chain, mode);
     this.quotes.set(quote.id, quote);
     return quote;
   }
@@ -115,12 +126,17 @@ export class DevnetSwapRunner {
         job.extraEvents.push({ status: "quoted", chain: "zcash", at: Date.now(), txid: unshieldTxid, detail: `Unshielded ${zec} ZEC into the swap address` });
       }
       if (job.opts.makerOffline) {
-        job.swap = structuredClone(await parties.taker.lockOnly(job.quote));
+        job.swap = structuredClone(await parties.taker.lockOnly(job.quote, { recipient: job.opts.recipient, label: job.opts.label }));
         job.refundable = true;
         job.error = "maker offline (demo): refund after the Zcash timeout";
         return;
       }
-      await parties.taker.swap(job.quote, { claim: !job.opts.skipClaim, privacy: job.opts.privacy });
+      await parties.taker.swap(job.quote, {
+        claim: !job.opts.skipClaim,
+        privacy: job.opts.privacy,
+        recipient: job.opts.recipient,
+        label: job.opts.label,
+      });
       if (job.opts.skipClaim) {
         job.refundable = true;
         job.error = "taker never claimed (demo): the maker refunds on its chain, the taker refunds ZEC after the timeout";

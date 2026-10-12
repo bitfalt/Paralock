@@ -39,6 +39,10 @@ export class HttpMakerApi implements MakerApi {
     return reviveQuote(await this.request<Quote>(`/quote?zat=${zecAmountZat}&chain=${chain}&mode=${mode}`));
   }
 
+  async quoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
+    return reviveQuote(await this.request<Quote>(`/quote?usd=${usdAmount}&chain=${chain}&mode=${mode}`));
+  }
+
   async accept(req: AcceptRequest): Promise<Swap> {
     return reviveSwap(await this.request<Swap>("/swaps", req));
   }
@@ -68,7 +72,7 @@ const ID = "(0x[0-9a-f]{64}|[0-9a-f-]{36})";
 
 /**
  * Web-standard request handler exposing a maker:
- *   GET  /quote?zat=&chain=&mode=                 -> Quote
+ *   GET  /quote?zat=&chain=&mode=                 -> Quote (or ?usd= for an exact dollar amount)
  *   POST /swaps (AcceptRequest)                   -> Swap            (htlc mode)
  *   POST /adaptor/swaps (AdaptorProposal)         -> AdaptorProposalAccepted
  *   POST /adaptor/swaps/:id/presignature          -> Swap            (adaptor mode)
@@ -85,6 +89,8 @@ export function makerHandler(maker: Maker): (req: Request) => Promise<Response> 
       if (req.method === "GET" && path === "/quote") {
         const chain = (url.searchParams.get("chain") ?? "tempo") as EvmChain;
         const mode = (url.searchParams.get("mode") ?? "htlc") as SwapMode;
+        const usd = url.searchParams.get("usd");
+        if (usd) return json(await maker.quoteExactOut(BigInt(usd), chain, mode));
         return json(await maker.quote(BigInt(url.searchParams.get("zat") ?? "0"), chain, mode));
       }
       if (req.method === "POST" && path === "/swaps") return json(await maker.accept((await req.json()) as AcceptRequest));

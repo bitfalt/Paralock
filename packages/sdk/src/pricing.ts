@@ -25,3 +25,11 @@ export function zatToUsdUnits(zat: bigint, usdPerZec: number, decimals: number):
   const microRate = BigInt(Math.floor(usdPerZec * 1_000_000));
   return (zat * microRate * 10n ** BigInt(decimals)) / (100_000_000n * 1_000_000n);
 }
+
+/** ZEC (zatoshi) needed to deliver `usdUnits` at `usdPerZec`, rounding up so the recipient always gets the full amount. */
+export function usdUnitsToZat(usdUnits: bigint, usdPerZec: number, decimals: number): bigint {
+  const microRate = BigInt(Math.floor(usdPerZec * 1_000_000));
+  const numerator = usdUnits * 100_000_000n * 1_000_000n;
+  const denominator = microRate * 10n ** BigInt(decimals);
+  return (numerator + denominator - 1n) / denominator;
+}

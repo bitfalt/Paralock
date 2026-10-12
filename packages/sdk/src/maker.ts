@@ -32,8 +32,8 @@ import {
 import type { AdaptorEvmSwap, ChainClients, EvmSwap } from "./evm-client.js";
 import { type TimeoutPolicy, assertSafeWindows } from "./policy.js";
 import { evmAddressOf } from "./privacy.js";
-import { zatToUsdUnits } from "./pricing.js";
-import type { EvmChain, Hex, Quote, Swap, SwapEvent, SwapMode, SwapStatus } from "./types.js";
+import { usdUnitsToZat, zatToUsdUnits } from "./pricing.js";
+import { EVM_CHAIN_NAMES, type EvmChain, type Hex, type Quote, type Swap, type SwapEvent, type SwapMode, type SwapStatus } from "./types.js";
 
 export interface MakerConfig {
   network: Network;
@@ -75,7 +75,7 @@ interface AdaptorState {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const hex = (b: Uint8Array): Hex => `0x${bytesToHex(b)}`;
 const usd = (units: bigint, decimals: number) => (Number(units) / 10 ** decimals).toFixed(2);
-const CHAIN_NAMES: Record<EvmChain, string> = { tempo: "Tempo", base: "Base", ethereum: "Ethereum" };
+const CHAIN_NAMES = EVM_CHAIN_NAMES;
 
 /**
  * The market-maker side of ZEC -> stablecoin swaps on any configured EVM chain, in htlc or adaptor mode.
@@ -107,12 +107,29 @@ export class Maker {
     return c;
   }
 
+  /** Quotes the stablecoins the maker pays for `zecAmountZat`. */
   async quote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
     if (zecAmountZat <= 0n) throw new Error("amount must be positive");
+    const rate = await this.rate();
+    const c = this.chain(chain);
+    return this.makeQuote(zecAmountZat, zatToUsdUnits(zecAmountZat, rate, c.tokenDecimals), rate, chain, mode, false);
+  }
+
+  /** Quotes the ZEC needed to deliver exactly `usdAmount` (token base units), e.g. to pay someone a fixed price. */
+  async quoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
+    if (usdAmount <= 0n) throw new Error("amount must be positive");
+    const rate = await this.rate();
+    const c = this.chain(chain);
+    return this.makeQuote(usdUnitsToZat(usdAmount, rate, c.tokenDecimals), usdAmount, rate, chain, mode, true);
+  }
+
+  private async rate(): Promise<number> {
+    return (await this.cfg.price()) * (1 - this.cfg.spreadBps / 10_000);
+  }
+
+  private makeQuote(zecAmountZat: bigint, usdAmount: bigint, rate: number, chain: EvmChain, mode: SwapMode, exactOut: boolean): Quote {
     const c = this.chain(chain);
     if (mode === "adaptor" && !c.adaptor) throw new Error(`private mode is not available on ${chain}`);
-    const price = await this.cfg.price();
-    const rate = price * (1 - this.cfg.spreadBps / 10_000);
     // A fresh Zcash key per adaptor quote: the 2-of-2 lock then reveals nothing about who the maker is.
     const zcashKey = mode === "adaptor" ? randomKeyPair() : this.cfg.zcashKey;
     const quote: Quote = {
@@ -121,7 +138,7 @@ export class Maker {
       mode,
       chain,
       zecAmountZat,
-      usdAmount: zatToUsdUnits(zecAmountZat, rate, c.tokenDecimals),
+      usdAmount,
       token: c.token,
       tokenSymbol: c.tokenSymbol,
       rate,
@@ -130,6 +147,7 @@ export class Maker {
       zcashLockBlocks: this.cfg.policy.zcashLockBlocks,
       evmLockSeconds: this.cfg.policy.evmLockSeconds,
       expiresAt: Math.floor(Date.now() / 1000) + (this.cfg.quoteTtlSeconds ?? 120),
+      ...(exactOut ? { exactOut: true } : {}),
     };
     this.quotes.set(quote.id, { quote, zcashKey });
     return quote;
