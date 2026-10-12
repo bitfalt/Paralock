@@ -127,26 +127,39 @@ export interface EvmLeg {
   refundTx?: Hex;
 }
 
-/** Public view of a swap. Never contains secrets or private keys; those live only in the `SwapStore`. */
+/**
+ * A swap as one party reports it. Never contains secrets or private keys; those live only in the `SwapStore`. It does
+ * list both legs' transactions, so it links them: share it only with whoever may know that.
+ *
+ * A maker's public view (`Maker.getSwap`, `GET /swaps/:id`) leaves out `adaptorPoint` and `adaptor`; the taker's own
+ * view and the maker's answer to the taker's pre-signature (`adaptorPreSignature`) include them.
+ */
 export interface Swap {
   id: string;
   quote: Quote;
   mode: SwapMode;
   /** htlc mode: sha256 of the secret, visible on both chains. Absent in adaptor mode (nothing on-chain links the legs). */
   hashlock?: Hex;
-  /** adaptor mode: the adaptor point, exchanged off-chain only and never published. */
+  /**
+   * adaptor mode: the adaptor point `Y`, exchanged off-chain only and never published. Not in a maker's public view:
+   * with it and the maker's escrow pre-signature, anyone who sees the claim can compute `y`.
+   */
   adaptorPoint?: Hex;
   status: SwapStatus;
   zcash: ZcashLeg;
   evm: EvmLeg;
-  /** adaptor mode: protocol data the two parties exchange. Safe to share. The escrow id, signer and salt also appear in the escrow's `Locked` event. */
+  /**
+   * adaptor mode: protocol data only the two parties hold. Not in a maker's public view; the maker sends it to the
+   * taker in its answer to the taker's pre-signature. The escrow id, signer and salt also appear in the escrow's
+   * `Locked` event; the pre-signature never appears on-chain.
+   */
   adaptor?: AdaptorSwapData;
   /** Set when the stablecoins pay someone other than the taker (the Pay flow). */
   payment?: { recipient: Hex; label?: string };
   events: SwapEvent[];
 }
 
-/** Private-mode data both parties see. */
+/** Private-mode data only the two parties hold (never in a maker's public view). */
 export interface AdaptorSwapData {
   /** ParalockAdaptorEscrow swap id (keccak of the escrow parameters). */
   escrowId?: Hex;
@@ -154,7 +167,10 @@ export interface AdaptorSwapData {
   signer?: Hex;
   signerPubkey?: Hex;
   salt?: Hex;
-  /** Maker's pre-signature on the escrow's claim digest, encrypted to the adaptor point. */
+  /**
+   * Maker's pre-signature on the escrow's claim digest, encrypted to the adaptor point (324 hex characters, no `0x`).
+   * Keep it private: with the adaptor point and the published claim it reveals `y` and links the two legs.
+   */
   evmPreSignature?: string;
 }
 

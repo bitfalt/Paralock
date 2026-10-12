@@ -30,7 +30,11 @@ export function reviveSwap(s: Swap): Swap {
 export interface HttpMakerApiOptions {
   /** Per-request timeout. Default 30 s. */
   timeoutMs?: number;
-  /** Retries on network errors, timeouts and 5xx/429 responses (every maker endpoint is idempotent). Default 2. */
+  /**
+   * Retries on network errors, timeouts and 5xx/429 responses. Default 2. The POST endpoints are idempotent for an
+   * identical request, and the GETs other than `/quote` are reads. `GET /quote` is not idempotent: each call that
+   * reaches the maker creates a quote, so a retry may leave an extra one behind (it expires unused).
+   */
   retries?: number;
   /** Extra headers, e.g. an API key. */
   headers?: Record<string, string>;
@@ -119,6 +123,7 @@ export class HttpMakerApi implements MakerApi {
     return reviveSwap((await this.request<Swap>("/swaps", req))!);
   }
 
+  /** The maker's public view of a swap (no adaptor data), or undefined on 404. */
   async getSwap(id: string): Promise<Swap | undefined> {
     const swap = await this.request<Swap>(`/swaps/${encodeURIComponent(id)}`, undefined, true);
     return swap && reviveSwap(swap);
@@ -128,6 +133,7 @@ export class HttpMakerApi implements MakerApi {
     return (await this.request<AdaptorProposalAccepted>("/adaptor/swaps", p))!;
   }
 
+  /** Sends (or resends) the taker's pre-signature; answers with the taker's view of the swap, adaptor data included. */
   async adaptorPreSignature(swapId: string, req: AdaptorPreSignatureRequest): Promise<Swap> {
     return reviveSwap((await this.request<Swap>(`/adaptor/swaps/${encodeURIComponent(swapId)}/presignature`, req))!);
   }
@@ -193,9 +199,11 @@ async function readJson(req: Request, maxBytes: number): Promise<unknown> {
  *   GET  /quote?zat=&chain=&mode=                 → Quote (or ?usd= for an exact dollar amount)
  *   POST /swaps (AcceptRequest)                   → Swap            (htlc mode)
  *   POST /adaptor/swaps (AdaptorProposal)         → AdaptorProposalAccepted
- *   POST /adaptor/swaps/:id/presignature          → Swap            (adaptor mode)
+ *   POST /adaptor/swaps/:id/presignature          → Swap            (adaptor mode: the taker's view, with adaptor data)
  *   GET  /swaps/:id, GET /health                  (GET /swaps only with `exposeSwapList`)
  *
+ * `GET /swaps/:id` and `GET /swaps` serve public views (`Maker.getSwap`): no adaptor point, pre-signatures, signer key
+ * or salt. Anyone who knows a swap id can still read its status and both legs' transactions, so keep ids private.
  * Errors are `{ error, code }` with the status of the `ParalockError` code; unexpected errors become a generic 500.
  * Put it behind TLS and a rate limiter in production.
  */

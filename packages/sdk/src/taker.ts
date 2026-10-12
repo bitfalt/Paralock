@@ -45,7 +45,7 @@ import { fromHex, newSecret } from "./secret.js";
 import { MemorySwapStore, type SwapStore } from "./store.js";
 import { assertNoUpgradeBefore, isUnspent } from "./zcash-node.js";
 import type { EvmChain, Hex, Quote, Swap, SwapEvent, SwapMode, SwapStatus } from "./types.js";
-import { DEFAULT_QUOTE_LIMITS, type QuoteLimits, isEvmAddress, validateQuote } from "./validation.js";
+import { DEFAULT_QUOTE_LIMITS, type QuoteLimits, isEvmAddress, isHex, validateQuote } from "./validation.js";
 
 export { SwapFailedError };
 
@@ -60,11 +60,18 @@ export interface MakerApi {
    * and reserves its stablecoins). Must be idempotent.
    */
   accept(req: AcceptRequest): Promise<Swap>;
-  /** The maker's view of a swap (an in-process `Maker` answers synchronously). */
+  /**
+   * The maker's public view of a swap (an in-process `Maker` answers synchronously): status, both legs, events. It has
+   * no adaptor protocol data; the taker never needs that from here.
+   */
   getSwap(id: string): Promise<Swap | undefined> | Swap | undefined;
   /** adaptor mode, step 1. Must be idempotent. */
   proposeAdaptor(p: AdaptorProposal): Promise<AdaptorProposalAccepted>;
-  /** adaptor mode, step 3. Must be idempotent. */
+  /**
+   * adaptor mode, step 3, and the taker's view of the swap: with the adaptor data (`adaptor.escrowId` and
+   * `adaptor.evmPreSignature` once the maker has locked). Must be idempotent: resending the same pre-signature returns
+   * the current view, which is how the taker polls for the lock.
+   */
   adaptorPreSignature(swapId: string, req: AdaptorPreSignatureRequest): Promise<Swap>;
 }
 
@@ -454,7 +461,14 @@ export class Taker {
     const returnAddress = this.cfg.returnAddress ?? this.zcashAddress;
     const expiryHeight = tip + FUNDING_EXPIRY_DELTA;
     const utxos = await this.cfg.zcash.getAddressUtxos([this.zcashAddress]);
-    const base = { utxos, key: this.cfg.zcashKey, changeScriptPubKey: scriptPubKeyForAddress(returnAddress, this.cfg.network), branchId, expiryHeight };
+    const base = {
+      utxos,
+      key: this.cfg.zcashKey,
+      changeScriptPubKey: scriptPubKeyForAddress(returnAddress, this.cfg.network),
+      branchId,
+      expiryHeight,
+      network: this.cfg.network,
+    };
     const options = { claim: opts.claim !== false, privacy: opts.privacy, ...(stopAfterFunding ? { stopAfterFunding } : {}) };
 
     let record: TakerSwapRecord;
@@ -763,20 +777,26 @@ export class Taker {
     await this.transition(record, "proposed");
   }
 
-  private async sendPreSignature(record: TakerSwapRecord) {
-    const { swap } = record;
+  /**
+   * Our pre-signature on the maker's claim, made and persisted on first use and sent unchanged ever after (it is what
+   * lets the maker answer us, and only us, with the adaptor data). It only becomes a valid signature with our secret.
+   */
+  private async ownPreSignature(record: TakerSwapRecord): Promise<string> {
     const a = record.adaptor!;
+    if (!a.takerPreSignature) {
+      const spends = this.spends(record, a.accepted!);
+      a.takerPreSignature = encodePreSignature(preSign(unhex(a.multisigKey), spends.claim.sighash, unhex(record.swap.adaptorPoint!)));
+      await this.save(record);
+    }
+    return a.takerPreSignature;
+  }
+
+  private async sendPreSignature(record: TakerSwapRecord) {
     if (record.options.stopAfterFunding) {
       await this.transition(record, "accepted");
       return;
     }
-    if (!a.takerPreSignature) {
-      // Pre-sign the maker's claim: it only becomes a valid signature with our adaptor secret.
-      const spends = this.spends(record, a.accepted!);
-      a.takerPreSignature = encodePreSignature(preSign(unhex(a.multisigKey), spends.claim.sighash, unhex(swap.adaptorPoint!)));
-      await this.save(record);
-    }
-    await this.cfg.maker.adaptorPreSignature(swap.id, { takerPreSignature: a.takerPreSignature });
+    await this.cfg.maker.adaptorPreSignature(record.swap.id, { takerPreSignature: await this.ownPreSignature(record) });
     await this.transition(record, "accepted");
   }
 
@@ -785,9 +805,13 @@ export class Taker {
     const a = record.adaptor!;
     const c = this.chain(swap.quote.chain);
     const escrow = c.adaptor!;
+    // The maker's public view (`getSwap`) has no adaptor data. Resending our stored pre-signature (idempotent) returns
+    // our view of the swap, with the escrow id and the maker's escrow pre-signature once the lock is on-chain. This also
+    // covers a crash right after a pre-signature request: resending it is always safe.
+    const takerPreSignature = await this.ownPreSignature(record);
     const view = await this.poll(
       async () => {
-        const v = await this.cfg.maker.getSwap(swap.id);
+        const v = await this.cfg.maker.adaptorPreSignature(swap.id, { takerPreSignature });
         return v?.adaptor?.evmPreSignature && v.adaptor.escrowId ? v : undefined;
       },
       "the maker's lock",
@@ -795,6 +819,7 @@ export class Taker {
       () => this.pastRefundHeight(record),
     );
     const escrowId = view.adaptor!.escrowId!;
+    if (!isHex(escrowId, 32)) throw new ParalockError("lock_mismatch", "maker sent a malformed escrow id");
     const lock = await this.waitForLock(record, () => escrow.getLock(escrowId), escrow, c.minConfirmations);
     this.checkTerms(record, lock.swap);
     if (lock.swap.signer.toLowerCase() !== a.accepted!.signer.toLowerCase()) throw new ParalockError("lock_mismatch", "lock uses a different signer");

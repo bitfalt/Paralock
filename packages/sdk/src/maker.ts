@@ -14,6 +14,7 @@ import {
   type Htlc,
   type KeyPair,
   type Network,
+  type NodeTransaction,
   type ZcashNode,
   ZcashRpcTransportError,
   buildHtlcClaim,
@@ -23,7 +24,9 @@ import {
   htlcFromRedeemScript,
   isTransparentAddress,
   keyPairFromPrivate,
+  parseTx,
   randomKeyPair,
+  scriptPubKeyForAddress,
   signMultisigSpend,
 } from "@paralock/zcash";
 import {
@@ -63,9 +66,17 @@ export interface MakerLimits {
   /**
    * Furthest a taker's declared `fundingExpiryHeight` may be above the tip when it commits: bounds how long an
    * unfunded reservation can hold inventory. Default 45: the SDK's taker uses 40 (`FUNDING_EXPIRY_DELTA`), plus 5
-   * blocks for a maker node that lags the taker's.
+   * blocks for a maker node that lags the taker's. An htlc accept without `fundingExpiryHeight` (pre-0.3 takers, which
+   * fund before accepting) gets the deadline `tip + maxFundingExpiryBlocks` instead: if the maker hasn't seen the
+   * funding `FUNDING_EXPIRY_MARGIN_BLOCKS` after it, the reservation is dropped.
    */
   maxFundingExpiryBlocks: number;
+  /**
+   * Least time, in seconds of EVM chain time, the lock must still have left when the maker sends it. With less, the
+   * maker abandons the swap instead of locking: a taker could not claim in time (the SDK's taker refuses to claim with
+   * less than its `minClaimWindowSeconds`, 30 by default, left). Default 30.
+   */
+  minEvmLockSecondsLeft: number;
   /** ZEC the maker spends on its own claim transaction (ZIP 317: 10,000 zat). Priced into every quote. */
   zcashFeeZat: bigint;
   /** Check the stablecoin balance (minus amounts reserved by other swaps) before quoting and before locking. Default true. */
@@ -80,6 +91,7 @@ export const DEFAULT_MAKER_LIMITS: MakerLimits = {
   maxOpenQuotes: 1_000,
   quoteTtlSeconds: 60,
   maxFundingExpiryBlocks: FUNDING_EXPIRY_DELTA + 5,
+  minEvmLockSecondsLeft: 30,
   zcashFeeZat: 10_000n,
   checkInventory: true,
 };
@@ -129,8 +141,8 @@ export interface AcceptRequest {
   /**
    * Last block the funding can be mined in (its `expiryHeight`). The maker drops the swap, and releases the stablecoins
    * it reserved, once the chain is more than `FUNDING_EXPIRY_MARGIN_BLOCKS` past it and the funding was never mined.
-   * Optional: 0.1 and 0.2 takers don't send it, and the maker then keeps the reservation until the Zcash window is too
-   * short to lock.
+   * Optional: 0.1 and 0.2 takers don't send it (they fund before accepting, so the funding is already mined). Without
+   * it the maker uses `tip + limits.maxFundingExpiryBlocks` as the deadline, and only for a funding it has never seen.
    */
   fundingExpiryHeight?: number;
 }
@@ -176,6 +188,17 @@ export interface MakerSwapRecord {
   fundingValue?: bigint;
   /** The taker's declared last block for its funding to be mined in (absent for 0.1/0.2 takers). */
   fundingExpiryHeight?: number;
+  /**
+   * htlc accepts without `fundingExpiryHeight`: the deadline the maker derived when it accepted (`tip +
+   * limits.maxFundingExpiryBlocks`). A funding the maker has never seen by `FUNDING_EXPIRY_MARGIN_BLOCKS` after it
+   * releases the reservation; once seen (`fundingSeenHeight`), it no longer applies.
+   */
+  fundingDeadline?: number;
+  /**
+   * Zcash tip when the maker first saw the funding: the lock's UTXO at the declared outpoint, or a transaction its node
+   * knows (even unmined) whose output `fundingVout` pays the lock.
+   */
+  fundingSeenHeight?: number;
   htlc?: { evm?: EvmSwap };
   adaptor?: {
     /** The per-swap Zcash private key (its half of the 2-of-2). */
@@ -200,6 +223,24 @@ const hex = (b: Uint8Array): Hex => `0x${bytesToHex(b)}`;
 const unhex = (h: string) => h.replace(/^0x/, "");
 const usd = (units: bigint, decimals: number) => (Number(units) / 10 ** decimals).toFixed(2);
 const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+/** Why `fundingExpired` dropped a swap. */
+function fundingDeadReason(record: MakerSwapRecord): string {
+  return record.fundingExpiryHeight !== undefined
+    ? `the taker's funding expired at block ${record.fundingExpiryHeight} without being mined`
+    : `the taker's funding was never seen by block ${record.fundingDeadline! + FUNDING_EXPIRY_MARGIN_BLOCKS} (no funding expiry was declared)`;
+}
+
+/**
+ * A swap without its adaptor protocol data: no `adaptorPoint` and no `adaptor` (escrow id, signer address and key,
+ * salt, the maker's escrow pre-signature). With the point and the pre-signature, anyone who sees the claim on-chain
+ * could compute `y`; the escrow id, signer and salt add nothing a caller needs that the lock transaction doesn't show.
+ * The taker gets all of it from the pre-signature response instead (`adaptorPreSignature`).
+ */
+function publicView(swap: Swap): Swap {
+  const { adaptorPoint: _point, adaptor: _adaptor, ...view } = swap;
+  return view;
+}
 
 /**
  * The market-maker side of ZEC → stablecoin swaps on any configured EVM chain, in htlc or adaptor mode.
@@ -238,6 +279,9 @@ export class Maker implements MakerApi {
     }
     if (!Number.isSafeInteger(this.limits.maxFundingExpiryBlocks) || this.limits.maxFundingExpiryBlocks < 1) {
       throw new ParalockError("invalid_request", "limits.maxFundingExpiryBlocks must be a positive integer");
+    }
+    if (!Number.isSafeInteger(this.limits.minEvmLockSecondsLeft) || this.limits.minEvmLockSecondsLeft < 0) {
+      throw new ParalockError("invalid_request", "limits.minEvmLockSecondsLeft must be a non-negative integer");
     }
     this.pollIntervalMs = cfg.pollIntervalMs ?? Math.min(15_000, Math.max(1_000, (cfg.policy.zcashBlockSeconds * 1000) / 5));
   }
@@ -371,6 +415,15 @@ export class Maker implements MakerApi {
     }
   }
 
+  /** The unused quote `id`, checked to be for `mode`, without consuming it (`takeQuote` does, once every check passed). */
+  private peekQuote(id: string, mode: SwapMode): Quote {
+    const entry = this.quotes.get(id);
+    if (!entry) throw new ParalockError("quote_expired", "unknown or already used quote");
+    if (entry.quote.mode !== mode) throw new ParalockError("invalid_request", `quote is for ${entry.quote.mode} mode`);
+    return entry.quote;
+  }
+
+  /** Consumes quote `id` (one swap per quote). Call it last in a commitment, so a refused one leaves the quote usable. */
   private async takeQuote(id: string, mode: SwapMode): Promise<MakerQuoteRecord> {
     const entry = this.quotes.get(id);
     if (!entry) throw new ParalockError("quote_expired", "unknown or already used quote");
@@ -411,6 +464,15 @@ export class Maker implements MakerApi {
     }
   }
 
+  /**
+   * Caps the Zcash refund height at `2 × policy.zcashLockBlocks` above the tip. The window rule is the lower bound;
+   * this upper bound keeps a commitment whose funding never confirms from holding a slot and inventory for long (the
+   * window rule only drops it once the refund height gets close).
+   */
+  private assertRefundHeightBound(refundHeight: number, tip: number) {
+    if (refundHeight - tip > this.cfg.policy.zcashLockBlocks * 2) throw new ParalockError("invalid_request", "refund height is too far away");
+  }
+
   private async assertInventory(c: ChainClients, mode: SwapMode, amount: bigint, includeReserved = true) {
     if (!this.limits.checkInventory) return;
     const client = mode === "adaptor" ? c.adaptor! : c.htlc;
@@ -424,14 +486,18 @@ export class Maker implements MakerApi {
   // ---------------------------------------------------------------------------------------------------------------
   // Views
 
-  /** The public view of a swap. */
+  /**
+   * The public view of a swap (what `GET /swaps/:id` serves to anyone who knows the id). It carries no adaptor protocol
+   * data (see `publicView`); the taker gets that from `adaptorPreSignature`.
+   */
   getSwap(id: string): Swap | undefined {
-    return this.records.get(id)?.swap;
+    const record = this.records.get(id);
+    return record && publicView(record.swap);
   }
 
-  /** Public views of every swap this maker knows. */
+  /** Public views of every swap this maker knows (no adaptor protocol data, as `getSwap`). */
   listSwaps(): Swap[] {
-    return [...this.records.values()].map((r) => r.swap);
+    return [...this.records.values()].map((r) => publicView(r.swap));
   }
 
   /** The internal stage of a swap (for operators). */
@@ -443,12 +509,15 @@ export class Maker implements MakerApi {
   // htlc mode
 
   /**
-   * Commits to the taker's HTLC: checks it against the quote (template byte for byte, claim key, window, inventory),
-   * consumes the quote and reserves the stablecoins, then watches for the funding. A 0.3 taker calls this before it
-   * broadcasts the funding. Once the funding has `policy.minZcashConfirmations` with the quoted value and the window is
-   * still safe, the maker locks the stablecoins. The reservation is dropped if the funding is still unmined
-   * `FUNDING_EXPIRY_MARGIN_BLOCKS` after the declared `fundingExpiryHeight` (it can't be mined any more), or once the
-   * window is too short to lock. Idempotent: repeating the same request returns the same swap.
+   * Commits to the taker's HTLC: checks it against the quote (template byte for byte, claim key, capacity, funding
+   * expiry, window, refund height at most `2 × policy.zcashLockBlocks` ahead, inventory), then consumes the quote and
+   * reserves the stablecoins, then watches for the funding. Every check runs before the quote is consumed, so a refused
+   * accept leaves it usable. A 0.3 taker calls this before it broadcasts the funding. Once the funding has
+   * `policy.minZcashConfirmations` with the quoted value and the window is still safe, the maker locks the stablecoins.
+   * The reservation is dropped if the funding is still unmined `FUNDING_EXPIRY_MARGIN_BLOCKS` after the declared
+   * `fundingExpiryHeight` (it can't be mined any more); without a declared expiry (pre-0.3 takers fund before
+   * accepting), if the maker never saw the funding by that margin after `tip + limits.maxFundingExpiryBlocks`; and in any
+   * case once the window is too short to lock. Idempotent: repeating the same request returns the same swap.
    */
   async accept(request: AcceptRequest): Promise<Swap> {
     await this.start();
@@ -462,14 +531,19 @@ export class Maker implements MakerApi {
         if (same) return existing.swap;
         throw new ParalockError("conflict", "hashlock already used");
       }
-      const tip = await this.cfg.zcash.getBlockCount();
-      this.assertFundingExpiry(req.fundingExpiryHeight, tip);
-      const { quote } = await this.takeQuote(req.quoteId, "htlc");
+      const quote = this.peekQuote(req.quoteId, "htlc");
       const c = this.chain(quote.chain);
       if (`0x${htlc.params.claimPubkey}` !== this.zcashPubkey) throw new ParalockError("invalid_request", "HTLC does not pay the maker's key");
       if (this.inFlight() >= this.limits.maxConcurrentSwaps) throw new ParalockError("busy", "the maker is at capacity");
+      const tip = await this.cfg.zcash.getBlockCount();
+      this.assertFundingExpiry(req.fundingExpiryHeight, tip);
       assertSafeWindows(this.cfg.policy, htlc.params.refundHeight - tip, quote.evmLockSeconds);
+      this.assertRefundHeightBound(htlc.params.refundHeight, tip);
       await this.assertInventory(c, "htlc", quote.usdAmount);
+      await this.takeQuote(req.quoteId, "htlc"); // last; `exclusive` keeps it atomic with the checks above
+      // A pre-0.3 taker sends no expiry; it funded before accepting, so its funding is normally already mined. Give an
+      // unseen funding the longest expiry a declaring taker could have had (`fundingExpired`).
+      const deadline = req.fundingExpiryHeight === undefined ? tip + this.limits.maxFundingExpiryBlocks : undefined;
 
       const swap = this.newSwap(id, quote, c, req.takerEvmAddress, {
         htlcAddress: htlc.address,
@@ -488,10 +562,14 @@ export class Maker implements MakerApi {
         swap,
         htlc: {},
         ...(req.fundingExpiryHeight !== undefined ? { fundingExpiryHeight: req.fundingExpiryHeight } : {}),
+        ...(deadline !== undefined ? { fundingDeadline: deadline } : {}),
         updatedAt: Date.now(),
       };
       await this.save(record);
-      const until = req.fundingExpiryHeight !== undefined ? `; funding must be mined by block ${req.fundingExpiryHeight}` : "";
+      const until =
+        req.fundingExpiryHeight !== undefined
+          ? `; funding must be mined by block ${req.fundingExpiryHeight}`
+          : `; no funding expiry declared: the funding must be seen by block ${deadline}`;
       this.log(`htlc: accepted ${id} (${quote.zecAmountZat} zat → ${quote.usdAmount} ${quote.tokenSymbol} on ${quote.chain}${until})`);
       this.settle(id);
       return swap;
@@ -533,10 +611,15 @@ export class Maker implements MakerApi {
     const zcashKey = keyPairFromPrivate(unhex(entry.zcashKey));
     if (p.takerZcashPubkey === hex(zcashKey.publicKey)) throw new ParalockError("invalid_request", "taker key must differ from the maker's");
     if (this.inFlight() >= this.limits.maxConcurrentSwaps) throw new ParalockError("busy", "the maker is at capacity");
+    // Required in private mode: pre-0.3 takers (the only ones that omit it) read the escrow pre-signature from
+    // `GET /swaps/:id`, which no longer serves it, so they could fund but never claim. Refuse them before anything moves.
+    if (p.fundingExpiryHeight === undefined) {
+      throw new ParalockError("invalid_request", "fundingExpiryHeight is required in private mode (update the taker to @paralock/sdk 0.3 or later)");
+    }
     const tip = await this.cfg.zcash.getBlockCount();
     this.assertFundingExpiry(p.fundingExpiryHeight, tip);
     assertSafeWindows(this.cfg.policy, p.refundHeight - tip, entry.quote.evmLockSeconds);
-    if (p.refundHeight - tip > this.cfg.policy.zcashLockBlocks * 2) throw new ParalockError("invalid_request", "refund height is too far away");
+    this.assertRefundHeightBound(p.refundHeight, tip);
     await assertNoUpgradeBefore(this.cfg.zcash, p.refundHeight + 1, (m) => this.log(m));
     const c = this.chain(entry.quote.chain);
     await this.assertInventory(c, "adaptor", entry.quote.usdAmount);
@@ -584,15 +667,22 @@ export class Maker implements MakerApi {
 
   /**
    * Steps 3–4: checks the taker's pre-signature on the maker's claim, then (in the background) waits for the 2-of-2
-   * funding, locks stablecoins and publishes the escrow's pre-signature. Idempotent.
+   * funding, locks stablecoins and publishes the escrow's pre-signature.
+   *
+   * Answers with the taker's view of the swap: the public view plus the adaptor point and `adaptor` (escrow id,
+   * signer, salt and, once the lock is on-chain, the maker's escrow pre-signature). Only the taker can call it
+   * successfully, since it takes a valid pre-signature by the taker's 2-of-2 key, so the taker polls it (resending its
+   * stored pre-signature) for the lock. Idempotent: the stored pre-signature, sent again, always gets the current
+   * view; a different one is checked and, if valid, also gets it (the first one is kept); an invalid one is refused.
    */
   async adaptorPreSignature(swapId: string, request: AdaptorPreSignatureRequest): Promise<Swap> {
     await this.start();
     const req = parsePreSignatureRequest(request);
     const record = this.records.get(swapId);
     if (!record?.adaptor) throw new ParalockError("not_found", "unknown swap");
-    if (record.adaptor.takerPreSignature) return record.swap; // already have one; any valid one works
-    if (record.stage !== "proposed") throw new ParalockError("conflict", `swap is ${record.stage}`);
+    const stored = record.adaptor.takerPreSignature;
+    if (stored === req.takerPreSignature) return record.swap; // the taker repeating itself (normalized hex)
+    if (!stored && record.stage !== "proposed") throw new ParalockError("conflict", `swap is ${record.stage}`);
     let pre: PreSignature;
     try {
       pre = decodePreSignature(req.takerPreSignature);
@@ -604,6 +694,7 @@ export class Maker implements MakerApi {
     if (!preVerify(unhex(proposal.takerZcashPubkey), spends.claim.sighash, unhex(proposal.adaptorPoint), pre)) {
       throw new ParalockError("invalid_request", "invalid pre-signature for the maker's claim");
     }
+    if (stored) return record.swap; // another valid one: only the taker's key makes those; keep the first
     record.adaptor.takerPreSignature = req.takerPreSignature;
     record.stage = "funding";
     await this.save(record);
@@ -687,7 +778,7 @@ export class Maker implements MakerApi {
   private async stepProposed(record: MakerSwapRecord): Promise<boolean> {
     const tip = await this.cfg.zcash.getBlockCount();
     if (await this.fundingExpired(record, tip)) {
-      await this.abandon(record, `the taker's funding expired at block ${record.fundingExpiryHeight} without being mined`);
+      await this.abandon(record, fundingDeadReason(record));
       return true;
     }
     try {
@@ -706,6 +797,7 @@ export class Maker implements MakerApi {
     const utxo = (await this.cfg.zcash.getAddressUtxos([swap.zcash.htlcAddress])).find(
       (u) => u.txid === swap.zcash.fundingTxid && u.vout === swap.zcash.fundingVout,
     );
+    if (utxo) await this.markFundingSeen(record, tip);
     const windowOk = () => {
       try {
         assertSafeWindows(this.cfg.policy, swap.zcash.refundHeight - tip, swap.quote.evmLockSeconds);
@@ -717,7 +809,7 @@ export class Maker implements MakerApi {
     if (!utxo || tip - utxo.height + 1 < this.cfg.policy.minZcashConfirmations) {
       if (!utxo && (await this.fundingExpired(record, tip))) {
         // Past its expiry the funding can never be mined: release the reservation. This can't strand the taker.
-        await this.abandon(record, `the taker's funding expired at block ${record.fundingExpiryHeight} without being mined`);
+        await this.abandon(record, fundingDeadReason(record));
         return true;
       }
       if (!windowOk()) await this.abandon(record, "the Zcash funding did not confirm in time");
@@ -788,7 +880,7 @@ export class Maker implements MakerApi {
       const remaining = Number(expiry - (await client.now()));
       const tip = await this.cfg.zcash.getBlockCount();
       try {
-        if (remaining < 30) throw new Error("the EVM lock would expire too soon");
+        if (remaining < this.limits.minEvmLockSecondsLeft) throw new Error(`the EVM lock would have only ${remaining}s left`);
         assertSafeWindows(this.cfg.policy, swap.zcash.refundHeight - tip, remaining);
       } catch (err) {
         await this.abandon(record, `not locking: ${errorMessage(err)}`);
@@ -924,21 +1016,55 @@ export class Maker implements MakerApi {
   }
 
   /**
-   * True once the taker's funding can never be mined: the tip is more than `FUNDING_EXPIRY_MARGIN_BLOCKS` past the
-   * expiry height the taker declared, and the node hasn't mined it. Always false without a declared expiry.
+   * True once the reservation may be dropped because the taker's funding is dead:
+   * - with a declared `fundingExpiryHeight`: the tip is more than `FUNDING_EXPIRY_MARGIN_BLOCKS` past it and the funding
+   *   isn't mined. It can never be mined any more, so this can't strand the taker.
+   * - without one (htlc accepts from pre-0.3 takers): the tip is more than `FUNDING_EXPIRY_MARGIN_BLOCKS` past the
+   *   derived `fundingDeadline`, and the maker has never seen the funding, neither as the lock's UTXO at the declared
+   *   outpoint nor as a transaction its node knows (mined or in the mempool) whose output `fundingVout` pays the lock.
+   *   Its real expiry is unknown, so a funding seen once is never dropped by this rule (only by the window rule).
+   * Always false for records with neither (made before the deadline existed).
    */
   private async fundingExpired(record: MakerSwapRecord, tip: number): Promise<boolean> {
-    const expiry = record.fundingExpiryHeight;
-    if (expiry === undefined || tip <= expiry + FUNDING_EXPIRY_MARGIN_BLOCKS) return false;
+    const declared = record.fundingExpiryHeight;
+    const deadline = declared ?? (record.fundingSeenHeight === undefined ? record.fundingDeadline : undefined);
+    if (deadline === undefined || tip <= deadline + FUNDING_EXPIRY_MARGIN_BLOCKS) return false;
     const { htlcAddress, fundingTxid, fundingVout } = record.swap.zcash;
     // Two independent signals, so a node error never reads as "not mined" (an error here is retried on the next poll).
     const utxos = await this.cfg.zcash.getAddressUtxos([htlcAddress]);
-    if (utxos.some((u) => u.txid === fundingTxid && u.vout === fundingVout)) return false;
+    if (utxos.some((u) => u.txid === fundingTxid && u.vout === fundingVout)) {
+      await this.markFundingSeen(record, tip);
+      return false;
+    }
     const tx = await this.cfg.zcash.getRawTransaction(fundingTxid!).catch((err: unknown) => {
       if (err instanceof ZcashRpcTransportError) throw err; // the node is unreachable: decide on the next poll
       return undefined; // unknown to the node
     });
-    return (tx?.confirmations ?? 0) === 0;
+    if (declared !== undefined) return (tx?.confirmations ?? 0) === 0;
+    // Only a transaction that really funds this lock counts: any txid the node knows would otherwise do.
+    if (!tx || !this.fundsLock(tx, record)) return true;
+    await this.markFundingSeen(record, tip);
+    return false;
+  }
+
+  /**
+   * True if output `fundingVout` of `tx` (from the maker's own node) pays the swap's lock address. Reads only the
+   * transparent outputs (`parseTx` leaves the shielded part opaque); a transaction it can't parse doesn't count.
+   */
+  private fundsLock(tx: NodeTransaction, record: MakerSwapRecord): boolean {
+    try {
+      const out = parseTx(tx.hex).outputs[record.swap.zcash.fundingVout!];
+      return !!out && bytesToHex(out.scriptPubKey) === bytesToHex(scriptPubKeyForAddress(record.swap.zcash.htlcAddress, this.cfg.network));
+    } catch {
+      return false;
+    }
+  }
+
+  /** Records (once) the tip at which the maker first saw the funding. See `fundingExpired`. */
+  private async markFundingSeen(record: MakerSwapRecord, tip: number) {
+    if (record.fundingSeenHeight !== undefined) return;
+    record.fundingSeenHeight = tip;
+    await this.save(record);
   }
 
   // ---------------------------------------------------------------------------------------------------------------

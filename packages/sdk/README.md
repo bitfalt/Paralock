@@ -78,6 +78,9 @@ createServer(async (req, res) => {
 `makerHandler` is a web-standard `Request → Response` handler, so it also runs in Bun, Deno or a Next.js route.
 Routes: `GET /quote?zat=|usd=&chain=&mode=`, `POST /swaps`, `POST /adaptor/swaps`,
 `POST /adaptor/swaps/:id/presignature`, `GET /swaps/:id`, `GET /health`. Put it behind TLS and a rate limiter.
+`GET /swaps/:id` serves a public view without private-mode data (adaptor point, pre-signatures, signer key, salt); the
+taker gets those in the answer to its own pre-signature request, which it resends to poll for the lock. The view still
+lists both legs' transactions, so keep swap ids private.
 
 ## Recovery after a crash
 
@@ -132,7 +135,8 @@ watches for the claim, claims the ZEC (rebroadcasting until it confirms) or refu
 | `minEvmConfirmations` | 1 | `quoteTtlSeconds` | 60 |
 | `expiryMarginSeconds` | 5 | `maxFundingExpiryBlocks` | 45 |
 | `maxSlippageBps` (with `price`) | 200 | `zcashFeeZat` (priced into quotes) | 10,000 |
-| `fundingConfirmationMs` / `makerLockMs` | 30 min each | `checkInventory` | true |
+| `fundingConfirmationMs` / `makerLockMs` | 30 min each | `minEvmLockSecondsLeft` (EVM time left to send a lock) | 30 |
+| | | `checkInventory` | true |
 
 ## Transaction expiry
 
@@ -141,7 +145,10 @@ later. The taker sends that height to the maker as `fundingExpiryHeight` (in the
 proposal; optional on the wire, since 0.1 and 0.2 takers don't send it). The maker refuses one that isn't above its tip
 or is more than `maxFundingExpiryBlocks` ahead, and drops its reservation, releasing the stablecoins, once the tip is
 more than 2 blocks past it and the funding was never mined: it can't be mined any more, so this can't strand the
-taker. Without the field, the reservation lasts until the Zcash window is too short to lock. Claims and refunds never
+taker. An htlc accept without the field (older takers fund first, so their funding is already mined) gets the deadline
+`tip + maxFundingExpiryBlocks`, which only releases a reservation whose funding the maker has never seen; once seen,
+only the window rule can drop it. Private-mode proposals must carry the field. Refund heights more than twice
+`policy.zcashLockBlocks` above the tip are refused in both modes, and a refused commitment leaves its quote usable. Claims and refunds never
 expire (`expiryHeight = 0`): the private-mode refund and claim are signed before the funding is broadcast and must stay
 valid until mined.
 

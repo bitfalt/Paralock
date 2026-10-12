@@ -57,13 +57,16 @@ export function assertValidPolicy(policy: TimeoutPolicy): void {
   assertSafeWindows(policy, policy.zcashLockBlocks, policy.evmLockSeconds);
 }
 
-/** Throws `ParalockError("unsafe_timeouts")` unless the remaining Zcash window comfortably outlasts the EVM lock. */
+/**
+ * Throws `ParalockError("unsafe_timeouts")` unless the remaining Zcash window is at least `policy.safetyFactor` times
+ * the EVM lock: `blocksUntilZcashRefund × zcashBlockSeconds ≥ evmLockSeconds × safetyFactor` (equality is safe).
+ */
 export function assertSafeWindows(policy: TimeoutPolicy, blocksUntilZcashRefund: number, evmLockSeconds: number): void {
   const zcashSeconds = blocksUntilZcashRefund * policy.zcashBlockSeconds;
   if (zcashSeconds < evmLockSeconds * policy.safetyFactor) {
     throw new ParalockError(
       "unsafe_timeouts",
-      `unsafe timeouts: Zcash refund in ~${zcashSeconds}s must exceed ${policy.safetyFactor}x the EVM lock (${evmLockSeconds}s)`,
+      `unsafe timeouts: Zcash refund in ~${zcashSeconds}s must be at least ${policy.safetyFactor}x the EVM lock (${evmLockSeconds}s)`,
     );
   }
 }

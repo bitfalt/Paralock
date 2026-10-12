@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { adaptorKeyPair, encodePreSignature, preSign } from "@paralock/adaptor";
 import {
   FUNDING_EXPIRY_DELTA,
   type KeyPair,
   type ZcashNode,
+  ZcashRpcTransportError,
   buildHtlcFunding,
   buildP2pkhSpend,
   bytesToHex,
@@ -15,6 +17,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AdaptorProposal, adaptorSpends } from "../src/adaptor-protocol.js";
 import { ParalockError, SwapFailedError } from "../src/errors.js";
+import { HttpMakerApi, makerHandler } from "../src/http.js";
 import { type AcceptRequest, Maker, type MakerLimits, type MakerSwapRecord } from "../src/maker.js";
 import type { TimeoutPolicy } from "../src/policy.js";
 import { fromHex, newSecret } from "../src/secret.js";
@@ -213,7 +216,9 @@ describe("engines (in-process, fake chains)", () => {
         key: w.takerKey,
         outputs: [{ scriptPubKey: multisig.scriptPubKey, value: fundedValue ?? quote.zecAmountZat }],
         branchId: await w.zcash.getNextBranchId(),
+        network: "regtest",
       });
+      const tip = await w.zcash.getBlockCount();
       const proposal = {
         quoteId: quote.id,
         takerZcashPubkey: hex(ms.publicKey),
@@ -221,17 +226,64 @@ describe("engines (in-process, fake chains)", () => {
         fundingTxid: funding.txid,
         fundingVout: 0,
         amountZat: quote.zecAmountZat.toString(),
-        refundHeight: (await w.zcash.getBlockCount()) + 40,
+        refundHeight: tip + 40,
         refundAddress: takerAddress,
         takerEvmRecipient: TAKER_EVM,
+        fundingExpiryHeight: tip + 45, // the furthest allowed: these tests exercise the other rules
         ...extra,
       };
       const accepted = await maker.proposeAdaptor(proposal);
       expect(await maker.proposeAdaptor(proposal)).toEqual(accepted); // idempotent
       const spends = adaptorSpends({ ...proposal, network: "regtest", takerPubkey: proposal.takerZcashPubkey, makerPubkey: quote.makerZcashPubkey, amountZat: quote.zecAmountZat, claimTo: accepted.claimTo, branchId: accepted.branchId });
       const pre = encodePreSignature(preSign(ms.privateKey, spends.claim.sighash, y.point));
-      return { quote, funding, sendPreSignature: () => maker.adaptorPreSignature(quote.id, { takerPreSignature: pre }) };
+      const anotherPre = () => encodePreSignature(preSign(ms.privateKey, spends.claim.sighash, y.point)); // fresh nonce
+      return { quote, funding, proposal, pre, anotherPre, sendPreSignature: () => maker.adaptorPreSignature(quote.id, { takerPreSignature: pre }) };
     }
+
+    it("refuses a proposal without fundingExpiryHeight (a pre-0.3 taker) without consuming the quote", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "adaptor");
+      const ms = randomKeyPair();
+      const tip = await w.zcash.getBlockCount();
+      const proposal: AdaptorProposal = {
+        quoteId: quote.id,
+        takerZcashPubkey: hex(ms.publicKey),
+        adaptorPoint: hex(adaptorKeyPair().point),
+        fundingTxid: "ab".repeat(32),
+        fundingVout: 0,
+        amountZat: quote.zecAmountZat.toString(),
+        refundHeight: tip + 40,
+        refundAddress: keyAddress(w.takerKey, "regtest"),
+        takerEvmRecipient: TAKER_EVM,
+      };
+      await expect(maker.proposeAdaptor(proposal)).rejects.toMatchObject({ code: "invalid_request", message: expect.stringMatching(/fundingExpiryHeight is required/) });
+      expect(maker.getStage(quote.id)).toBeUndefined();
+      await expect(maker.proposeAdaptor({ ...proposal, fundingExpiryHeight: tip + 40 })).resolves.toMatchObject({ swapId: quote.id });
+    });
+
+    it("answers the taker's pre-signature with the adaptor data, but never anyone else", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const { quote, proposal, pre, anotherPre, sendPreSignature } = await propose(w, maker);
+      const first = await sendPreSignature();
+      expect(first.adaptorPoint).toBe(proposal.adaptorPoint);
+      expect(first.adaptor?.signerPubkey).toMatch(/^0x0[23]/);
+      // The public view leaves the adaptor data out.
+      const view = maker.getSwap(quote.id)!;
+      expect(view.status).toBe("quoted");
+      expect("adaptorPoint" in view || "adaptor" in view).toBe(false);
+      expect(maker.listSwaps().some((s) => "adaptorPoint" in s || "adaptor" in s)).toBe(false);
+      // Resending the stored pre-signature (any hex casing) is idempotent; another valid one also proves the taker's key.
+      expect((await maker.adaptorPreSignature(quote.id, { takerPreSignature: `0x${pre.toUpperCase()}` })).adaptor?.signer).toBe(first.adaptor?.signer);
+      expect((await maker.adaptorPreSignature(quote.id, { takerPreSignature: anotherPre() })).adaptorPoint).toBe(proposal.adaptorPoint);
+      expect((await w.makerStore.get<MakerSwapRecord>(`maker/swap/${quote.id}`))?.adaptor?.takerPreSignature).toBe(pre); // the first one is kept
+      // Anything else is refused, so the adaptor data can't be fished out with a guess.
+      const tampered = `${pre.slice(0, -2)}${pre.endsWith("00") ? "01" : "00"}`;
+      await expect(maker.adaptorPreSignature(quote.id, { takerPreSignature: tampered })).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(maker.adaptorPreSignature(quote.id, { takerPreSignature: "00".repeat(162) })).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(maker.adaptorPreSignature(randomUUID(), { takerPreSignature: pre })).rejects.toMatchObject({ code: "not_found" });
+    });
 
     it("when the 2-of-2 holds less than proposed (same txid, smaller output)", async () => {
       const w = world();
@@ -298,12 +350,20 @@ describe("engines (in-process, fake chains)", () => {
   });
 });
 
-/** An htlc commitment built by hand, as any taker would: the HTLC for `quote`, its signed funding (not broadcast). */
-async function handBuiltHtlc(w: ReturnType<typeof world>, quote: Quote, key: KeyPair) {
+/**
+ * An htlc commitment built by hand, as any taker would: the HTLC for `quote` (refund `refundBlocks` above the tip,
+ * default the quote's window), its signed funding (not broadcast).
+ */
+async function handBuiltHtlc(w: ReturnType<typeof world>, quote: Quote, key: KeyPair, opts: { refundBlocks?: number; claimPubkey?: Hex } = {}) {
   const { hashlock } = newSecret();
   const tip = await w.zcash.getBlockCount();
   const htlc = createHtlc(
-    { hashlock: fromHex(hashlock), claimPubkey: fromHex(quote.makerZcashPubkey), refundPubkey: key.publicKey, refundHeight: tip + quote.zcashLockBlocks },
+    {
+      hashlock: fromHex(hashlock),
+      claimPubkey: fromHex(opts.claimPubkey ?? quote.makerZcashPubkey),
+      refundPubkey: key.publicKey,
+      refundHeight: tip + (opts.refundBlocks ?? quote.zcashLockBlocks),
+    },
     "regtest",
   );
   const funding = buildHtlcFunding({
@@ -313,6 +373,7 @@ async function handBuiltHtlc(w: ReturnType<typeof world>, quote: Quote, key: Key
     key,
     branchId: await w.zcash.getNextBranchId(),
     expiryHeight: tip + FUNDING_EXPIRY_DELTA,
+    network: "regtest",
   });
   const request: AcceptRequest = { quoteId: quote.id, redeemScript: hex(htlc.redeemScript), fundingTxid: funding.txid, fundingVout: 0, takerEvmAddress: TAKER_EVM };
   return { htlc, funding, request, tip, id: hashlock };
@@ -594,18 +655,177 @@ describe("reserve before broadcast (htlc)", () => {
     expect(maker.getSwap(id)?.events.map((e) => e.status)).toEqual(["zcash_locked", "evm_locked"]);
   });
 
-  it("keeps an old-style reservation until the window closes (no expiry to go by)", async () => {
+  it("keeps an old-style reservation until the window closes when that comes before the derived deadline", async () => {
     const w = world();
     const maker = w.newMaker();
     const quote = await maker.quote(100_000_000n, "tempo", "htlc");
-    const { request, id } = await handBuiltHtlc(w, quote, w.takerKey);
+    const { request, id, tip } = await handBuiltHtlc(w, quote, w.takerKey);
     await maker.accept(request);
+    expect((await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`))?.fundingDeadline).toBe(tip + 45);
     await w.zcash.generate(8); // where a declared expiry of tip + 5 would already have released it
     await new Promise((r) => setTimeout(r, 50));
     expect(maker.getStage(id)).toBe("funding");
     await w.zcash.generate(3);
     await until(() => maker.getStage(id) === "abandoned", "the window rule");
     expect(maker.getSwap(id)?.events.at(-1)?.detail).toMatch(/did not confirm in time/);
+  });
+
+  describe("accept griefing: far refund heights and missing funding expiries", () => {
+    it("refuses a refund height more than 2 × zcashLockBlocks away, without consuming the quote", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const far = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 2 * POLICY.zcashLockBlocks + 1 });
+      await expect(maker.accept(far.request)).rejects.toMatchObject({ code: "invalid_request", message: "refund height is too far away" });
+      await expect(maker.accept({ ...far.request, fundingExpiryHeight: far.tip + 40 })).rejects.toMatchObject({ code: "invalid_request" });
+      expect(maker.getStage(far.id)).toBeUndefined();
+      const edge = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 2 * POLICY.zcashLockBlocks });
+      expect((await maker.accept(edge.request)).id).toBe(edge.id);
+    });
+
+    it("drops an accept without fundingExpiryHeight whose funding it never sees, at tip + maxFundingExpiryBlocks + 2", async () => {
+      const w = world({ makerLimits: { maxFundingExpiryBlocks: 10 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      w.evm.balances.set(MAKER_EVM, (quote.usdAmount * 3n) / 2n); // room for this swap, not for a second one
+      // A far refund height, so the window rule alone would hold the reservation for 50 blocks.
+      const { request, tip, id } = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 2 * POLICY.zcashLockBlocks });
+      await maker.accept(request); // no fundingExpiryHeight, and the funding is never broadcast
+      const record = await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`);
+      expect(record?.fundingExpiryHeight).toBeUndefined();
+      expect(record?.fundingDeadline).toBe(tip + 10); // persisted, so a restarted maker applies it too
+      await expect(maker.quote(100_000_000n)).rejects.toMatchObject({ code: "insufficient_liquidity" });
+      await w.zcash.generate(12); // tip = deadline + 2: within the margin
+      await new Promise((r) => setTimeout(r, 50));
+      expect(maker.getStage(id)).toBe("funding");
+      await w.zcash.generate(1);
+      await until(() => maker.getStage(id) === "abandoned", "the deadline");
+      expect(maker.getSwap(id)?.events.at(-1)?.detail).toMatch(/never seen/);
+      expect((await maker.quote(100_000_000n)).usdAmount).toBe(quote.usdAmount); // inventory released
+    });
+
+    it("never drops an accept without fundingExpiryHeight once it has seen the funding, and still locks", async () => {
+      const w = world({ makerLimits: { maxFundingExpiryBlocks: 10 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, funding, tip, id } = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 2 * POLICY.zcashLockBlocks });
+      await maker.accept(request);
+      w.zcash.holdMempool = true; // broadcast, but stuck in the mempool past the deadline
+      await w.zcash.sendRawTransaction(funding.hex);
+      await w.zcash.generate(14);
+      await until(async () => (await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`))?.fundingSeenHeight !== undefined, "the maker to see it");
+      await new Promise((r) => setTimeout(r, 50));
+      expect(maker.getStage(id)).toBe("funding");
+      expect((await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`))?.fundingSeenHeight).toBeGreaterThan(tip + 12);
+      w.zcash.holdMempool = false;
+      await w.zcash.generate(1);
+      await until(() => maker.getStage(id) === "locked", "the maker's lock");
+    });
+
+    it("doesn't count a transaction that doesn't pay the lock as seen, even when the node knows it", async () => {
+      const w = world({ makerLimits: { maxFundingExpiryBlocks: 10 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, id } = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 2 * POLICY.zcashLockBlocks });
+      // An unrelated, mined transaction: the attacker declares its txid as the funding to keep the reservation alive.
+      const other = randomKeyPair();
+      const decoy = buildP2pkhSpend({
+        utxos: await w.zcash.getAddressUtxos([keyAddress(w.takerKey, "regtest")]),
+        key: w.takerKey,
+        outputs: [{ scriptPubKey: keyScriptPubKey(other), value: 50_000_000n }],
+        branchId: await w.zcash.getNextBranchId(),
+        network: "regtest",
+      });
+      await w.zcash.sendRawTransaction(decoy.hex);
+      await w.zcash.generate(1);
+      expect((await w.zcash.getRawTransaction(decoy.txid)).confirmations).toBe(1);
+      await maker.accept({ ...request, fundingTxid: decoy.txid, fundingVout: 0 });
+      await w.zcash.generate(13);
+      await until(() => maker.getStage(id) === "abandoned", "the deadline");
+      expect((await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`))?.fundingSeenHeight).toBeUndefined();
+    });
+
+    it("never reads a node error as an unseen funding at the derived deadline", async () => {
+      const w = world({ makerLimits: { maxFundingExpiryBlocks: 10 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, id } = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 2 * POLICY.zcashLockBlocks });
+      const real = w.zcash.getRawTransaction.bind(w.zcash);
+      let failing = true;
+      vi.spyOn(w.zcash, "getRawTransaction").mockImplementation(async (txid) => {
+        if (failing && txid === request.fundingTxid) throw new ZcashRpcTransportError("getrawtransaction", "connection refused");
+        return real(txid);
+      });
+      await maker.accept(request);
+      await w.zcash.generate(14);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(maker.getStage(id)).toBe("funding"); // undecided while the node is unreachable
+      failing = false;
+      await until(() => maker.getStage(id) === "abandoned", "the deadline once the node answers");
+    });
+
+    it("still records the deadline for a 0.2 taker whose funding is mined, and marks it seen", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, funding, tip, id } = await handBuiltHtlc(w, quote, w.takerKey);
+      await w.zcash.sendRawTransaction(funding.hex);
+      await w.zcash.generate(1);
+      await maker.accept(request);
+      await until(() => maker.getStage(id) === "locked", "the maker's lock");
+      const record = await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`);
+      expect(record?.fundingDeadline).toBe(tip + 1 + 45);
+      expect(record?.fundingSeenHeight).toBe(tip + 1);
+    });
+  });
+
+  describe("a refused accept leaves the quote usable", () => {
+    it("after each check that can fail: claim key, capacity, window, inventory", async () => {
+      const w = world({ makerLimits: { maxConcurrentSwaps: 1 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const notMaker = await handBuiltHtlc(w, quote, w.takerKey, { claimPubkey: hex(randomKeyPair().publicKey) });
+      await expect(maker.accept(notMaker.request)).rejects.toMatchObject({ code: "invalid_request", message: "HTLC does not pay the maker's key" });
+      const unsafe = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 20 });
+      await expect(maker.accept(unsafe.request)).rejects.toMatchObject({ code: "unsafe_timeouts" });
+      const balance = w.evm.balances.get(MAKER_EVM)!;
+      w.evm.balances.set(MAKER_EVM, quote.usdAmount - 1n);
+      const good = await handBuiltHtlc(w, quote, w.takerKey);
+      await expect(maker.accept(good.request)).rejects.toMatchObject({ code: "insufficient_liquidity" });
+      w.evm.balances.set(MAKER_EVM, balance);
+      // Fill the only slot with another swap, then free it again.
+      const other = await maker.quote(100_000_000n, "tempo", "htlc");
+      const occupying = await handBuiltHtlc(w, other, w.takerKey);
+      await maker.accept({ ...occupying.request, fundingExpiryHeight: occupying.tip + 5 });
+      await expect(maker.accept(good.request)).rejects.toMatchObject({ code: "busy" });
+      await w.zcash.generate(8);
+      await until(() => maker.getStage(occupying.id) === "abandoned", "the slot to free up");
+      // Every refusal above left the quote alone.
+      expect((await maker.accept(good.request)).quote.id).toBe(quote.id);
+      await expect(maker.accept({ ...unsafe.request, quoteId: quote.id })).rejects.toMatchObject({ code: "quote_expired" });
+    });
+  });
+
+  describe("minEvmLockSecondsLeft", () => {
+    it("is a validated limit, 30 s by default", () => {
+      const w = world();
+      expect(w.newMaker().effectiveLimits.minEvmLockSecondsLeft).toBe(30);
+      expect(() => world({ makerLimits: { minEvmLockSecondsLeft: -1 } }).newMaker()).toThrow(/minEvmLockSecondsLeft/);
+      expect(() => world({ makerLimits: { minEvmLockSecondsLeft: 1.5 } }).newMaker()).toThrow(/minEvmLockSecondsLeft/);
+    });
+
+    it("makes the maker abandon instead of locking with less time left", async () => {
+      const w = world({ makerLimits: { minEvmLockSecondsLeft: POLICY.evmLockSeconds + 1 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, funding, id } = await handBuiltHtlc(w, quote, w.takerKey);
+      await maker.accept({ ...request, fundingExpiryHeight: (await w.zcash.getBlockCount()) + 40 });
+      await w.zcash.sendRawTransaction(funding.hex);
+      await w.zcash.generate(1);
+      await until(() => maker.getStage(id) === "abandoned", "the maker to refuse to lock");
+      expect(maker.getSwap(id)?.events.at(-1)?.detail).toMatch(/only 45s left/);
+      expect(w.htlc.locks.size).toBe(0);
+    });
   });
 });
 
@@ -641,6 +861,71 @@ describe("reserve before broadcast (adaptor)", () => {
     await until(async () => (await w.takerStore.get<TakerSwapRecord>(`taker/${quote.id}`))?.stage === "proposed", "the proposal");
     expect(w.zcash.txs.size).toBe(1); // only the faucet
     expect((await w.newTaker(proxy(() => maker)).resume(quote.id)).status).toBe("completed");
+  });
+});
+
+describe("private swap data stays between the two parties", () => {
+  it("completes over HTTP while GET /swaps/:id never serves adaptor data (the taker re-POSTs its pre-signature)", async () => {
+    const w = world();
+    const maker = w.newMaker();
+    const handle = makerHandler(maker, { exposeSwapList: true });
+    const seen: { method: string; path: string; body: string }[] = [];
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      const res = await handle(new Request(input, init));
+      const body = await res.clone().text();
+      seen.push({ method: init?.method ?? "GET", path: new URL(input).pathname, body });
+      return res;
+    });
+    try {
+      const taker = w.newTaker(new HttpMakerApi("http://maker"));
+      const swap = await taker.swap(await taker.quote(100_000_000n, "tempo", "adaptor"));
+      expect(swap.status).toBe("completed");
+      expect(swap.adaptor?.evmPreSignature).toMatch(/^[0-9a-f]{324}$/); // the taker's own view keeps it
+
+      const reads = seen.filter((r) => r.method === "GET" && r.path.startsWith("/swaps"));
+      expect(reads.length).toBeGreaterThan(0); // the taker still reads the public view (status, the maker's claim)
+      for (const r of reads) for (const field of ["adaptorPoint", "evmPreSignature", "signerPubkey", "salt", "escrowId"]) expect(r.body).not.toContain(field);
+      const outsider = await (await handle(new Request(`http://maker/swaps/${swap.id}`))).json();
+      expect(outsider).toMatchObject({ id: swap.id, status: "completed" });
+      expect(outsider.adaptorPoint ?? outsider.adaptor).toBeUndefined();
+      const list = await (await handle(new Request("http://maker/swaps"))).text();
+      expect(list).not.toContain("adaptorPoint");
+      expect(list).not.toContain("evmPreSignature");
+      // The adaptor data reached the taker only through its own POSTs.
+      const posts = seen.filter((r) => r.method === "POST" && r.path.endsWith("/presignature"));
+      expect(posts.some((r) => r.body.includes(swap.adaptor!.evmPreSignature!))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("resumes after a crash between the pre-signature response and persisting it, by re-POSTing", async () => {
+    const w = world();
+    const maker = w.newMaker();
+    let posts = 0;
+    const api: MakerApi = {
+      ...proxy(() => maker),
+      adaptorPreSignature: async (id, r) => {
+        posts++;
+        await maker.adaptorPreSignature(id, r);
+        return new Promise<never>(() => undefined); // the taker dies before it sees (and persists) the answer
+      },
+    };
+    const doomed = w.newTaker(api);
+    const quote = await doomed.quote(100_000_000n, "tempo", "adaptor");
+    void doomed.swap(quote);
+    await until(() => posts === 1, "the pre-signature");
+    const record = await w.takerStore.get<TakerSwapRecord>(`taker/${quote.id}`);
+    expect(record?.stage).toBe("funded");
+    expect(record?.adaptor?.takerPreSignature).toMatch(/^[0-9a-f]{324}$/); // persisted before it was sent
+    expect(maker.getStage(quote.id)).not.toBe("proposed"); // the maker got it
+
+    const reads: (Swap | undefined)[] = [];
+    const fresh = w.newTaker({ ...proxy(() => maker), getSwap: async (id) => (reads.push(maker.getSwap(id)), maker.getSwap(id)) });
+    const done = await fresh.resume(quote.id);
+    expect(done.status).toBe("completed");
+    expect((await w.takerStore.get<TakerSwapRecord>(`taker/${quote.id}`))?.adaptor?.takerPreSignature).toBe(record?.adaptor?.takerPreSignature);
+    expect(reads.every((v) => v?.adaptor === undefined && v?.adaptorPoint === undefined)).toBe(true);
   });
 });
 

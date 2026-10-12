@@ -135,7 +135,10 @@ describe("zcash-htlc.json", () => {
     }
   });
   it("rejects scripts that are not the template byte for byte", () => {
-    for (const c of v.invalidScripts) expect(throws(() => zcash.htlcFromRedeemScript(c.redeemScript, "testnet")), c.description).toBe(true);
+    for (const c of v.invalidScripts) {
+      expect(throws(() => zcash.htlcFromRedeemScript(c.redeemScript, "testnet")), c.description).toBe(true);
+      expect(throws(() => zcash.parseHtlcRedeemScript(c.redeemScript)), c.description).toBe(true);
+    }
   });
   it("rejects invalid parameters", () => {
     for (const c of v.invalidParams) expect(throws(() => zcash.createHtlc(c.params, "testnet")), c.description).toBe(true);
@@ -172,13 +175,19 @@ describe("zcash-htlc.json", () => {
   it("builder errors", () => {
     const htlc = zcash.htlcFromRedeemScript(v.scripts[0].redeemScript, "testnet");
     const keys: Record<string, V> = { "taker-funding-key": v.fixtures.keys.takerFunding, "maker-zcash-key": v.fixtures.keys.makerZcash };
-    for (const c of v.transactions.errors) {
+    expect(v.transactions.validationErrors.length).toBeGreaterThan(0);
+    for (const c of [...v.transactions.errors, ...v.transactions.validationErrors]) {
       const key = zcash.keyPairFromPrivate(keys[c.key].privateKey);
       const to = c.kind === "claim" ? v.transactions.claim[0].to : v.transactions.refund[0].to;
       const run = () => {
-        if (c.kind === "funding") return zcash.buildHtlcFunding({ htlc, amount: BigInt(c.amount), utxos: c.utxos.map(utxoOf), key, branchId: zcash.BRANCH_ID_NU6_3 });
-        if (c.kind === "claim") return zcash.buildHtlcClaim({ htlc, utxo: utxoOf(c.utxo), key, preimage: c.preimage, to, branchId: zcash.BRANCH_ID_NU6_3 });
-        return zcash.buildHtlcRefund({ htlc, utxo: utxoOf(c.utxo), key, to, branchId: zcash.BRANCH_ID_NU6_3 });
+        const opts = {
+          branchId: c.branchId !== undefined ? branch(c.branchId) : zcash.BRANCH_ID_NU6_3,
+          network: "testnet" as const,
+          ...(c.fee !== undefined ? { fee: BigInt(c.fee) } : {}),
+        };
+        if (c.kind === "funding") return zcash.buildHtlcFunding({ htlc, amount: BigInt(c.amount), utxos: c.utxos.map(utxoOf), key, ...opts });
+        if (c.kind === "claim") return zcash.buildHtlcClaim({ htlc, utxo: utxoOf(c.utxo), key, preimage: c.preimage, to, ...opts });
+        return zcash.buildHtlcRefund({ htlc, utxo: utxoOf(c.utxo), key, to, ...opts });
       };
       expect(run, c.description).toThrow(c.error);
     }
@@ -265,6 +274,13 @@ describe("zcash-multisig.json", () => {
       expect(zcash.verifyMultisigSignature(c.spend === "refund" ? spends.refund : spends.claim, c.pubkey, c.signature), c.description).toBe(c.valid);
     }
   });
+  it("adaptorSpends refuses refund heights that are not lock-time block heights", () => {
+    const a = v.adaptorSpends;
+    expect(v.invalidAdaptorSpends.length).toBeGreaterThan(0);
+    for (const c of v.invalidAdaptorSpends) {
+      expect(() => sdk.adaptorSpends({ ...a.args, amountZat: BigInt(a.args.amountZat), refundHeight: c.refundHeight }), c.description).toThrow(c.error);
+    }
+  });
 });
 
 describe("zcash-tx-parse.json", () => {
@@ -307,6 +323,13 @@ describe("zcash-sighash.json", () => {
       const prevouts = vec.prevouts.map((p: V) => ({ value: BigInt(p.value), scriptPubKey: unhex(p.scriptPubKey) }));
       for (const c of vec.cases) expect(h(zcash.transparentSighash(tx, c.input, prevouts, c.hashType)), `${vec.description} ${c.name} ${c.input}`).toBe(c.sighash);
     }
+  });
+  it("rejects every other hash type", () => {
+    const vec = v.vectors[0];
+    const tx = zcash.parseTx(vec.hex);
+    const prevouts = vec.prevouts.map((p: V) => ({ value: BigInt(p.value), scriptPubKey: unhex(p.scriptPubKey) }));
+    expect(v.invalidHashTypes.length).toBeGreaterThan(0);
+    for (const c of v.invalidHashTypes) expect(() => zcash.transparentSighash(tx, 0, prevouts, c.hashType), c.description).toThrow(c.error);
   });
 });
 

@@ -10,7 +10,8 @@
  *    passes without it being mined.
  * 3. Taker broadcasts the funding, then sends a pre-signature on the maker's claim, encrypted to Y.
  * 4. Maker locks stablecoins in the adaptor escrow (released by the one-time signer's signature) and hands the taker
- *    a pre-signature on the escrow's claim digest, also encrypted to Y.
+ *    a pre-signature on the escrow's claim digest, also encrypted to Y: in its answer to the taker's pre-signature,
+ *    which the taker resends until the lock is there. The maker's public swap view never carries it.
  * 5. Taker completes it with y and claims. The signature on-chain plus the maker's pre-signature reveal y.
  * 6. Maker completes the taker's Zcash pre-signature with y and claims the ZEC.
  * Nothing in either chain's data is shared between the two legs.
@@ -43,8 +44,9 @@ export interface AdaptorProposal {
   takerEvmRecipient: Hex;
   /**
    * Last block the funding can be mined in (its `expiryHeight`). The maker drops the swap, and releases the stablecoins
-   * it reserved, once the chain is past it and the funding was never mined. Optional: 0.1 and 0.2 takers don't send
-   * it, and the maker then keeps the reservation until the Zcash window is too short to lock.
+   * it reserved, once the chain is past it and the funding was never mined. Optional in the type (0.1 and 0.2 takers
+   * don't send it), but a 0.3 maker refuses private-mode proposals without it: those takers read the escrow
+   * pre-signature from the public swap view, which no longer carries it, so they could fund but never claim.
    */
   fundingExpiryHeight?: number;
 }
@@ -63,7 +65,10 @@ export interface AdaptorProposalAccepted {
   signerPubkey: Hex;
 }
 
-/** Step 3, taker → maker. */
+/**
+ * Step 3, taker → maker. The taker persists it before sending and resends the same value to poll for the lock; the
+ * maker answers with the taker's view of the swap (adaptor data included).
+ */
 export interface AdaptorPreSignatureRequest {
   /** Taker's pre-signature on the maker's Zcash claim, encrypted to the adaptor point (`encodePreSignature`). */
   takerPreSignature: string;
@@ -91,6 +96,10 @@ export function adaptorSpends(args: {
   /** Consensus branch id both spends commit to; the taker checks it against its own node. */
   branchId: number;
 }): AdaptorSpends {
+  // The refund's lock_time: a block height. 0 would make the "refund" spendable at once, defeating the time lock.
+  if (!Number.isSafeInteger(args.refundHeight) || args.refundHeight < 1 || args.refundHeight >= 500_000_000) {
+    throw new Error(`refundHeight must be a block height in [1, 500000000), got ${args.refundHeight}`);
+  }
   const multisig = createMultisig2of2(args.takerPubkey.slice(2), args.makerPubkey.slice(2), args.network);
   const utxo = { txid: args.fundingTxid, vout: args.fundingVout, value: args.amountZat, scriptPubKey: multisig.scriptPubKey };
   return {
