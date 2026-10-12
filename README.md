@@ -20,9 +20,8 @@ It is two things:
   - `@paralock/evm`: escrow contracts and their clients.
   - `@paralock/sdk`: maker and taker engines.
   - A one-command local devnet running Zcash and three EVM chains.
-- **A business:** run the market maker that fills these swaps and earn the spread, the way
-  [Boltz](https://boltz.exchange) does for Lightning. The protocol is symmetric, so anyone running the SDK can be a
-  maker, including peer to peer.
+- **A business:** run the market maker that fills these swaps and earn the spread. The protocol is symmetric, so
+  anyone running the SDK can be a maker, including peer to peer.
 
 ## How a swap works (and why nobody can cheat)
 
@@ -92,7 +91,7 @@ prefilled.
 
 ## Why atomic swaps aren't mainstream yet, and what changes here
 
-HTLC swaps already run in production in Lightning, in Boltz and Lightning Loop, and in BTC⇄XMR swaps. They lost
+HTLC swaps already run in production in Lightning (submarine swaps and Lightning Loop) and in BTC⇄XMR swaps. They lost
 retail to exchanges and bridges because of UX:
 
 | Problem | Paralock |

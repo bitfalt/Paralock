@@ -8,7 +8,7 @@ colosseum.com before the deadline.
 > Pay anyone in dollars from shielded ZEC, with no custodian in between. Paralock is the open-source SDK for
 > non-custodial ZEC settlement, and **Pay** is the first product built on it: a shop shares a payment link, you pay
 > from your private savings, and they receive exactly the dollars they asked for, atomically. Either both sides
-> settle or both refund. We run the first market maker and earn the spread, the way Boltz does for Lightning.
+> settle or both refund. We run the first market maker and earn the spread on every swap.
 
 - **Zcash track:** lead with Pay: a payment link, shielded ZEC in, exact dollars out. Then the open-source SDK and
   the one-command devnet.
@@ -100,7 +100,7 @@ disappears: the ZEC simply comes back after the timeout.
 - the escrow contracts;
 - a one-command devnet so anyone can build Zcash swaps.
 
-**[2:10, business]** The business is the market maker, like Boltz on Lightning. We run the first maker, take a
+**[2:10, business]** The business is the market maker. We run the first maker, take a
 spread on every swap, and start with a "pay in dollars" button for Zcash wallets. The protocol is open, so more
 makers, and peer-to-peer offers, can join.
 
