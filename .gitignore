@@ -14,3 +14,5 @@ coverage/
 
 # Local devnet deployments are recreated by `paralock devnet up`
 contracts/deployments/31337.json
+contracts/deployments/31338.json
+contracts/deployments/31339.json
