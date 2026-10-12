@@ -1,5 +1,11 @@
 # Paralock
 
+[![@paralock/zcash](https://img.shields.io/npm/v/@paralock/zcash?label=%40paralock%2Fzcash)](https://www.npmjs.com/package/@paralock/zcash)
+[![@paralock/adaptor](https://img.shields.io/npm/v/@paralock/adaptor?label=%40paralock%2Fadaptor)](https://www.npmjs.com/package/@paralock/adaptor)
+[![@paralock/evm](https://img.shields.io/npm/v/@paralock/evm?label=%40paralock%2Fevm)](https://www.npmjs.com/package/@paralock/evm)
+[![@paralock/sdk](https://img.shields.io/npm/v/@paralock/sdk?label=%40paralock%2Fsdk)](https://www.npmjs.com/package/@paralock/sdk)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Two locks. One key. No middleman.**
 
 Paralock pays dollars from shielded ZEC on EVM chains with no bridge, custodian or wrapped token. You can swap for
@@ -204,13 +210,29 @@ End-to-end swaps verified on the devnet:
 - the maker-vanishes refund in both modes;
 - the taker-never-claims double refund.
 
-## Packages on npm
+## Install
 
-The libraries ship as `@paralock/zcash`, `@paralock/adaptor`, `@paralock/evm` and `@paralock/sdk` (dist-only, MIT).
-To publish:
-1. `npm login`.
-2. Create the `paralock` organization on npmjs.com.
-3. `pnpm -r --filter "./packages/{zcash,adaptor,evm,sdk}" publish --access public`.
+```sh
+npm install @paralock/sdk        # maker/taker engines (pulls in the three below)
+npm install @paralock/zcash      # just the Zcash HTLC / 2-of-2 / ZIP 244 library
+npm install @paralock/adaptor    # just the ECDSA adaptor signatures
+npm install @paralock/evm        # just the EVM escrow clients and network registry
+```
+
+| Package | npm |
+|---|---|
+| `@paralock/zcash` | [npmjs.com/package/@paralock/zcash](https://www.npmjs.com/package/@paralock/zcash) |
+| `@paralock/adaptor` | [npmjs.com/package/@paralock/adaptor](https://www.npmjs.com/package/@paralock/adaptor) |
+| `@paralock/evm` | [npmjs.com/package/@paralock/evm](https://www.npmjs.com/package/@paralock/evm) |
+| `@paralock/sdk` | [npmjs.com/package/@paralock/sdk](https://www.npmjs.com/package/@paralock/sdk) |
+
+They are ESM, Node ≥ 20 (`@paralock/zcash` and `@paralock/adaptor` also run in browsers), MIT, and experimental:
+not audited.
+
+To publish a new version:
+1. Bump the version.
+2. Run `pnpm check:deps && pnpm build`.
+3. Run `pnpm --filter <package> publish --access public` in an interactive terminal; npm asks for 2FA.
 
 ## Roadmap
 
