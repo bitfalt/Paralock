@@ -142,6 +142,19 @@ export function parsePreSignatureRequest(body: unknown): AdaptorPreSignatureRequ
 // ---------------------------------------------------------------------------------------------------------------
 // Taker side: quotes from makers
 
+/**
+ * Bounds `parseQuote` puts on a quote's fields. A maker refuses a configuration beyond them (its quotes would be
+ * unparseable for every taker).
+ */
+export const QUOTE_FIELD_LIMITS = {
+  /** Longest `tokenSymbol`, in characters. */
+  tokenSymbolLength: 32,
+  /** Largest `zcashLockBlocks`. */
+  zcashLockBlocks: 100_000,
+  /** Largest `evmLockSeconds`. */
+  evmLockSeconds: 10_000_000,
+} as const;
+
 /** Parses a quote from untrusted JSON (bigints as decimal strings). Checks shape only; see `validateQuote`. */
 export function parseQuote(body: unknown): Quote {
   const q = object(body, "quote");
@@ -161,12 +174,12 @@ export function parseQuote(body: unknown): Quote {
     zecAmountZat: parseAmount(q.zecAmountZat, "quote.zecAmountZat", { max: MAX_ZAT }),
     usdAmount: parseAmount(q.usdAmount, "quote.usdAmount", { max: 10n ** 30n }),
     token: q.token as Hex,
-    tokenSymbol: string(q.tokenSymbol, "quote.tokenSymbol", 32),
+    tokenSymbol: string(q.tokenSymbol, "quote.tokenSymbol", QUOTE_FIELD_LIMITS.tokenSymbolLength),
     rate: q.rate as number,
     makerZcashPubkey: q.makerZcashPubkey as Hex,
     makerEvmAddress: q.makerEvmAddress as Hex,
-    zcashLockBlocks: parseInteger(q.zcashLockBlocks, "quote.zcashLockBlocks", { min: 1, max: 100_000 }),
-    evmLockSeconds: parseInteger(q.evmLockSeconds, "quote.evmLockSeconds", { min: 1, max: 10_000_000 }),
+    zcashLockBlocks: parseInteger(q.zcashLockBlocks, "quote.zcashLockBlocks", { min: 1, max: QUOTE_FIELD_LIMITS.zcashLockBlocks }),
+    evmLockSeconds: parseInteger(q.evmLockSeconds, "quote.evmLockSeconds", { min: 1, max: QUOTE_FIELD_LIMITS.evmLockSeconds }),
     expiresAt: parseInteger(q.expiresAt, "quote.expiresAt"),
   };
   if (q.chainId !== undefined) quote.chainId = parseInteger(q.chainId, "quote.chainId", { min: 1 });

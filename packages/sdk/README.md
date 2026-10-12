@@ -98,14 +98,24 @@ for (const swap of await taker.pendingSwaps()) {
 await taker.refund(id, { wait: false });         // throws "the refund opens at block N" instead of waiting
 ```
 
-`resume(id, { claim: true })` claims a swap that was started with `claim: false`; `resume(id, { relayClaim: false })`
-submits the claim from your own EVM account if the relayer refused (the SDK doesn't fall back by itself). A swap
+`resume(id, { claim: true })` claims a swap that was started with `claim: false` (or with `lockOnly`: in htlc mode the
+maker hears about it only then, so this works while the quote is still valid and otherwise fails fast with
+`quote_expired`; refund instead); `resume(id, { relayClaim: false })` submits the claim from your own EVM account if
+the relayer refused (the SDK doesn't fall back by itself). The claim's transaction hash is stored as soon as the node
+has it: after a crash or a receipt timeout, `resume` follows that transaction (until the lock expires) instead of sending
+a second claim, and sends a new one only if it reverted or left the network. A swap
 interrupted before its funding reached the network is resumed conservatively: one the maker never committed to
 (`prepared`) is abandoned; one it committed to (`reserved`, `proposed`) is broadcast late only while the funding is at
 least 5 blocks from its expiry height, at least `minZcashLockBlocks` of the refund window remain and the maker still
 holds the swap, and is abandoned otherwise. A funding that may already be on the network is never given up on before its
 expiry height. On the maker side, `await maker.start()` resumes every swap: it waits for the taker's funding, locks,
 watches for the claim, claims the ZEC (rebroadcasting until it confirms) or refunds after the EVM expiry.
+
+Both engines read records one at a time (stores with `keys`, as both built-in ones). A record that can't be used
+(corrupted, or written by another SDK version) never stops the others: it is moved to the store's `quarantine/`
+directory with its bytes intact and reported in an `ALERT` log line, and every other swap still resumes (the maker)
+or is still listed (`pendingSwaps`). Settle a quarantined swap by hand: it holds that swap's keys. If the store can't
+be read at all, `maker.start()` rejects and the next request tries again.
 
 ## API overview
 
@@ -114,13 +124,13 @@ watches for the claim, claims the ZEC (rebroadcasting until it confirms) or refu
 | Factories | `createTaker`, `createMaker`, `connectEvmChain`, `zcashKeyFrom`, `zcashNodeFrom`; options types `CreateTakerOptions`, `CreateMakerOptions`, `ZcashOptions` (`rpcUrl` or any `node: ZcashNode`), `EvmChainOptions`, `TakerEvmChainOptions` (`tokens`, `tokenDecimals`, `relayer`, `minConfirmations`, `minClaimWindowSeconds`), `MakerEvmChainOptions` (`token`) |
 | Taker | `Taker`: `quote`, `quoteExactOut`, `validateQuote`, `swap`, `lockOnly`, `resume(id, { claim, relayClaim })`, `refund(idOrSwap, { wait })`, `getSwap`, `pendingSwaps`, `freshRecipient(id)`; `TakerLimits` / `DEFAULT_TAKER_LIMITS`, `TakerTimeouts` / `DEFAULT_TAKER_TIMEOUTS`, `SwapOptions`, `MakerApi` |
 | Maker | `Maker`: `start`, `stop`, `quote`, `quoteExactOut`, `accept`, `proposeAdaptor`, `adaptorPreSignature`, `getSwap`, `getStage`, `listSwaps`; `MakerLimits` / `DEFAULT_MAKER_LIMITS`, `MakerStage` |
-| Persistence | `SwapStore`, `MemorySwapStore` (not durable), `FileSwapStore` (one file per record, atomic write + fsync + rename, dir 0700 / files 0600), `encodeRecord` / `decodeRecord` (JSON with bigints, for database-backed stores) |
+| Persistence | `SwapStore` (optional `keys` and `quarantine` let the engines load records one at a time), `MemorySwapStore` (not durable), `FileSwapStore` (one file per record, atomic write + fsync + rename, dir 0700 / files 0600, unusable records moved to `quarantine/`), `loadRecords` / `UnusableRecord`, `encodeRecord` / `decodeRecord` (JSON with bigints, for database-backed stores) |
 | Transport | `makerHandler(maker, { cors, maxBodyBytes = 16 KiB, exposeSwapList = false, onError })`, `HttpMakerApi(url, { timeoutMs = 30 s, retries = 2, headers })` (validates responses, maps error codes) |
-| Validation | `validateQuote`, `parseQuote`, `parseAcceptRequest`, `parseAdaptorProposal`, `parsePreSignatureRequest`, `parseAmount`, `isEvmAddress`, `isHex`, `DEFAULT_QUOTE_LIMITS` |
-| Errors | `ParalockError` with `code` and HTTP `status`: `invalid_request`, `quote_rejected`, `quote_expired`, `not_found`, `conflict`, `limit_exceeded`, `busy`, `insufficient_liquidity`, `unsafe_timeouts`, `lock_mismatch`, `unavailable`, `timeout`, `internal`; `SwapFailedError` (carries `swap`); `isParalockError` |
+| Validation | `validateQuote`, `parseQuote`, `QUOTE_FIELD_LIMITS` (the maker refuses a configuration beyond them), `parseAcceptRequest`, `parseAdaptorProposal`, `parsePreSignatureRequest`, `parseAmount`, `isEvmAddress`, `isHex`, `DEFAULT_QUOTE_LIMITS` |
+| Errors | `ParalockError` with `code` and HTTP `status`: `invalid_request`, `quote_rejected`, `quote_expired`, `not_found`, `conflict`, `limit_exceeded`, `busy`, `insufficient_liquidity`, `unsafe_timeouts`, `lock_mismatch`, `unavailable`, `timeout`, `internal`; `SwapFailedError` (carries `swap`, not enumerable, so logging the error doesn't print it); `isParalockError`; `errorMessage` (a viem error's short message: no calldata or RPC URL) |
 | Policy and pricing | `TimeoutPolicy`, `MAINNET_POLICY` (144 blocks, 1 h EVM lock, 2 confirmations, 2× safety), `DEVNET_POLICY`, `assertSafeWindows`, `zecUsdPrice({ fallback?, cacheMs, maxStaleMs, timeoutMs, url })`, `zatToUsdUnits`, `usdUnitsToZat` |
 | Robustness | `retry`, `pollUntil`, `sleep`, `backoffDelay`, `isUnspent`, `assertNoUpgradeBefore` |
-| Engine interfaces | `EvmClient`, `AdaptorEvmClient`, `ChainClients`, `evmClientFrom`, `adaptorClientFrom` (implement the interfaces yourself to use another EVM library or a custody API) |
+| Engine interfaces | `EvmClient`, `AdaptorEvmClient` (`claim` takes `ClaimOptions`; optional `transactionStatus` returns a `TransactionStatus`), `ChainClients`, `evmClientFrom`, `adaptorClientFrom` (implement the interfaces yourself to use another EVM library or a custody API) |
 | Privacy | `PrivacyOptions` (`freshRecipient`, `relayClaim`, `standardAmountsOnly`, `jitterMs`), `STANDARD_AMOUNTS_ZAT`, `freshEvmAccount`, `evmAddressOf` |
 | Protocol | `adaptorSpends`, `AdaptorProposal`, `AdaptorProposalAccepted`, `Quote`, `Swap`, `SwapStatus` |
 | Devnet | `devnetTaker`, `devnetMaker`, `DevnetSwapRunner`, `ThsClient`, `loadDevnetFile`, `devnetStorePath` (built on the same factories) |
@@ -169,6 +179,17 @@ valid until mined.
   after `minEvmConfirmations`, and the lock must have at least `minClaimWindowSeconds` left both when verified and
   when claiming. A claim mined after the expiry reverts but still reveals the secret: on Ethereum L1, set the claim
   window to several minutes and raise `minConfirmations` against reorgs.
+- **Locks the maker sends.** It persists that it sent a lock before sending it, and never drops a swap whose lock could
+  still be mined (until the lock's expiry). A lock someone else made under the same hashlock first is never taken for
+  the maker's own: the swap is dropped (once the maker's own lock can no longer be mined) and nothing is locked.
+- **Claims the taker sends.** The receipt wait lasts at most the time the lock has left, and the claim's hash is stored
+  before that wait, so a restart follows it instead of sending another.
+- **No secrets in errors or logs.** Claim errors are redacted (viem's full messages echo the call's arguments, such
+  as the preimage), `SwapFailedError.swap` is not enumerable, and `Maker`, `Taker` and `MemorySwapStore` print a
+  summary under `util.inspect`. The records themselves hold secrets: treat the store like a wallet file.
+- **Maker configuration.** Refused at construction if its quotes would fail a taker's `parseQuote` (token symbol of 1
+  to 32 characters, token and accounts as addresses, `policy.zcashLockBlocks` ≤ 100,000, `policy.evmLockSeconds` ≤
+  10,000,000) or its limits are incoherent.
 - **Maker re-checks.** The redeem script must match the template byte for byte and pay the maker's key; the funding
   output must hold exactly the proposed value (private mode) with `minZcashConfirmations`; the Zcash window is checked
   again right before locking, so a taker can't stall until its refund is close; private-mode proposals are refused if

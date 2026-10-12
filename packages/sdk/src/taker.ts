@@ -36,13 +36,13 @@ import {
   adaptorSpends,
 } from "./adaptor-protocol.js";
 import { ParalockError, SwapFailedError, errorMessage, isParalockError } from "./errors.js";
-import type { AdaptorEvmClient, AdaptorEvmSwap, EvmClient, EvmSwap } from "./evm-client.js";
+import type { AdaptorEvmClient, AdaptorEvmSwap, ClaimOptions, EvmClient, EvmOutcome, EvmSwap } from "./evm-client.js";
 import type { AcceptRequest } from "./maker.js";
 import { FUNDING_BROADCAST_MARGIN_BLOCKS, FUNDING_EXPIRY_MARGIN_BLOCKS } from "./policy.js";
 import { type PrivacyOptions, evmAddressOf, freshEvmAccount, isStandardAmount, jitter } from "./privacy.js";
 import { pollUntil } from "./retry.js";
 import { fromHex, newSecret } from "./secret.js";
-import { MemorySwapStore, type SwapStore } from "./store.js";
+import { MemorySwapStore, type SwapStore, loadRecords } from "./store.js";
 import { assertNoUpgradeBefore, isUnspent } from "./zcash-node.js";
 import type { EvmChain, Hex, Quote, Swap, SwapEvent, SwapMode, SwapStatus } from "./types.js";
 import { DEFAULT_QUOTE_LIMITS, type QuoteLimits, isEvmAddress, isHex, validateQuote } from "./validation.js";
@@ -223,12 +223,18 @@ export interface TakerSwapRecord {
     escrow?: AdaptorEvmSwap;
   };
   freshRecipient?: { address: Hex; privateKey: Hex };
+  /**
+   * The EVM claim: when it was sent, whether through the relayer, and its transaction hash once the node accepted it
+   * (persisted before waiting for it to be mined). `resume` follows that transaction instead of sending a second claim.
+   */
+  claim?: { at: number; relayed: boolean; hash?: Hex };
   refund?: { txid: string; hex: string };
   error?: string;
   updatedAt: number;
 }
 
 const DONE: readonly TakerStage[] = ["claimed", "completed", "refunded", "abandoned"];
+const STAGES: readonly TakerStage[] = ["prepared", "reserved", "proposed", "funded", "accepted", "locked", ...DONE];
 /** Stages in which the funding may not have reached the network yet. */
 const UNFUNDED: readonly TakerStage[] = ["prepared", "reserved", "proposed"];
 /** A quote counts as expired locally only this long after its `expiresAt` (the maker's clock may run behind ours). */
@@ -239,6 +245,43 @@ const fmt = (units: bigint, decimals = 6) => (Number(units) / 10 ** decimals).to
 const hex = (b: Uint8Array): Hex => `0x${bytesToHex(b)}`;
 const unhex = (h: string) => h.replace(/^0x/, "");
 const hex32 = (n: bigint): Hex => `0x${n.toString(16).padStart(64, "0")}`;
+const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+/** Node's `util.inspect` hook: the taker prints a summary, never its key or store. */
+const INSPECT = Symbol.for("nodejs.util.inspect.custom");
+
+/**
+ * Why a persisted swap can't be used (undefined if it can): what `pendingSwaps`, `resume` and `refund` read. A record
+ * of another version is refused too.
+ */
+function swapRecordProblem(r: Record<string, unknown>, key: string): string | undefined {
+  if (r.kind !== "taker-swap") return "not a taker swap";
+  if (r.version !== 1) return "unsupported record version (written by another SDK version?)";
+  if (typeof r.id !== "string" || key !== PREFIX + r.id) return "its id doesn't match its key";
+  if (!STAGES.includes(r.stage as TakerStage)) return "unknown stage";
+  const { swap, funding } = r;
+  if (!isObject(swap) || typeof swap.id !== "string" || typeof swap.status !== "string" || !isObject(swap.quote) || !isObject(swap.zcash) || !isObject(swap.evm)) {
+    return "incomplete swap";
+  }
+  if (!isObject(funding) || [typeof funding.hex, typeof funding.txid, typeof funding.vout, typeof funding.expiryHeight].join() !== "string,string,number,number") {
+    return "incomplete funding";
+  }
+  if (!isObject(r.options) || typeof r.returnAddress !== "string") return "incomplete record";
+  if (!(isObject(r.htlc) && typeof r.htlc.secret === "string") && !(isObject(r.adaptor) && typeof r.adaptor.secret === "string")) return "no secret";
+  return undefined;
+}
+
+/**
+ * `text` with every occurrence of each hex value in `secrets` (with or without `0x`, any case) replaced by
+ * `[redacted]`, for error messages that may echo a call's arguments.
+ */
+function redact(text: string, secrets: readonly string[]): string {
+  let out = text;
+  for (const secret of secrets) {
+    const bare = secret.replace(/^0x/i, "");
+    if (/^[0-9a-f]{32,}$/i.test(bare)) out = out.replace(new RegExp(bare, "gi"), "[redacted]");
+  }
+  return out;
+}
 
 /**
  * The taker side of a ZEC → stablecoin swap. It holds the secret (htlc) or the adaptor secret (adaptor mode), which
@@ -271,6 +314,11 @@ export class Taker {
   /** The transparent address this taker funds swaps from. */
   get zcashAddress(): string {
     return keyAddress(this.cfg.zcashKey, this.cfg.network);
+  }
+
+  /** A summary: `util.inspect` (and `console.log`) never print the taker's key or store. */
+  [INSPECT](): string {
+    return `Taker { address: ${this.zcashAddress}, chains: [${Object.keys(this.cfg.chains).join(", ")}] }`;
   }
 
   private log(message: string) {
@@ -433,9 +481,18 @@ export class Taker {
     return (await this.store.get<TakerSwapRecord>(PREFIX + id))?.swap;
   }
 
-  /** Persisted swaps that are not finished (their ZEC may still be locked). */
+  /**
+   * Persisted swaps that are not finished (their ZEC may still be locked). Records are read one at a time (with a store
+   * that has `keys`): one that can't be used (corrupted, or written by another SDK version) is moved aside with
+   * `store.quarantine`, reported in an `ALERT` log line and left out; the others are still listed.
+   */
   async pendingSwaps(): Promise<Swap[]> {
-    const all = await this.store.list<TakerSwapRecord>(PREFIX);
+    const all = await loadRecords<TakerSwapRecord>(this.store, PREFIX, swapRecordProblem, (u) =>
+      this.log(
+        `ALERT unusable swap record ${u.key} (${u.reason}); ${u.quarantinedTo ? `moved to ${u.quarantinedTo}` : "left in place"}. ` +
+          "Its ZEC may still be locked: inspect the record by hand (it holds the swap's secrets).",
+      ),
+    );
     return all.filter(({ record }) => !DONE.includes(record.stage)).map(({ record }) => record.swap);
   }
 
@@ -701,8 +758,30 @@ export class Taker {
     await this.transition(record, "accepted");
   }
 
+  /**
+   * A funded htlc swap the maker was never told about (`lockOnly`, resumed with `claim: true`): send the accept now
+   * (an idempotent repeat for one it already has). If the quote has expired the maker will never lock: fail fast; the
+   * ZEC comes back with `refund` after the refund height.
+   */
+  private async tellMaker(record: TakerSwapRecord) {
+    if (record.reservedAt !== undefined) return;
+    try {
+      await this.cfg.maker.accept(this.acceptRequest(record, false));
+    } catch (err) {
+      if (!isParalockError(err) || err.code !== "quote_expired") throw err;
+      throw new ParalockError(
+        "quote_expired",
+        `the maker was never told about this swap (it was started with lockOnly) and the quote has expired, so it will not lock; ` +
+          `refund the ZEC from block ${record.swap.zcash.refundHeight}`,
+      );
+    }
+    record.reservedAt = Date.now();
+    await this.save(record);
+  }
+
   private async verifyHtlcLock(record: TakerSwapRecord) {
     const { swap } = record;
+    await this.tellMaker(record);
     const c = this.chain(swap.quote.chain);
     const lock = await this.waitForLock(record, () => c.htlc.getLock(swap.hashlock!), c.htlc, c.minConfirmations);
     this.checkTerms(record, lock.swap);
@@ -853,34 +932,42 @@ export class Taker {
     const c = this.chain(swap.quote.chain);
     const privacy = record.options.privacy ?? {};
     const relayer = privacy.relayClaim ? c.relayer : undefined;
-    // After a restart the claim may already be on-chain.
-    const prior = record.adaptor ? await c.adaptor!.outcome(swap.adaptor!.escrowId!) : await c.htlc.outcome(swap.hashlock!);
-    if (prior.status === "claimed") {
+    const own = record.adaptor ? c.adaptor! : c.htlc;
+    const outcome = (): Promise<EvmOutcome<object>> => (record.adaptor ? c.adaptor!.outcome(swap.adaptor!.escrowId!) : c.htlc.outcome(swap.hashlock!));
+    const found = async () => {
       await this.transition(record, "claimed", "evm_claimed", { chain: swap.quote.chain, detail: "Claim found on-chain" });
       return this.followMaker(record);
-    }
+    };
+    // After a restart the claim may already be on-chain.
+    const prior = await outcome();
+    if (prior.status === "claimed") return found();
     if (prior.status === "refunded") throw new ParalockError("lock_mismatch", "the maker's lock was refunded before we claimed");
+    // A claim sent before a restart or a receipt timeout may still be mined: follow it rather than send a second one.
+    if (await this.followSentClaim(record, own, outcome)) return found();
     await jitter(privacy.jitterMs);
     let claimTx: Hex;
     let relayed: boolean;
     if (record.adaptor) {
       const a = record.adaptor;
       const escrow = c.adaptor!;
-      await this.assertClaimWindow(record, escrow, a.escrow!.expiry);
+      const secondsLeft = await this.assertClaimWindow(record, escrow, a.escrow!.expiry);
       // Complete the release signature with our secret. The signature reveals the secret to the maker only.
       const digest = await escrow.claimDigest(swap.adaptor!.escrowId!);
       const sig = adapt(decodePreSignature(a.evmPreSignature!), unhex(a.secret));
       const v = 27 + recoveryId(unhex(a.accepted!.signerPubkey), unhex(digest), sig);
       const claimer = relayer?.adaptor ?? escrow;
       relayed = claimer !== escrow;
-      claimTx = await this.submitClaim(relayed, () => claimer.claim(a.escrow!, { v, r: hex32(sig.r), s: hex32(sig.s) }));
+      const options = await this.trackClaim(record, relayed, secondsLeft);
+      const signature = { v, r: hex32(sig.r), s: hex32(sig.s) };
+      claimTx = await this.submitClaim(relayed, [a.secret, signature.r, signature.s], () => claimer.claim(a.escrow!, signature, options));
     } else {
       const lock = await c.htlc.getLockedSwap(swap.hashlock!);
       if (!lock) throw new ParalockError("lock_mismatch", "the maker's lock disappeared");
-      await this.assertClaimWindow(record, c.htlc, lock.expiry);
+      const secondsLeft = await this.assertClaimWindow(record, c.htlc, lock.expiry);
       const claimer = relayer?.htlc ?? c.htlc;
       relayed = claimer !== c.htlc;
-      claimTx = await this.submitClaim(relayed, () => claimer.claim(lock, record.htlc!.secret));
+      const options = await this.trackClaim(record, relayed, secondsLeft);
+      claimTx = await this.submitClaim(relayed, [record.htlc!.secret], () => claimer.claim(lock, record.htlc!.secret, options));
     }
     swap.evm.claimTx = claimTx;
     const amount = `${fmt(swap.evm.amount, c.tokenDecimals)} ${swap.quote.tokenSymbol}`;
@@ -894,16 +981,70 @@ export class Taker {
     await this.followMaker(record);
   }
 
-  /** Submits a claim; a relayer's failure says how to claim from your own account instead. */
-  private async submitClaim(relayed: boolean, send: () => Promise<Hex>): Promise<Hex> {
+  /**
+   * Persists that a claim is about to be sent, and returns the claim options: `onSent` persists its hash as soon as the
+   * node has it, and the receipt wait lasts at most the time the lock has left (a claim mined later reverts).
+   */
+  private async trackClaim(record: TakerSwapRecord, relayed: boolean, secondsLeft: bigint): Promise<ClaimOptions> {
+    record.claim = { at: Date.now(), relayed };
+    await this.save(record);
+    return {
+      onSent: async (hash) => {
+        record.claim = { ...record.claim!, hash };
+        await this.save(record);
+      },
+      receiptTimeoutMs: Math.max(1_000, Number(secondsLeft) * 1_000),
+    };
+  }
+
+  /**
+   * Follows the claim sent earlier (`record.claim.hash`) until it lands. Returns true once the lock is claimed, false
+   * if a new claim should be sent (that one reverted or left the network, or it can't be looked up). Throws if the lock
+   * was refunded, or expired while that claim was still pending (a claim mined after the expiry reverts).
+   */
+  private async followSentClaim(record: TakerSwapRecord, client: EvmClient | AdaptorEvmClient, outcome: () => Promise<EvmOutcome<object>>): Promise<boolean> {
+    const hash = record.claim?.hash;
+    if (!hash || !client.transactionStatus) return false;
+    const status = await client.transactionStatus(hash);
+    if (status === "reverted" || status === "unknown") {
+      this.log(`the claim ${hash} sent earlier ${status === "reverted" ? "reverted" : "is no longer on the network"}; sending a new one`);
+      return false;
+    }
+    const expiry = BigInt(record.swap.evm.expiry!);
+    const secondsLeft = Number(expiry - (await client.now()));
+    this.log(`following the claim ${hash} sent earlier (${status})`);
+    const result = await this.poll(
+      async () => {
+        const o = await outcome();
+        if (o.status === "claimed" || o.status === "refunded") return o.status;
+        const now = await client.transactionStatus!(hash);
+        if (now === "reverted" || now === "unknown") return now;
+        if (now === "success") return undefined; // mined: the outcome shows the claim once the node serves its event
+        return (await client.now()) >= expiry ? "expired" : undefined;
+      },
+      `the claim ${hash}`,
+      Math.max(0, secondsLeft) * 1_000 + 60_000,
+    );
+    if (result === "claimed") return true;
+    if (result === "refunded") throw new ParalockError("lock_mismatch", "the maker's lock was refunded before our claim was mined");
+    if (result === "expired") throw new ParalockError("timeout", `the claim ${hash} was not mined before the maker's lock expired`);
+    this.log(`the claim ${hash} sent earlier ${result === "reverted" ? "reverted" : "left the network"}; sending a new one`);
+    return false;
+  }
+
+  /**
+   * Submits a claim. Its errors may echo the call's arguments (viem's full messages do), so only a message with the
+   * secrets redacted is kept, never the error itself. A relayer's failure says how to claim from your own account.
+   */
+  private async submitClaim(relayed: boolean, secrets: readonly string[], send: () => Promise<Hex>): Promise<Hex> {
     try {
       return await send();
     } catch (err) {
-      if (!relayed) throw err;
+      const message = redact(errorMessage(err), secrets);
+      if (!relayed) throw new ParalockError(isParalockError(err) ? err.code : "internal", `the claim failed: ${message}`);
       throw new ParalockError(
         isParalockError(err) ? err.code : "unavailable",
-        `the relayer did not submit the claim (${errorMessage(err)}); \`resume(id, { relayClaim: false })\` submits it from your own account before the lock expires`,
-        { cause: err },
+        `the relayer did not submit the claim (${message}); \`resume(id, { relayClaim: false })\` submits it from your own account before the lock expires`,
       );
     }
   }
@@ -989,10 +1130,13 @@ export class Taker {
     if (locked.amount < swap.quote.usdAmount) throw new ParalockError("lock_mismatch", "lock is smaller than quoted");
   }
 
-  private async assertClaimWindow(record: TakerSwapRecord, client: EvmClient | AdaptorEvmClient, expiry: bigint) {
+  /** Throws unless the lock has at least the claim window left; returns the seconds it has left. */
+  private async assertClaimWindow(record: TakerSwapRecord, client: EvmClient | AdaptorEvmClient, expiry: bigint): Promise<bigint> {
     const c = this.chain(record.swap.quote.chain);
     const min = BigInt(c.minClaimWindowSeconds ?? this.limits.minClaimWindowSeconds);
-    if (expiry - (await client.now()) < min) throw new ParalockError("timeout", "the maker's lock expires too soon to claim safely");
+    const left = expiry - (await client.now());
+    if (left < min) throw new ParalockError("timeout", "the maker's lock expires too soon to claim safely");
+    return left;
   }
 
   private async waitForLock<S>(
@@ -1056,6 +1200,8 @@ export class Taker {
   private async load(id: string): Promise<TakerSwapRecord> {
     const record = await this.store.get<TakerSwapRecord>(PREFIX + id);
     if (!record) throw new ParalockError("not_found", `no swap ${id} in this taker's store`);
+    const problem = isObject(record) ? swapRecordProblem(record as unknown as Record<string, unknown>, PREFIX + id) : "not an object";
+    if (problem) throw new ParalockError("internal", `the record of swap ${id} can't be used (${problem}); inspect it by hand`);
     return record;
   }
 

@@ -78,20 +78,28 @@ export function isParalockError(err: unknown): err is ParalockError {
 /**
  * A swap failed after the taker's ZEC was locked. The swap is persisted in the taker's store, so it can be refunded
  * (`taker.refund(err.swap.id)`) even after a restart.
+ *
+ * `swap` is the taker's own view (in private mode it carries the adaptor point and the maker's pre-signature). It is
+ * not enumerable, so logging or serializing the error (`console.error(err)`, `JSON.stringify(err)`) leaves it out.
  */
 export class SwapFailedError extends ParalockError {
   override name = "SwapFailedError";
-  constructor(
-    readonly swap: Swap,
-    cause: unknown,
-  ) {
-    super(
-      isParalockError(cause) ? cause.code : "internal",
-      cause instanceof Error ? cause.message : String(cause),
-      { cause },
-    );
+  declare readonly swap: Swap;
+
+  constructor(swap: Swap, cause: unknown) {
+    super(isParalockError(cause) ? cause.code : "internal", errorMessage(cause), { cause });
+    Object.defineProperty(this, "swap", { value: swap, enumerable: false });
   }
 }
 
-/** Message of any thrown value. */
-export const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+/**
+ * Message of any thrown value. For viem errors (they have a `shortMessage`) it is the short message plus the node's
+ * `details`: their full message adds the call's arguments, calldata and RPC URL, which can hold a secret (a claim's
+ * preimage or signature) or an API key.
+ */
+export const errorMessage = (err: unknown): string => {
+  if (!(err instanceof Error)) return String(err);
+  const { shortMessage, details } = err as Error & { shortMessage?: unknown; details?: unknown };
+  if (typeof shortMessage !== "string" || shortMessage === "") return err.message;
+  return typeof details === "string" && details !== "" && !shortMessage.includes(details) ? `${shortMessage} (${details})` : shortMessage;
+};

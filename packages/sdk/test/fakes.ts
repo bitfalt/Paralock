@@ -188,13 +188,64 @@ export class FakeEvmChain {
 const txHash = (n: number): Hex => `0x${n.toString(16).padStart(64, "0")}`;
 let nonce = 1;
 
+/**
+ * Transactions of one escrow: mined ones with their result, and stalled ones (broadcast, but their receipt wait timed
+ * out) that `minePending` mines and `dropPending` drops, like a node's mempool.
+ */
+class TxPool {
+  /** Claims broadcast so far (mined, stalled or reverted). */
+  claimsSent = 0;
+  /** The next `n` claims are broadcast but not mined: the sender's receipt wait times out. */
+  stallClaims = 0;
+  /** The next `n` locks are broadcast but not mined: the sender's receipt wait times out. */
+  stallLocks = 0;
+  private readonly pending = new Map<Hex, () => boolean>();
+  private readonly results = new Map<Hex, "success" | "reverted">();
+
+  /**
+   * Broadcasts a transaction: `apply` runs when it is mined (now, or at `minePending` if `stall`) and returns false if
+   * it reverts. Calls `onSent` with the hash first, as a real client does once the node accepted it.
+   */
+  async send(apply: () => boolean, stall: boolean, onSent?: (hash: Hex) => unknown): Promise<Hex> {
+    const hash = txHash(nonce++);
+    await onSent?.(hash);
+    if (stall) {
+      this.pending.set(hash, apply);
+      throw new Error(`timed out waiting for the receipt of ${hash}`);
+    }
+    const ok = apply();
+    this.results.set(hash, ok ? "success" : "reverted");
+    if (!ok) throw new Error(`transaction ${hash} reverted`);
+    return hash;
+  }
+
+  /** Mines every stalled transaction, in order. */
+  minePending() {
+    for (const [hash, apply] of [...this.pending]) {
+      this.pending.delete(hash);
+      this.results.set(hash, apply() ? "success" : "reverted");
+    }
+  }
+
+  /** Drops every stalled transaction (evicted from the mempool, never mined). */
+  dropPending() {
+    this.pending.clear();
+  }
+
+  status(hash: Hex): "pending" | "success" | "reverted" | "unknown" {
+    return this.pending.has(hash) ? "pending" : (this.results.get(hash) ?? "unknown");
+  }
+}
+
 /** ParalockHTLC semantics in memory. */
-export class FakeHtlc {
+export class FakeHtlc extends TxPool {
   readonly locks = new Map<string, { swap: EvmSwap; status: "active" | "claimed" | "refunded"; block: bigint; preimage?: Hex; tx: Hex }>();
   constructor(
     readonly evm: FakeEvmChain,
     readonly contract: Hex,
-  ) {}
+  ) {
+    super();
+  }
 
   /** A client for `address` (the account sending transactions). */
   client(address: Hex): EvmClient {
@@ -209,25 +260,40 @@ export class FakeHtlc {
       rpcChainId: async () => evm.chainId,
       tokenBalance: async (token, owner) => (token.toLowerCase() === evm.token.toLowerCase() ? (evm.balances.get((owner ?? address).toLowerCase()) ?? 0n) : 0n),
       lock: async (swap) => {
+        // The simulation, then the transaction itself (re-checked when it is mined).
         if (swap.sender.toLowerCase() !== address.toLowerCase()) throw new Error("NotSender");
         if (this.locks.has(swap.hashlock)) throw new Error("HashlockUsed");
         if (swap.expiry <= evm.time) throw new Error("InvalidExpiry");
-        evm.move(address, this.contract, swap.amount);
-        evm.tick();
-        const tx = txHash(nonce++);
-        this.locks.set(swap.hashlock, { swap, status: "active", block: evm.block, tx });
-        return tx;
+        const stall = this.stallLocks > 0;
+        if (stall) this.stallLocks--;
+        let hash: Hex | undefined;
+        const apply = () => {
+          if (this.locks.has(swap.hashlock) || swap.expiry <= evm.time) return false;
+          evm.move(address, this.contract, swap.amount);
+          evm.tick();
+          this.locks.set(swap.hashlock, { swap, status: "active", block: evm.block, tx: hash! });
+          return true;
+        };
+        return this.send(apply, stall, (h) => (hash = h));
       },
-      claim: async (swap, preimage) => {
+      claim: async (swap, preimage, options) => {
         const l = this.locks.get(swap.hashlock);
         if (!l || l.status !== "active") throw new Error("SwapNotActive");
         if (evm.time >= swap.expiry) throw new Error("SwapExpired");
         if (`0x${bytesToHex(sha256(hexToBytes(preimage.slice(2))))}` !== swap.hashlock) throw new Error("InvalidPreimage");
-        evm.move(this.contract, swap.recipient, swap.amount);
-        evm.tick();
-        Object.assign(l, { status: "claimed", preimage });
-        return txHash(nonce++);
+        this.claimsSent++;
+        const stall = this.stallClaims > 0;
+        if (stall) this.stallClaims--;
+        const apply = () => {
+          if (l.status !== "active" || evm.time >= swap.expiry) return false;
+          evm.move(this.contract, swap.recipient, swap.amount);
+          evm.tick();
+          Object.assign(l, { status: "claimed", preimage });
+          return true;
+        };
+        return this.send(apply, stall, options?.onSent);
       },
+      transactionStatus: async (hash) => this.status(hash),
       refund: async (swap) => {
         const l = this.locks.get(swap.hashlock);
         if (!l || l.status !== "active") throw new Error("SwapNotActive");
@@ -254,12 +320,14 @@ export class FakeHtlc {
 }
 
 /** ParalockAdaptorEscrow semantics in memory, with real id/digest computation and signature recovery. */
-export class FakeAdaptorEscrow {
+export class FakeAdaptorEscrow extends TxPool {
   readonly locks = new Map<string, { swap: AdaptorEvmSwap; status: "active" | "claimed" | "refunded"; block: bigint; sig?: EvmSignature; tx: Hex }>();
   constructor(
     readonly evm: FakeEvmChain,
     readonly contract: Hex,
-  ) {}
+  ) {
+    super();
+  }
 
   client(address: Hex): AdaptorEvmClient {
     const evm = this.evm;
@@ -285,7 +353,7 @@ export class FakeAdaptorEscrow {
         this.locks.set(id, { swap, status: "active", block: evm.block, tx });
         return { hash: tx, id };
       },
-      claim: async (swap, sig) => {
+      claim: async (swap, sig, options) => {
         const id = adaptorSwapId(swap);
         const l = this.locks.get(id);
         if (!l || l.status !== "active") throw new Error("SwapNotActive");
@@ -294,11 +362,19 @@ export class FakeAdaptorEscrow {
           .addRecoveryBit(sig.v - 27)
           .recoverPublicKey(hexToBytes(digest(id).slice(2)));
         if (evmAddressOf(recovered.toBytes(true)).toLowerCase() !== swap.signer.toLowerCase()) throw new Error("InvalidSignature");
-        evm.move(this.contract, swap.recipient, swap.amount);
-        evm.tick();
-        Object.assign(l, { status: "claimed", sig });
-        return txHash(nonce++);
+        this.claimsSent++;
+        const stall = this.stallClaims > 0;
+        if (stall) this.stallClaims--;
+        const apply = () => {
+          if (l.status !== "active" || evm.time >= swap.expiry) return false;
+          evm.move(this.contract, swap.recipient, swap.amount);
+          evm.tick();
+          Object.assign(l, { status: "claimed", sig });
+          return true;
+        };
+        return this.send(apply, stall, options?.onSent);
       },
+      transactionStatus: async (hash) => this.status(hash),
       refund: async (swap) => {
         const l = this.locks.get(adaptorSwapId(swap));
         if (!l || l.status !== "active") throw new Error("SwapNotActive");

@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { inspect } from "node:util";
 import { adaptorKeyPair, encodePreSignature, preSign } from "@paralock/adaptor";
 import {
   FUNDING_EXPIRY_DELTA,
@@ -16,14 +20,16 @@ import {
 } from "@paralock/zcash";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AdaptorProposal, adaptorSpends } from "../src/adaptor-protocol.js";
-import { ParalockError, SwapFailedError } from "../src/errors.js";
-import { HttpMakerApi, makerHandler } from "../src/http.js";
-import { type AcceptRequest, Maker, type MakerLimits, type MakerSwapRecord } from "../src/maker.js";
+import { ParalockError, SwapFailedError, errorMessage } from "../src/errors.js";
+import type { AdaptorEvmClient, ChainClients, EvmClient } from "../src/evm-client.js";
+import { HttpMakerApi, makerHandler, toJson } from "../src/http.js";
+import { type AcceptRequest, Maker, type MakerConfig, type MakerLimits, type MakerSwapRecord } from "../src/maker.js";
 import type { TimeoutPolicy } from "../src/policy.js";
 import { fromHex, newSecret } from "../src/secret.js";
-import { MemorySwapStore } from "../src/store.js";
+import { FileSwapStore, MemorySwapStore, type SwapStore } from "../src/store.js";
 import { type MakerApi, Taker, type TakerConfig, type TakerSwapRecord } from "../src/taker.js";
 import type { Hex, Quote, Swap } from "../src/types.js";
+import { parseQuote } from "../src/validation.js";
 import { FakeAdaptorEscrow, FakeEvmChain, FakeHtlc, FakeZcash } from "./fakes.js";
 
 const TOKEN: Hex = "0x20c000000000000000000000975247ebc585d0ad";
@@ -48,7 +54,7 @@ afterEach(async () => {
   await Promise.all(makers.splice(0).map((m) => m.stop()));
 });
 
-function world(opts: { makerLimits?: Partial<MakerLimits> } = {}) {
+function world(opts: { makerLimits?: Partial<MakerLimits>; makerStore?: SwapStore; takerStore?: SwapStore } = {}) {
   const zcash = new FakeZcash();
   nodes.push(zcash);
   const evm = new FakeEvmChain("tempo", 31337, TOKEN);
@@ -58,18 +64,27 @@ function world(opts: { makerLimits?: Partial<MakerLimits> } = {}) {
   const makerKey = randomKeyPair();
   const takerKey = randomKeyPair();
   zcash.faucet(keyScriptPubKey(takerKey), 1_000_000_000n);
-  const makerStore = new MemorySwapStore();
-  const takerStore = new MemorySwapStore();
+  const makerStore = opts.makerStore ?? new MemorySwapStore();
+  const takerStore = opts.takerStore ?? new MemorySwapStore();
   const logs: string[] = [];
-  const newMaker = () => {
+  /** The maker's tempo clients; `overrides` replaces some of them (e.g. a wrapped htlc client). */
+  const makerChain = (overrides: Partial<ChainClients> = {}): ChainClients => ({
+    chain: "tempo",
+    chainId: 31337,
+    token: TOKEN,
+    tokenSymbol: "OUSD",
+    tokenDecimals: 6,
+    htlc: htlc.client(MAKER_EVM),
+    adaptor: escrow.client(MAKER_EVM),
+    ...overrides,
+  });
+  const newMaker = (extra: Partial<MakerConfig> = {}) => {
     const maker = new Maker({
       network: "regtest",
       zcash,
       zcashKey: makerKey,
       zcashPayoutAddress: keyAddress(makerKey, "regtest"),
-      chains: {
-        tempo: { chain: "tempo", chainId: 31337, token: TOKEN, tokenSymbol: "OUSD", tokenDecimals: 6, htlc: htlc.client(MAKER_EVM), adaptor: escrow.client(MAKER_EVM) },
-      },
+      chains: { tempo: makerChain() },
       price: async () => 1_000,
       spreadBps: 50,
       policy: POLICY,
@@ -77,6 +92,7 @@ function world(opts: { makerLimits?: Partial<MakerLimits> } = {}) {
       pollIntervalMs: 5,
       limits: opts.makerLimits,
       log: (m) => logs.push(m),
+      ...extra,
     });
     makers.push(maker);
     return maker;
@@ -94,10 +110,11 @@ function world(opts: { makerLimits?: Partial<MakerLimits> } = {}) {
       limits: { minClaimWindowSeconds: 15 },
       timeouts: { pollIntervalMs: 5, followMakerMs: 3_000, makerLockMs: 5_000, fundingConfirmationMs: 5_000 },
       mineZcash: (n) => zcash.generate(n),
+      log: (m) => logs.push(m),
       ...config,
     });
   };
-  return { zcash, evm, htlc, escrow, makerKey, takerKey, makerStore, takerStore, newMaker, newTaker, logs };
+  return { zcash, evm, htlc, escrow, makerKey, takerKey, makerStore, takerStore, makerChain, newMaker, newTaker, logs };
 }
 
 /** MakerApi over an in-process maker that may be swapped out (simulates a maker restart behind the same URL). */
@@ -949,5 +966,386 @@ describe("relayed claims", () => {
     expect(done.status).toBe("completed");
     expect(done.evm.recipient).toBe(fresh!.address);
     expect(w.evm.balances.get(fresh!.address.toLowerCase())).toBe(quote.usdAmount);
+  });
+});
+
+const SQUATTER: Hex = "0x90f79bf6eb2c4f870365e785982e1f101e93b906";
+const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("failure handling", () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+  async function tempDir(name: string) {
+    const dir = await mkdtemp(join(tmpdir(), "paralock-engines-"));
+    dirs.push(dir);
+    return join(dir, name);
+  }
+
+  describe("an unreadable record never stops the others", () => {
+    it("maker: quarantines unreadable records, still serves requests and settles every readable swap", async () => {
+      const dir = await tempDir("maker");
+      const w = world({ makerStore: new FileSwapStore(dir) });
+      let maker = w.newMaker();
+      const api = proxy(() => maker);
+      const swap = await w.newTaker(api).swap(await w.newTaker(api).quote(100_000_000n, "tempo", "htlc"), { claim: false });
+      expect(swap.status).toBe("evm_locked");
+      await maker.stop();
+      // A torn file, a record of another schema version, a quote record without its quote, and a copy of the real
+      // record filed under another key.
+      const copy = await readFile(join(dir, `maker~swap~${swap.id}.json`), "utf8");
+      const bad: Record<string, string> = {
+        [`maker~swap~0x${"ab".repeat(32)}.json`]: '{"kind":"maker-swap","version":1,"id":',
+        [`maker~swap~0x${"cd".repeat(32)}.json`]: JSON.stringify({ kind: "maker-swap", version: 2, id: `0x${"cd".repeat(32)}`, stage: "locked" }),
+        [`maker~quote~${randomUUID()}.json`]: JSON.stringify({ kind: "maker-quote" }),
+        [`maker~swap~0x${"ef".repeat(32)}.json`]: copy,
+      };
+      for (const [file, content] of Object.entries(bad)) await writeFile(join(dir, file), content);
+
+      maker = w.newMaker();
+      const handle = makerHandler(maker, { onError: () => undefined });
+      expect((await handle(new Request("http://maker/health"))).status).toBe(200);
+      expect(w.logs.filter((l) => l.includes("ALERT"))).toHaveLength(4);
+      expect((await readdir(dir)).filter((f) => f in bad)).toEqual([]);
+      expect(await readdir(join(dir, "quarantine"))).toHaveLength(4);
+      // The readable swap was resumed: once the taker claims, the maker claims the ZEC.
+      expect((await w.newTaker(api).resume(swap.id, { claim: true })).status).toBe("completed");
+      expect(maker.getStage(swap.id)).toBe("completed");
+      expect((await maker.quote(100_000_000n)).zecAmountZat).toBe(100_000_000n);
+    });
+
+    it("maker: a failed load is retried by the next request instead of failing every request", async () => {
+      const w = world();
+      let failures = 1;
+      const flaky = new Proxy(w.makerStore, {
+        get(target, prop) {
+          if ((prop === "keys" || prop === "list") && failures > 0) {
+            return async () => {
+              failures--;
+              throw new Error("EMFILE: too many open files");
+            };
+          }
+          const value = Reflect.get(target, prop, target) as unknown;
+          return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const maker = w.newMaker({ store: flaky });
+      await expect(maker.quote(100_000_000n)).rejects.toThrow(/EMFILE/);
+      expect((await maker.quote(100_000_000n)).zecAmountZat).toBe(100_000_000n);
+    });
+
+    it("taker: pendingSwaps lists every readable swap and quarantines unreadable ones", async () => {
+      const dir = await tempDir("taker");
+      const w = world({ takerStore: new FileSwapStore(dir) });
+      const taker = w.newTaker(w.newMaker());
+      const locked = await taker.lockOnly(await taker.quote(100_000_000n, "tempo", "htlc"));
+      await writeFile(join(dir, `taker~0x${"ab".repeat(32)}.json`), "not json");
+      await writeFile(join(dir, `taker~${randomUUID()}.json`), JSON.stringify({ kind: "taker-swap", version: 1, id: "x" }));
+      expect((await taker.pendingSwaps()).map((s) => s.id)).toEqual([locked.id]);
+      expect(w.logs.filter((l) => l.includes("ALERT"))).toHaveLength(2);
+      expect(await readdir(join(dir, "quarantine"))).toHaveLength(2);
+      expect((await taker.refund(locked.id)).status).toBe("refunded_zcash");
+    });
+
+    it("maker: refuses a configuration whose quotes a taker couldn't parse", async () => {
+      const w = world();
+      expect(() => w.newMaker({ chains: { tempo: w.makerChain({ tokenSymbol: "X".repeat(33) }) } })).toThrow(/tokenSymbol/);
+      expect(() => w.newMaker({ chains: { tempo: w.makerChain({ tokenSymbol: "" }) } })).toThrow(/tokenSymbol/);
+      expect(() => w.newMaker({ chains: { tempo: w.makerChain({ chainId: 0 }) } })).toThrow(/chainId/);
+      expect(() => w.newMaker({ chains: { tempo: w.makerChain({ token: "0x1234" }) } })).toThrow(/token/);
+      expect(() => w.newMaker({ chains: { base: w.makerChain() } })).toThrow(/base/);
+      expect(() => w.newMaker({ policy: { ...POLICY, zcashLockBlocks: 100_001 } })).toThrow(/zcashLockBlocks/);
+      expect(() => w.newMaker({ policy: { ...POLICY, zcashLockBlocks: 100_000, zcashBlockSeconds: 1_000, evmLockSeconds: 10_000_001 } })).toThrow(/evmLockSeconds/);
+      expect(() => w.newMaker({ limits: { quoteTtlSeconds: 0 } })).toThrow(/quoteTtlSeconds/);
+      expect(() => w.newMaker({ limits: { maxZecAmountZat: 22_000_000n * 100_000_000n } })).toThrow(/maxZecAmountZat/);
+      expect(() => w.newMaker({ limits: { maxConcurrentSwaps: 0 } })).toThrow(/maxConcurrentSwaps/);
+      // What a valid maker quotes, a taker parses back unchanged.
+      const quote = await w.newMaker().quote(100_000_000n);
+      expect(parseQuote(JSON.parse(toJson(quote)))).toEqual(quote);
+    });
+  });
+
+  describe("a hashlock someone else locked first", () => {
+    it("is abandoned, never adopted, when the maker never sent its own lock", async () => {
+      const w = world({ makerLimits: { maxConcurrentSwaps: 1 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, funding, id, tip } = await handBuiltHtlc(w, quote, w.takerKey);
+      await maker.accept({ ...request, fundingExpiryHeight: tip + 40 });
+      w.evm.credit(SQUATTER, 1n);
+      await w.htlc.client(SQUATTER).lock({ hashlock: id, token: TOKEN, sender: SQUATTER, recipient: SQUATTER, amount: 1n, expiry: w.evm.time + 10_000n });
+      const balance = w.evm.balances.get(MAKER_EVM);
+      await w.zcash.sendRawTransaction(funding.hex);
+      await w.zcash.generate(1);
+      await until(() => maker.getStage(id) === "abandoned", "the maker to drop the swap");
+      expect(maker.getSwap(id)!.events.map((e) => e.status)).not.toContain("evm_locked");
+      expect(maker.getSwap(id)!.events.at(-1)?.detail).toMatch(/someone else/);
+      expect(w.evm.balances.get(MAKER_EVM)).toBe(balance);
+      expect(w.htlc.locks.get(id)?.swap.sender).toBe(SQUATTER);
+      expect((await maker.quote(100_000_000n)).zecAmountZat).toBe(100_000_000n); // the slot is free again
+    });
+
+    it("is watched until the maker's own lock can no longer be mined when its lock was front-run, then abandoned", async () => {
+      const w = world();
+      const real = w.htlc.client(MAKER_EVM);
+      let frontRun = false;
+      const racing: EvmClient = {
+        ...real,
+        lock: async (swap) => {
+          if (!frontRun) {
+            frontRun = true; // someone copies the hashlock from the pending lock and gets theirs mined first
+            w.evm.credit(SQUATTER, 1n);
+            await w.htlc.client(SQUATTER).lock({ ...swap, sender: SQUATTER, recipient: SQUATTER, amount: 1n });
+          }
+          return real.lock(swap);
+        },
+      };
+      const maker = w.newMaker({ chains: { tempo: w.makerChain({ htlc: racing }) } });
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, funding, id, tip } = await handBuiltHtlc(w, quote, w.takerKey);
+      await maker.accept({ ...request, fundingExpiryHeight: tip + 40 });
+      await w.zcash.sendRawTransaction(funding.hex);
+      await w.zcash.generate(1);
+      await until(() => frontRun, "the front-run");
+      await sleepMs(50);
+      expect(maker.getStage(id)).toBe("locking");
+      expect((await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`))?.lockSentAt).toBeDefined();
+      w.evm.tick(POLICY.evmLockSeconds); // EVM time reaches the maker's expiry: its lock can never be mined now
+      await until(() => maker.getStage(id) === "abandoned", "the maker to drop the swap");
+      expect(maker.getSwap(id)!.events.map((e) => e.status)).not.toContain("evm_locked");
+    });
+
+    it("never abandons a lock the maker sent while it can still be mined", async () => {
+      const w = world();
+      const real = w.htlc.client(MAKER_EVM);
+      const slow: EvmClient = {
+        ...real,
+        lock: async (swap) => {
+          try {
+            return await real.lock(swap);
+          } finally {
+            w.evm.tick(20); // the receipt wait took 20 s of chain time
+          }
+        },
+      };
+      w.htlc.stallLocks = 1; // the lock is broadcast, then the receipt wait times out
+      const maker = w.newMaker({ chains: { tempo: w.makerChain({ htlc: slow }) } });
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, funding, id, tip } = await handBuiltHtlc(w, quote, w.takerKey);
+      await maker.accept({ ...request, fundingExpiryHeight: tip + 40 });
+      const balance = w.evm.balances.get(MAKER_EVM)!;
+      await w.zcash.sendRawTransaction(funding.hex);
+      await w.zcash.generate(1);
+      await until(() => w.htlc.stallLocks === 0, "the lock broadcast");
+      await sleepMs(50); // 25 s left: under minEvmLockSecondsLeft, so the maker would not send it now
+      expect(maker.getStage(id)).toBe("locking");
+      w.htlc.minePending(); // the pending lock is mined after all
+      await until(() => maker.getStage(id) === "locked", "the maker to find its lock");
+      w.evm.tick(30);
+      await until(() => maker.getStage(id) === "refunded", "the maker's refund");
+      expect(w.evm.balances.get(MAKER_EVM)).toBe(balance);
+    });
+  });
+
+  describe("a funding the maker can't read never pins a reservation", () => {
+    it("applies the window rule even when looking the funding up keeps failing", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, id, tip } = await handBuiltHtlc(w, quote, w.takerKey);
+      const real = w.zcash.getRawTransaction.bind(w.zcash);
+      vi.spyOn(w.zcash, "getRawTransaction").mockImplementation(async (txid) => {
+        if (txid === request.fundingTxid) throw new ZcashRpcTransportError("getrawtransaction", "the backend can't serve this transaction");
+        return real(txid);
+      });
+      await maker.accept({ ...request, fundingExpiryHeight: tip + 5 });
+      await w.zcash.generate(11); // past the declared expiry, and the window is no longer safe
+      await until(() => maker.getStage(id) === "abandoned", "the window rule");
+      expect(maker.getSwap(id)?.events.at(-1)?.detail).toMatch(/did not confirm in time/);
+    });
+
+    it("treats a funding its node returns unparseable as not paying the lock", async () => {
+      const w = world({ makerLimits: { maxFundingExpiryBlocks: 10 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, id } = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 2 * POLICY.zcashLockBlocks });
+      const real = w.zcash.getRawTransaction.bind(w.zcash);
+      vi.spyOn(w.zcash, "getRawTransaction").mockImplementation(async (txid) =>
+        txid === request.fundingTxid ? { txid, hex: `0600008010${"00".repeat(12)}`, confirmations: 0, vin: [] } : real(txid),
+      );
+      await maker.accept(request); // no declared expiry: the derived deadline applies
+      await w.zcash.generate(13);
+      await until(() => maker.getStage(id) === "abandoned", "the derived deadline");
+      expect((await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`))?.fundingSeenHeight).toBeUndefined();
+    });
+
+    it("doesn't count a transaction its node returns under the funding's txid when its txid differs", async () => {
+      const w = world({ makerLimits: { maxFundingExpiryBlocks: 10 } });
+      const maker = w.newMaker();
+      const quote = await maker.quote(100_000_000n, "tempo", "htlc");
+      const { request, htlc, id, tip } = await handBuiltHtlc(w, quote, w.takerKey, { refundBlocks: 2 * POLICY.zcashLockBlocks });
+      // Another transaction that pays the same lock at output 0: not the declared funding.
+      const other = buildHtlcFunding({
+        htlc,
+        amount: quote.zecAmountZat + 1n,
+        utxos: await w.zcash.getAddressUtxos([keyAddress(w.takerKey, "regtest")]),
+        key: w.takerKey,
+        branchId: await w.zcash.getNextBranchId(),
+        expiryHeight: tip + FUNDING_EXPIRY_DELTA,
+        network: "regtest",
+      });
+      const real = w.zcash.getRawTransaction.bind(w.zcash);
+      vi.spyOn(w.zcash, "getRawTransaction").mockImplementation(async (txid) =>
+        txid === request.fundingTxid ? { txid, hex: other.hex, confirmations: 0, vin: [] } : real(txid),
+      );
+      await maker.accept(request);
+      await w.zcash.generate(13);
+      await until(() => maker.getStage(id) === "abandoned", "the derived deadline");
+      expect((await w.makerStore.get<MakerSwapRecord>(`maker/swap/${id}`))?.fundingSeenHeight).toBeUndefined();
+    });
+  });
+
+  describe("the taker's claim is tracked from its broadcast", () => {
+    for (const mode of ["htlc", "adaptor"] as const) {
+      it(`resume waits for a claim still in the mempool instead of sending another (${mode})`, async () => {
+        const w = world();
+        const maker = w.newMaker();
+        const escrow = mode === "htlc" ? w.htlc : w.escrow;
+        escrow.stallClaims = 1; // broadcast, then the receipt wait times out
+        const taker = w.newTaker(maker);
+        const err = await taker.swap(await taker.quote(100_000_000n, "tempo", mode)).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(SwapFailedError);
+        const id = (err as SwapFailedError).swap.id;
+        expect((await w.takerStore.get<TakerSwapRecord>(`taker/${id}`))?.claim?.hash).toMatch(/^0x[0-9a-f]{64}$/);
+        const resumed = w.newTaker(maker).resume(id);
+        await sleepMs(100);
+        expect(escrow.claimsSent).toBe(1);
+        escrow.minePending();
+        expect((await resumed).status).toBe("completed");
+        expect(escrow.claimsSent).toBe(1);
+      });
+    }
+
+    it("sends a new claim on resume when the first one was dropped", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      w.htlc.stallClaims = 1;
+      const taker = w.newTaker(maker);
+      const err = await taker.swap(await taker.quote(100_000_000n, "tempo", "htlc")).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SwapFailedError);
+      w.htlc.dropPending(); // evicted from the mempool
+      expect((await w.newTaker(maker).resume((err as SwapFailedError).swap.id)).status).toBe("completed");
+      expect(w.htlc.claimsSent).toBe(2);
+    });
+
+    it("waits for a claim's receipt no longer than the lock has left", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const real = w.htlc.client(TAKER_EVM);
+      let timeoutMs: number | undefined;
+      let secondsLeft: bigint | undefined;
+      const watched: EvmClient = {
+        ...real,
+        claim: async (swap, preimage, options) => {
+          timeoutMs = options?.receiptTimeoutMs;
+          secondsLeft = swap.expiry - w.evm.time;
+          return real.claim(swap, preimage, options);
+        },
+      };
+      const taker = w.newTaker(maker, { chains: { tempo: { htlc: watched, adaptor: w.escrow.client(TAKER_EVM), tokens: [TOKEN] } } });
+      expect((await taker.swap(await taker.quote(100_000_000n, "tempo", "htlc"))).status).toBe("completed");
+      expect(timeoutMs).toBeGreaterThan(0);
+      expect(timeoutMs).toBeLessThanOrEqual(Number(secondsLeft) * 1000);
+    });
+  });
+
+  describe("no secret in errors, logs or inspection", () => {
+    it("keeps the preimage out of a failed claim's error, record, events and logs", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      // A client whose errors echo the call's arguments, as viem's long messages do ("Contract Call: … args: …").
+      const leaky: EvmClient = {
+        ...w.htlc.client(TAKER_EVM),
+        claim: async (swap, preimage) => {
+          throw new Error(`The contract function "claim" reverted.\n\nContract Call:\n  function: claim(Swap s, bytes32 preimage)\n  args: (${swap.hashlock}, ${preimage})`);
+        },
+      };
+      const taker = w.newTaker(maker, { chains: { tempo: { htlc: leaky, adaptor: w.escrow.client(TAKER_EVM), tokens: [TOKEN] } } });
+      const err = (await taker.swap(await taker.quote(100_000_000n, "tempo", "htlc")).catch((e: unknown) => e)) as SwapFailedError;
+      expect(err).toBeInstanceOf(SwapFailedError);
+      expect(err.message).toMatch(/reverted/); // still says what happened
+      const record = (await w.takerStore.get<TakerSwapRecord>(`taker/${err.swap.id}`))!;
+      const secret = record.htlc!.secret.slice(2).toLowerCase();
+      for (const text of [err.message, inspect(err, { depth: 10 }), JSON.stringify(err), record.error ?? "", JSON.stringify(record.swap.events), w.logs.join("\n")]) {
+        expect(text.toLowerCase()).not.toContain(secret);
+      }
+    });
+
+    it("reads a viem error's short message, which leaves out calldata and RPC URLs", () => {
+      const viemLike = Object.assign(
+        new Error('The contract function "claim" reverted.\n\nRequest Arguments:\n  data: 0xdeadbeef\n\nURL: https://rpc.example/secret-key\nVersion: viem@2'),
+        { shortMessage: 'The contract function "claim" reverted.', details: "execution reverted" },
+      );
+      expect(errorMessage(viemLike)).toBe('The contract function "claim" reverted. (execution reverted)');
+      expect(new SwapFailedError({ id: "x" } as Swap, viemLike).message).not.toContain("deadbeef");
+    });
+
+    it("doesn't print the adaptor point or pre-signatures when a private swap fails", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const failing: AdaptorEvmClient = { ...w.escrow.client(TAKER_EVM), claim: async () => Promise.reject(new Error("the relayer is down")) };
+      const taker = w.newTaker(maker, { chains: { tempo: { htlc: w.htlc.client(TAKER_EVM), adaptor: failing, tokens: [TOKEN] } } });
+      const err = (await taker.swap(await taker.quote(100_000_000n, "tempo", "adaptor")).catch((e: unknown) => e)) as SwapFailedError;
+      expect(err).toBeInstanceOf(SwapFailedError);
+      const pre = err.swap.adaptor?.evmPreSignature;
+      expect(pre).toMatch(/^[0-9a-f]{324}$/); // still on err.swap for the caller
+      const point = err.swap.adaptorPoint!.slice(2);
+      for (const text of [inspect(err, { depth: 10 }), JSON.stringify(err), String(err)]) {
+        expect(text).not.toContain(point);
+        expect(text).not.toContain(pre);
+      }
+    });
+
+    it("doesn't print keys or secrets when the engines or a memory store are inspected", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const taker = w.newTaker(maker);
+      const swap = await taker.swap(await taker.quote(100_000_000n, "tempo", "adaptor"));
+      const m = (await w.makerStore.get<MakerSwapRecord>(`maker/swap/${swap.id}`))!.adaptor!;
+      const t = (await w.takerStore.get<TakerSwapRecord>(`taker/${swap.id}`))!.adaptor!;
+      const secrets = [m.zcashKey, m.signerKey, t.secret, t.multisigKey].map((s) => s.slice(2));
+      for (const text of [inspect(maker, { depth: 10 }), inspect(taker, { depth: 10 }), inspect(w.makerStore, { depth: 10 }), inspect(w.takerStore, { depth: 10 })]) {
+        for (const s of secrets) expect(text).not.toContain(s);
+        expect(text).not.toMatch(/privateKey/);
+      }
+    });
+  });
+
+  describe("resuming a lock-only htlc swap with claim: true", () => {
+    it("tells the maker, which then locks, and completes", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const taker = w.newTaker(maker);
+      const locked = await taker.lockOnly(await taker.quote(100_000_000n, "tempo", "htlc"));
+      expect(maker.getSwap(locked.id)).toBeUndefined(); // the maker was never contacted
+      expect((await w.newTaker(maker).resume(locked.id, { claim: true })).status).toBe("completed");
+    });
+
+    it("fails fast, and stays refundable, when the quote expired before the maker was told", async () => {
+      const w = world();
+      const maker = w.newMaker();
+      const taker = w.newTaker(maker);
+      const locked = await taker.lockOnly(await taker.quote(100_000_000n, "tempo", "htlc"));
+      const realNow = Date.now.bind(Date);
+      const started = realNow();
+      vi.spyOn(Date, "now").mockImplementation(() => realNow() + 120_000);
+      const err = await w.newTaker(maker).resume(locked.id, { claim: true }).catch((e: unknown) => e);
+      vi.restoreAllMocks();
+      expect(realNow() - started).toBeLessThan(2_000);
+      expect(err).toBeInstanceOf(SwapFailedError);
+      expect(err).toMatchObject({ code: "quote_expired", message: expect.stringMatching(/never told/) });
+      expect((await taker.refund(locked.id)).status).toBe("refunded_zcash");
+    });
   });
 });

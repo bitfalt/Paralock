@@ -28,6 +28,7 @@ import {
   randomKeyPair,
   scriptPubKeyForAddress,
   signMultisigSpend,
+  transparentTxid,
 } from "@paralock/zcash";
 import {
   type AdaptorPreSignatureRequest,
@@ -42,11 +43,22 @@ import { FUNDING_EXPIRY_MARGIN_BLOCKS, type TimeoutPolicy, assertSafeWindows, as
 import { evmAddressOf } from "./privacy.js";
 import { usdUnitsToZat, zatToUsdUnits } from "./pricing.js";
 import { backoffDelay, sleep } from "./retry.js";
-import { MemorySwapStore, type SwapStore } from "./store.js";
+import { MemorySwapStore, type SwapStore, type UnusableRecord, loadRecords } from "./store.js";
 import type { MakerApi } from "./taker.js";
 import { assertNoUpgradeBefore, isUnspent } from "./zcash-node.js";
 import { EVM_CHAIN_NAMES, type EvmChain, type Hex, type Quote, type Swap, type SwapEvent, type SwapMode, type SwapStatus } from "./types.js";
-import { MAX_ZAT, isEvmChain, isSwapMode, parseAcceptRequest, parseAdaptorProposal, parseAmount, parsePreSignatureRequest } from "./validation.js";
+import {
+  MAX_ZAT,
+  QUOTE_FIELD_LIMITS,
+  isEvmAddress,
+  isEvmChain,
+  isHex,
+  isSwapMode,
+  parseAcceptRequest,
+  parseAdaptorProposal,
+  parseAmount,
+  parsePreSignatureRequest,
+} from "./validation.js";
 
 /** Per-swap and capacity limits of a maker. */
 export interface MakerLimits {
@@ -168,6 +180,7 @@ export type MakerStage =
   | "lost";
 
 const TERMINAL: readonly MakerStage[] = ["completed", "refunded", "abandoned", "lost"];
+const STAGES: readonly MakerStage[] = ["proposed", "funding", "locking", "locked", "claiming", "refunding", ...TERMINAL];
 
 /** A quote as persisted by the maker. */
 export interface MakerQuoteRecord {
@@ -200,6 +213,11 @@ export interface MakerSwapRecord {
    */
   fundingSeenHeight?: number;
   htlc?: { evm?: EvmSwap };
+  /**
+   * When the maker first sent its EVM lock (persisted before sending). From then on a lock of its own may get mined
+   * until the lock's expiry, so the swap is never dropped before the expiry.
+   */
+  lockSentAt?: number;
   adaptor?: {
     /** The per-swap Zcash private key (its half of the 2-of-2). */
     zcashKey: Hex;
@@ -223,6 +241,111 @@ const hex = (b: Uint8Array): Hex => `0x${bytesToHex(b)}`;
 const unhex = (h: string) => h.replace(/^0x/, "");
 const usd = (units: bigint, decimals: number) => (Number(units) / 10 ** decimals).toFixed(2);
 const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+/** Node's `util.inspect` hook: the maker prints a summary, never its keys or records. */
+const INSPECT = Symbol.for("nodejs.util.inspect.custom");
+
+/**
+ * Why a persisted quote can't be used (undefined if it can). Only what the maker reads is checked, loosely: the quote
+ * is the maker's own, so this is no wire parse (which could reject a record the maker wrote itself).
+ */
+function quoteRecordProblem(r: Record<string, unknown>, key: string): string | undefined {
+  if (r.kind !== "maker-quote") return "not a maker quote";
+  const q = r.quote;
+  if (!isObject(q)) return "no quote";
+  if (typeof q.id !== "string" || key !== QUOTE_PREFIX + q.id) return "its id doesn't match its key";
+  if (!isSwapMode(q.mode) || !isEvmChain(q.chain)) return "unknown mode or chain";
+  const fields = [typeof q.expiresAt, typeof q.evmLockSeconds, typeof q.zecAmountZat, typeof q.usdAmount, typeof q.token];
+  if (fields.join() !== "number,number,bigint,bigint,string") return "incomplete quote";
+  if (q.mode === "adaptor" && !isHex(r.zcashKey, 32)) return "an adaptor quote without its key";
+  return undefined;
+}
+
+/**
+ * Why a persisted swap can't be settled (undefined if it can): the shape every view and capacity count reads, plus,
+ * for an unfinished swap, what its current stage needs. A record of another version is refused too.
+ */
+function swapRecordProblem(r: Record<string, unknown>, key: string): string | undefined {
+  if (r.kind !== "maker-swap") return "not a maker swap";
+  if (r.version !== 1) return "unsupported record version (written by another SDK version?)";
+  if (typeof r.id !== "string" || key !== SWAP_PREFIX + r.id) return "its id doesn't match its key";
+  const stage = r.stage as MakerStage;
+  if (!STAGES.includes(stage)) return "unknown stage";
+  const { swap } = r;
+  if (!isObject(swap) || !isObject(swap.quote) || !isObject(swap.zcash) || !isObject(swap.evm) || !Array.isArray(swap.events)) return "incomplete swap";
+  const { quote: q, zcash: z, evm } = swap;
+  if (!isSwapMode(swap.mode) || typeof swap.status !== "string" || !isEvmChain(evm.chain) || typeof evm.amount !== "bigint") return "incomplete swap";
+  const quoteFields = [typeof q.id, typeof q.evmLockSeconds, typeof q.usdAmount, typeof q.zecAmountZat, typeof q.token, typeof q.tokenSymbol];
+  if (quoteFields.join() !== "string,number,bigint,bigint,string,string") return "incomplete quote";
+  if ([typeof z.refundHeight, typeof z.htlcAddress, typeof z.redeemScript, typeof z.amountZat].join() !== "number,string,string,bigint") {
+    return "incomplete Zcash leg";
+  }
+  if (TERMINAL.includes(stage)) return undefined;
+  // What the settlement loop reads from here on.
+  if (typeof z.fundingTxid !== "string" || typeof z.fundingVout !== "number") return "no funding outpoint";
+  const a = r.adaptor;
+  if (swap.mode === "adaptor") {
+    if (!isObject(a) || typeof a.zcashKey !== "string" || typeof a.signerKey !== "string" || !isObject(a.proposal) || !isObject(a.accepted)) {
+      return "incomplete adaptor data";
+    }
+    if (stage !== "proposed" && typeof a.takerPreSignature !== "string") return "no pre-signature from the taker";
+  } else if (typeof swap.hashlock !== "string") {
+    return "no hashlock";
+  }
+  if (stage === "locking" || stage === "locked" || stage === "refunding") {
+    if (typeof evm.expiry !== "number") return "no lock expiry";
+    const params =
+      swap.mode === "adaptor"
+        ? isObject(a) && isObject(a.evm) && typeof a.evmPreSignature === "string" && isObject(swap.adaptor) && typeof swap.adaptor.escrowId === "string"
+        : isObject(r.htlc) && isObject(r.htlc.evm);
+    if (!params) return "no lock parameters";
+  }
+  if (stage === "claiming" && !(isObject(r.claim) && typeof r.claim.txid === "string" && typeof r.claim.hex === "string")) return "no claim transaction";
+  return undefined;
+}
+
+/** Same HTLC entry: the lock under our hashlock is ours, not one someone else made with the same hashlock. */
+function sameHtlcLock(a: EvmSwap, b: EvmSwap): boolean {
+  return (
+    a.hashlock.toLowerCase() === b.hashlock.toLowerCase() &&
+    a.token.toLowerCase() === b.token.toLowerCase() &&
+    a.sender.toLowerCase() === b.sender.toLowerCase() &&
+    a.recipient.toLowerCase() === b.recipient.toLowerCase() &&
+    a.amount === b.amount &&
+    a.expiry === b.expiry
+  );
+}
+
+/**
+ * Throws `invalid_request` unless the maker's chains and limits make quotes a taker can parse (`QUOTE_FIELD_LIMITS`,
+ * `parseQuote`) and records it can reload.
+ */
+function assertMakerConfig(cfg: MakerConfig, limits: MakerLimits) {
+  const bad = (message: string): never => {
+    throw new ParalockError("invalid_request", message);
+  };
+  if (cfg.policy.zcashLockBlocks > QUOTE_FIELD_LIMITS.zcashLockBlocks) bad(`policy.zcashLockBlocks must be at most ${QUOTE_FIELD_LIMITS.zcashLockBlocks}`);
+  if (cfg.policy.evmLockSeconds > QUOTE_FIELD_LIMITS.evmLockSeconds) bad(`policy.evmLockSeconds must be at most ${QUOTE_FIELD_LIMITS.evmLockSeconds}`);
+  for (const [name, c] of Object.entries(cfg.chains)) {
+    if (!c) continue;
+    if (!isEvmChain(name) || c.chain !== name) bad(`chains.${name} must be the clients of the ${name} chain`);
+    if (!Number.isSafeInteger(c.chainId) || c.chainId < 1) bad(`chains.${name}.chainId must be a positive integer`);
+    if (!isEvmAddress(c.token)) bad(`chains.${name}.token must be a non-zero 0x address`);
+    const max = QUOTE_FIELD_LIMITS.tokenSymbolLength;
+    if (typeof c.tokenSymbol !== "string" || c.tokenSymbol.length < 1 || c.tokenSymbol.length > max) bad(`chains.${name}.tokenSymbol must be 1 to ${max} characters`);
+    if (!Number.isSafeInteger(c.tokenDecimals) || c.tokenDecimals < 0 || c.tokenDecimals > 36) bad(`chains.${name}.tokenDecimals must be an integer from 0 to 36`);
+    if (!c.htlc || !isEvmAddress(c.htlc.address)) bad(`chains.${name}.htlc must be a client with a sending account`);
+    if (c.adaptor && !isEvmAddress(c.adaptor.address)) bad(`chains.${name}.adaptor must be a client with a sending account`);
+  }
+  for (const name of ["maxConcurrentSwaps", "maxOpenQuotes", "quoteTtlSeconds"] as const) {
+    if (!Number.isSafeInteger(limits[name]) || limits[name] < 1) bad(`limits.${name} must be a positive integer`);
+  }
+  const { minZecAmountZat: min, maxZecAmountZat: max, zcashFeeZat: fee } = limits;
+  if (typeof min !== "bigint" || typeof max !== "bigint" || typeof fee !== "bigint") bad("limits.minZecAmountZat, maxZecAmountZat and zcashFeeZat must be bigints");
+  if (fee < 0n) bad("limits.zcashFeeZat must not be negative");
+  if (max < min || max > MAX_ZAT) bad(`limits.maxZecAmountZat must be between limits.minZecAmountZat and ${MAX_ZAT}`);
+}
 
 /** Why `fundingExpired` dropped a swap. */
 function fundingDeadReason(record: MakerSwapRecord): string {
@@ -274,6 +397,7 @@ export class Maker implements MakerApi {
     }
     this.store = cfg.store ?? new MemorySwapStore();
     this.limits = { ...DEFAULT_MAKER_LIMITS, ...(cfg.quoteTtlSeconds ? { quoteTtlSeconds: cfg.quoteTtlSeconds } : {}), ...cfg.limits };
+    assertMakerConfig(cfg, this.limits);
     if (this.limits.minZecAmountZat <= this.limits.zcashFeeZat) {
       throw new ParalockError("invalid_request", "limits.minZecAmountZat must exceed limits.zcashFeeZat");
     }
@@ -308,24 +432,43 @@ export class Maker implements MakerApi {
   /**
    * Loads persisted quotes and swaps and resumes the settlement of every unfinished swap. Call once at startup (the
    * request handlers call it implicitly). Idempotent.
+   *
+   * Records are loaded one at a time (with a store that has `keys`): one the maker can't use (corrupted, or written by
+   * another SDK version) is moved aside with `store.quarantine` and reported in an `ALERT` log line, and every other
+   * swap still resumes. If loading fails as a whole (e.g. the store is unreachable), the next call tries again.
    */
   start(): Promise<void> {
-    this.started ??= (async () => {
-      for (const { record } of await this.store.list<MakerQuoteRecord>(QUOTE_PREFIX)) {
-        if (record.quote.expiresAt >= nowSeconds()) this.quotes.set(record.quote.id, record);
-        else await this.store.delete(QUOTE_PREFIX + record.quote.id);
-      }
-      let resumed = 0;
-      for (const { record } of await this.store.list<MakerSwapRecord>(SWAP_PREFIX)) {
-        this.records.set(record.id, record);
-        if (!TERMINAL.includes(record.stage)) {
-          this.settle(record.id);
-          resumed++;
-        }
-      }
-      if (resumed) this.log(`resumed ${resumed} unfinished swap(s)`);
-    })();
+    this.started ??= this.load().catch((err: unknown) => {
+      this.started = undefined; // let the next request retry instead of failing every request from now on
+      throw err;
+    });
     return this.started;
+  }
+
+  private async load(): Promise<void> {
+    const alert = (what: string) => (u: UnusableRecord) =>
+      this.log(
+        `ALERT unusable ${what} record ${u.key} (${u.reason}); ${u.quarantinedTo ? `moved to ${u.quarantinedTo}` : "left in place"}.` +
+          (what === "swap" ? " That swap is not being settled: inspect the record by hand (it holds keys)." : ""),
+      );
+    for (const { record } of await loadRecords<MakerQuoteRecord>(this.store, QUOTE_PREFIX, quoteRecordProblem, alert("quote"))) {
+      if (record.quote.expiresAt >= nowSeconds()) this.quotes.set(record.quote.id, record);
+      else await this.store.delete(QUOTE_PREFIX + record.quote.id);
+    }
+    let resumed = 0;
+    for (const { record } of await loadRecords<MakerSwapRecord>(this.store, SWAP_PREFIX, swapRecordProblem, alert("swap"))) {
+      this.records.set(record.id, record);
+      if (!TERMINAL.includes(record.stage)) {
+        this.settle(record.id);
+        resumed++;
+      }
+    }
+    if (resumed) this.log(`resumed ${resumed} unfinished swap(s)`);
+  }
+
+  /** A summary: `util.inspect` (and `console.log`) never print the maker's keys or records. */
+  [INSPECT](): string {
+    return `Maker { chains: [${this.chains.join(", ")}], swaps: ${this.records.size}, inFlight: ${this.inFlight()} }`;
   }
 
   /** Stops the settlement loops (they resume on the next `start()`). Waits for them to wind down. */
@@ -807,12 +950,16 @@ export class Maker implements MakerApi {
       }
     };
     if (!utxo || tip - utxo.height + 1 < this.cfg.policy.minZcashConfirmations) {
+      // The window rule first: it needs nothing but the tip, so no answer (or error) about the funding can delay it.
+      if (!windowOk()) {
+        await this.abandon(record, "the Zcash funding did not confirm in time");
+        return true;
+      }
       if (!utxo && (await this.fundingExpired(record, tip))) {
         // Past its expiry the funding can never be mined: release the reservation. This can't strand the taker.
         await this.abandon(record, fundingDeadReason(record));
         return true;
       }
-      if (!windowOk()) await this.abandon(record, "the Zcash funding did not confirm in time");
       return false;
     }
     // Exact value: the claim and refund were built (and the taker pre-signed) with this amount.
@@ -870,23 +1017,45 @@ export class Maker implements MakerApi {
     return true;
   }
 
+  /**
+   * Sends the lock (persisting `lockSentAt` first) unless it is too late, then waits for it on-chain. A lock the maker
+   * sent can be mined until its expiry (the contract refuses it after), so from the first send the swap is only dropped
+   * once the chain's time reaches the expiry.
+   */
   private async stepLocking(record: MakerSwapRecord): Promise<boolean> {
     const { swap } = record;
     const c = this.chain(swap.evm.chain);
+    const client = record.adaptor ? c.adaptor! : c.htlc;
+    const expiry = BigInt(swap.evm.expiry!);
     const lock = record.adaptor ? await c.adaptor!.getLock(swap.adaptor!.escrowId!) : await c.htlc.getLock(swap.hashlock!);
+    // An escrow id commits to every parameter, but a hashlock doesn't: someone else may have locked under ours first
+    // (e.g. copied from our pending lock). It's single-use, so our lock reverts: never adopt theirs.
+    if (lock && !record.adaptor && !sameHtlcLock(lock.swap as EvmSwap, record.htlc!.evm!)) {
+      const ours = record.htlc!.evm!;
+      if (lock.swap.sender.toLowerCase() === ours.sender.toLowerCase()) {
+        // The contract only takes locks from their sender: this one is the maker's own money. Never drop or adopt it.
+        throw new Error("the hashlock holds a different lock from the maker's own account; check it by hand");
+      }
+      if (record.lockSentAt !== undefined && (await client.now()) < expiry) return false; // theirs could still be reorged out
+      await this.abandon(record, `the hashlock was locked by someone else on ${EVM_CHAIN_NAMES[swap.evm.chain]}; nothing of the maker's is locked`);
+      return true;
+    }
     if (!lock) {
-      const client = record.adaptor ? c.adaptor! : c.htlc;
-      const expiry = BigInt(swap.evm.expiry!);
       const remaining = Number(expiry - (await client.now()));
       const tip = await this.cfg.zcash.getBlockCount();
       try {
         if (remaining < this.limits.minEvmLockSecondsLeft) throw new Error(`the EVM lock would have only ${remaining}s left`);
         assertSafeWindows(this.cfg.policy, swap.zcash.refundHeight - tip, remaining);
       } catch (err) {
+        if (record.lockSentAt !== undefined && remaining > 0) return false; // a lock already sent may still be mined
         await this.abandon(record, `not locking: ${errorMessage(err)}`);
         return true;
       }
-      // Locks are idempotent on-chain (the id or hashlock can't be reused), so resending after a crash is safe.
+      if (record.lockSentAt === undefined) {
+        record.lockSentAt = Date.now();
+        await this.save(record);
+      }
+      // Locks are single-use on-chain (the id or hashlock can't be reused), so resending after a crash is safe.
       const hash = record.adaptor ? (await c.adaptor!.lock(record.adaptor.evm!)).hash : await c.htlc.lock(record.htlc!.evm!);
       swap.evm.lockTx = hash;
       await this.save(record);
@@ -1048,13 +1217,19 @@ export class Maker implements MakerApi {
   }
 
   /**
-   * True if output `fundingVout` of `tx` (from the maker's own node) pays the swap's lock address. Reads only the
-   * transparent outputs (`parseTx` leaves the shielded part opaque); a transaction it can't parse doesn't count.
+   * True if `tx` (from the maker's own node) is the declared funding and its output `fundingVout` pays the swap's lock
+   * address. Reads only the transparent outputs (`parseTx` leaves the shielded part opaque). A transaction it can't
+   * parse (another version, malformed) doesn't count, nor one whose txid isn't the funding's: the node's reported txid
+   * must match, and so must the txid computed from the bytes when it can be (a transparent-only v5 transaction).
    */
   private fundsLock(tx: NodeTransaction, record: MakerSwapRecord): boolean {
+    const { fundingTxid, fundingVout, htlcAddress } = record.swap.zcash;
     try {
-      const out = parseTx(tx.hex).outputs[record.swap.zcash.fundingVout!];
-      return !!out && bytesToHex(out.scriptPubKey) === bytesToHex(scriptPubKeyForAddress(record.swap.zcash.htlcAddress, this.cfg.network));
+      if (tx.txid.toLowerCase() !== fundingTxid!.toLowerCase()) return false;
+      const computed = transparentTxid(tx.hex);
+      if (computed !== undefined && computed !== fundingTxid!.toLowerCase()) return false;
+      const out = parseTx(tx.hex).outputs[fundingVout!];
+      return !!out && bytesToHex(out.scriptPubKey) === bytesToHex(scriptPubKeyForAddress(htlcAddress, this.cfg.network));
     } catch {
       return false;
     }

@@ -53,6 +53,26 @@ export type EvmOutcome<T> =
   | { status: "refunded" }
   | ({ status: "claimed" } & T);
 
+/** Options of a claim (`EvmClient.claim`, `AdaptorEvmClient.claim`). Clients may ignore them. */
+export interface ClaimOptions {
+  /**
+   * Called with the transaction hash as soon as the node accepted the claim, before waiting for it to be mined. The
+   * taker persists it, so after a crash or a receipt timeout it checks that claim instead of sending another.
+   */
+  onSent?: (hash: Hex) => void | Promise<void>;
+  /**
+   * Longest wait for the claim's receipt, in ms. The taker passes the time its lock has left: a claim mined after the
+   * expiry reverts, so there is no point waiting longer.
+   */
+  receiptTimeoutMs?: number;
+}
+
+/**
+ * Where a transaction stands: `pending` (known to the node, not mined), `success` or `reverted` (mined), or `unknown`
+ * (the node doesn't have it, e.g. it was dropped).
+ */
+export type TransactionStatus = "pending" | "success" | "reverted" | "unknown";
+
 /** Shared by both escrow clients. */
 export interface ChainInfo {
   readonly chain: EvmChain;
@@ -70,14 +90,19 @@ export interface ChainInfo {
   rpcChainId(): Promise<number>;
   /** ERC-20 / TIP-20 balance of `owner` (default: this account). */
   tokenBalance(token: Hex, owner?: Hex): Promise<bigint>;
+  /**
+   * Optional: where the transaction `hash` stands. The taker uses it to check a claim it sent before a restart or a
+   * receipt timeout instead of sending a second one; without it, it sends a new claim if the lock is still unclaimed.
+   */
+  transactionStatus?(hash: Hex): Promise<TransactionStatus>;
 }
 
 /** What the swap engines need from an EVM chain in htlc mode. */
 export interface EvmClient extends ChainInfo {
   /** Approves (if needed) and locks; resolves with the transaction hash once mined. */
   lock(swap: EvmSwap): Promise<Hex>;
-  /** Anyone may submit a claim; the funds always go to `swap.recipient`. */
-  claim(swap: EvmSwap, preimage: Hex): Promise<Hex>;
+  /** Anyone may submit a claim; the funds always go to `swap.recipient`. Resolves with the hash once mined. */
+  claim(swap: EvmSwap, preimage: Hex, options?: ClaimOptions): Promise<Hex>;
   /** Returns the funds to `swap.sender` after `swap.expiry`. */
   refund(swap: EvmSwap): Promise<Hex>;
   /** The locked swap for this hashlock, if a lock exists (active or finished). */
@@ -101,8 +126,8 @@ export interface AdaptorEvmClient extends ChainInfo {
   claimDigest(id: Hex): Promise<Hex>;
   /** Approves (if needed) and locks; resolves once mined. */
   lock(swap: AdaptorEvmSwap): Promise<{ hash: Hex; id: Hex }>;
-  /** Anyone may submit a claim; the funds always go to `swap.recipient`. */
-  claim(swap: AdaptorEvmSwap, sig: EvmSignature): Promise<Hex>;
+  /** Anyone may submit a claim; the funds always go to `swap.recipient`. Resolves with the hash once mined. */
+  claim(swap: AdaptorEvmSwap, sig: EvmSignature, options?: ClaimOptions): Promise<Hex>;
   /** Returns the funds to `swap.sender` after `swap.expiry`. */
   refund(swap: AdaptorEvmSwap): Promise<Hex>;
   /** The locked swap for this id, if any. */

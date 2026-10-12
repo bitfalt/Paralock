@@ -16,13 +16,17 @@ function accountOf(client: ViemBacked): Hex {
   return address;
 }
 
-/** Reads shared by both escrows. `now`, `blockNumber` and `tokenBalance` check the node's chain id first (cached). */
-function chainReads(client: Pick<EvmHtlc, "publicClient" | "now" | "blockNumber" | "tokenBalance">, address: Hex) {
+/**
+ * Reads shared by both escrows. `now`, `blockNumber`, `tokenBalance` and `transactionStatus` check the node's chain id
+ * first (cached).
+ */
+function chainReads(client: Pick<EvmHtlc, "publicClient" | "now" | "blockNumber" | "tokenBalance" | "transactionStatus">, address: Hex) {
   return {
     now: () => client.now(),
     blockNumber: () => client.blockNumber(),
     rpcChainId: () => client.publicClient.getChainId(),
     tokenBalance: (token: Hex, owner?: Hex) => client.tokenBalance(token, owner ?? address),
+    transactionStatus: (hash: Hex) => client.transactionStatus(hash),
   };
 }
 
@@ -42,8 +46,8 @@ export function evmClientFrom(chain: EvmChain, htlc: EvmHtlc): EvmClient {
     async lock(swap) {
       return (await htlc.approveAndLock(swap)).lock.hash;
     },
-    async claim(swap, preimage) {
-      return (await htlc.claim(swap, preimage)).hash;
+    async claim(swap, preimage, options) {
+      return (await htlc.claim(swap, preimage, options)).hash;
     },
     async refund(swap) {
       return (await htlc.refund(swap)).hash;
@@ -84,8 +88,8 @@ export function adaptorClientFrom(chain: EvmChain, escrow: AdaptorEscrow): Adapt
       const { hash, id } = (await escrow.approveAndLock(swap)).lock;
       return { hash, id };
     },
-    async claim(swap, sig) {
-      return (await escrow.claim(swap, sig)).hash;
+    async claim(swap, sig, options) {
+      return (await escrow.claim(swap, sig, options)).hash;
     },
     async refund(swap) {
       return (await escrow.refund(swap)).hash;
