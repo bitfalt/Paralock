@@ -1,0 +1,10 @@
+{
+  "name": "@paralock/example-payroll",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pay a team exact dollar amounts on their own chains from shielded ZEC, with Paralock.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": { "start": "tsx src/index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@paralock/sdk": "workspace:*" }
+}
