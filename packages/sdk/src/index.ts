@@ -16,6 +16,7 @@ export * from "./pricing.js";
 export * from "./privacy.js";
 export * from "./retry.js";
 export * from "./runner.js";
+export * from "./state-dir.js";
 export * from "./secret.js";
 export * from "./store.js";
 export * from "./taker.js";

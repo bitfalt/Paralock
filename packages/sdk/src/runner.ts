@@ -1,37 +1,38 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type DevnetFile, type DevnetTaker, devnetTaker } from "./devnet.js";
+import { paralockStateDir } from "./state-dir.js";
 import { SwapFailedError } from "./errors.js";
 import type { StoreOption } from "./factories.js";
 import { HttpMakerApi } from "./http.js";
 import type { PrivacyOptions } from "./privacy.js";
 import type { EvmChain, Hex, Quote, Swap, SwapEvent, SwapMode } from "./types.js";
 
-/** Finds `.paralock/devnet.json` in `start` or any parent directory. */
+/**
+ * The `devnet.json` that `paralock devnet up` wrote, as seen from `start`: in the CLI's state directory
+ * (`paralockStateDir`): `<checkout>/.paralock` inside a Paralock checkout, else `$PARALOCK_HOME`, else `~/.paralock`.
+ * Throws if there is none yet.
+ */
 export function devnetFilePath(start = process.cwd()): string {
-  let dir = start;
-  for (;;) {
-    const file = join(dir, ".paralock", "devnet.json");
-    if (existsSync(file)) return file;
-    if (dir === dirname(dir)) throw new Error("no .paralock/devnet.json found; run `paralock devnet up`");
-    dir = dirname(dir);
-  }
+  const file = join(paralockStateDir({ cwd: start }), "devnet.json");
+  if (!existsSync(file)) throw new Error(`no devnet at ${file}; run \`paralock devnet up\``);
+  return file;
 }
 
-/** Reads `.paralock/devnet.json` (searching upward from `start`). */
+/** Reads the devnet's `devnet.json` (see `devnetFilePath`). */
 export function loadDevnetFile(start = process.cwd()): DevnetFile {
   return JSON.parse(readFileSync(devnetFilePath(start), "utf8")) as DevnetFile;
 }
 
 /**
- * Directory of the devnet's swap store for `role`, next to `devnet.json` (`.paralock/taker` or `.paralock/maker`).
+ * Directory of the devnet's swap store for `role`, next to `devnet.json` (`taker/` or `maker/` in the state directory).
  * The CLI and the web app share the taker store, so `paralock refund <id>` works for swaps started anywhere.
  */
 export function devnetStorePath(role: "taker" | "maker", start = process.cwd()): string {
   return join(dirname(devnetFilePath(start)), role);
 }
 
-/** Appends a fresh recipient's key to `.paralock/recipients.jsonl` so swapped funds stay reachable. */
+/** Appends a fresh recipient's key to `recipients.jsonl` next to `devnet.json`, so swapped funds stay reachable. */
 export function saveRecipient(entry: { address: string; privateKey: string; swapId: string; chain: string }, start = process.cwd()): void {
   const dir = dirname(devnetFilePath(start));
   mkdirSync(dir, { recursive: true });
