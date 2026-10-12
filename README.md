@@ -60,7 +60,7 @@ pnpm paralock pay --usd 25 --to 0xShop… --chain base --label "Acme Coffee"
 pnpm paralock pay --usd 42.50 --to 0xShop… --chain tempo --private --relay
 ```
 
-In the web app, a payment link like `/?pay=0xShop…&usd=25&chain=base&label=Acme%20Coffee` opens the Pay flow
+In the web app, a payment link like `/app?pay=0xShop…&usd=25&chain=base&label=Acme%20Coffee` opens the Pay flow
 prefilled.
 
 ## Two modes
@@ -130,7 +130,7 @@ swaps (eigenwallet).
 | [`packages/evm`](packages/evm) | `@paralock/evm`: viem clients for both escrows on Tempo or any EVM chain. |
 | [`packages/sdk`](packages/sdk) | `@paralock/sdk`: `Maker` and `Taker` engines for both modes, timeout policy, privacy options, maker HTTP API, devnet wiring. |
 | [`packages/cli`](packages/cli) | The `paralock` CLI: devnet, maker server, swaps. |
-| [`apps/web`](apps/web) | The web app: Pay (payment links) and Swap. |
+| [`apps/web`](apps/web) | The landing page (`/`) and the app (`/app`): Pay (payment links) and Swap. |
 | [`examples`](examples) | Apps built with Paralock: private payroll, selling a secret for ZEC. |
 
 ## Quickstart (local devnet)
