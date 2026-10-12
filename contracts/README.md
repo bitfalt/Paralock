@@ -53,13 +53,14 @@ FOUNDRY_NETWORK=ethereum forge script script/Deploy.s.sol --rpc-url base_local -
 PRIVATE_KEY=0x… forge script script/Deploy.s.sol --rpc-url moderato --broadcast --tempo.fee-token PathUSD
 ```
 
-`paralock devnet up` runs all of this for you (one anvil per chain: Tempo 8545/31337, Base 8546/31338, Ethereum
-8547/31339).
+`paralock devnet up` runs all of this for you, one anvil per chain: Tempo 8545/31337, Base 8546/31338, Ethereum
+8547/31339 (the default), plus Arbitrum 8548/31340, Robinhood Chain 8549/31341 and HyperEVM 8550/31342 with
+`--evm …` or `--evm all`.
 
 `Deploy.s.sol` writes `deployments/<chainId>.json` (`chain`, `htlc`, `adaptorEscrow`, `quoteToken`, `startBlock` for
 log scans, token map). It is idempotent: contracts listed in an existing file are reused while the chain still holds
 exactly their current bytecode. Non-Tempo chains need `FOUNDRY_NETWORK=ethereum` (foundry.toml defaults to Tempo's
-EVM). On local Base / Ethereum (31338 / 31339) it deploys a `MockUSD` "USDC" minted to dev accounts 0 and 1; other
+EVM). On the local plain chains (31338-31342) it deploys a `MockUSD` "USDC" minted to dev accounts 0 and 1; other
 non-Tempo chains take the token from the `USDC` environment variable. On local Tempo (31337) it creates an **OUSD
 stand-in** through the TIP20Factory precompile
 (`createToken("Open USD (Paralock local)", "OUSD", "USD", PathUSD, deployer, keccak256("paralock/ousd"))`), grants

@@ -24,6 +24,9 @@ tempo_local = "http://localhost:8545"
 # Plain EVM devnet chains: run forge with FOUNDRY_NETWORK=ethereum against these (see script/Deploy.s.sol).
 base_local = "http://localhost:8546"
 ethereum_local = "http://localhost:8547"
+arbitrum_local = "http://localhost:8548"
+robinhood_local = "http://localhost:8549"
+hyperevm_local = "http://localhost:8550"
 moderato = "https://rpc.moderato.tempo.xyz"
 
 [lint]

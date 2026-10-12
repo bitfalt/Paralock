@@ -20,11 +20,12 @@ import {MockUSD} from "../src/MockUSD.sol";
 ///         - Tempo: Open USD (OUSD). On a local Tempo chain (anvil `--network tempo`, chain id 31337) it creates an
 ///           "OUSD" stand-in through the TIP20Factory precompile and mints it to anvil dev accounts 0 and 1; factory
 ///           addresses are deterministic in (deployer, salt), so re-runs reuse it.
-///         - Local Base / Ethereum (anvil, chain ids 31338 / 31339): a MockUSD "USDC" (6 decimals) minted to anvil
-///           dev accounts 0 and 1.
+///         - Local Base / Ethereum / Arbitrum / Robinhood Chain / HyperEVM (plain anvils, chain ids 31338-31342): a
+///           MockUSD "USDC" (6 decimals) minted to anvil dev accounts 0 and 1.
 ///         - Other chains: the USDC address from the `USDC` environment variable.
 ///
-///         Tempo vs. plain EVM is derived from the chain id; set `PARALOCK_EVM_CHAIN=tempo|base|ethereum` to override.
+///         The chain name (and Tempo vs. plain EVM) is derived from the chain id; set
+///         `PARALOCK_EVM_CHAIN=tempo|base|ethereum|arbitrum|robinhood|hyperevm` to override it.
 ///
 ///         Non-Tempo chains need forge's Ethereum EVM (`FOUNDRY_NETWORK=ethereum`), since foundry.toml defaults to Tempo.
 ///
@@ -35,6 +36,9 @@ contract Deploy is Script {
     uint256 internal constant TEMPO_LOCAL_CHAIN_ID = 31337;
     uint256 internal constant BASE_LOCAL_CHAIN_ID = 31338;
     uint256 internal constant ETHEREUM_LOCAL_CHAIN_ID = 31339;
+    uint256 internal constant ARBITRUM_LOCAL_CHAIN_ID = 31340;
+    uint256 internal constant ROBINHOOD_LOCAL_CHAIN_ID = 31341;
+    uint256 internal constant HYPEREVM_LOCAL_CHAIN_ID = 31342;
     uint256 internal constant TEMPO_MAINNET_CHAIN_ID = 4217;
     uint256 internal constant TEMPO_MODERATO_CHAIN_ID = 42431;
 
@@ -62,8 +66,8 @@ contract Deploy is Script {
     function run() external returns (Deployment memory d) {
         d.chain = _chainName();
         d.tempo = keccak256(bytes(d.chain)) == keccak256("tempo");
-        d.local = block.chainid == TEMPO_LOCAL_CHAIN_ID || block.chainid == BASE_LOCAL_CHAIN_ID
-            || block.chainid == ETHEREUM_LOCAL_CHAIN_ID;
+        // The Paralock devnet's anvils: Tempo 31337, then Base, Ethereum, Arbitrum, Robinhood Chain, HyperEVM.
+        d.local = block.chainid >= TEMPO_LOCAL_CHAIN_ID && block.chainid <= HYPEREVM_LOCAL_CHAIN_ID;
         uint256 key = d.local ? vm.envOr("PRIVATE_KEY", ANVIL_DEV0_KEY) : vm.envUint("PRIVATE_KEY");
         d.deployer = vm.addr(key);
         _loadPrevious(d);
@@ -82,7 +86,7 @@ contract Deploy is Script {
         if (!vm.isContext(VmSafe.ForgeContext.ScriptDryRun)) _writeDeployment(d);
     }
 
-    /// @dev "tempo", "base" or "ethereum": `PARALOCK_EVM_CHAIN`, else derived from the chain id.
+    /// @dev `PARALOCK_EVM_CHAIN`, else derived from the chain id (devnet ids and known public ones).
     function _chainName() internal view returns (string memory) {
         string memory forced = vm.envOr("PARALOCK_EVM_CHAIN", string(""));
         if (bytes(forced).length != 0) return forced;
@@ -91,6 +95,9 @@ contract Deploy is Script {
             return "tempo";
         }
         if (id == BASE_LOCAL_CHAIN_ID || id == 8453 || id == 84532) return "base";
+        if (id == ARBITRUM_LOCAL_CHAIN_ID || id == 42161 || id == 421614) return "arbitrum";
+        if (id == ROBINHOOD_LOCAL_CHAIN_ID || id == 4663 || id == 46630) return "robinhood";
+        if (id == HYPEREVM_LOCAL_CHAIN_ID || id == 999 || id == 998) return "hyperevm";
         return "ethereum";
     }
 
