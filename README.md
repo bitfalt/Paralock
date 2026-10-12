@@ -2,74 +2,109 @@
 
 **Two locks. One key. No middleman.**
 
-Paralock swaps private money for dollars without a bridge, a custodian, or a wrapped token. The first route is
-**shielded ZEC ⇄ stablecoins (OUSD) on [Tempo](https://tempo.xyz)**: keep your savings shielded on Zcash and pay
-anyone in dollars on Tempo.
+Paralock swaps shielded ZEC for dollars on EVM chains with no bridge, custodian or wrapped token. Routes: Tempo
+(OUSD), Base (USDC) and Ethereum (USDC). It is two things:
 
-Each swap places a lock on both chains, and the same 32-byte secret opens both. When the taker claims the dollars
-on Tempo, the secret becomes public, and the maker uses it to claim the ZEC. Either both sides settle or both
-refund. Nobody else holds the funds at any point.
+- **A developer toolkit (public good)** for building trustless swaps with Zcash:
+  - `@paralock/zcash`: Zcash HTLCs, 2-of-2 locks, v5 transactions and ZIP 244 signing, in TypeScript.
+  - `@paralock/adaptor`: ECDSA adaptor signatures.
+  - `@paralock/evm`: escrow contracts and their clients.
+  - `@paralock/sdk`: maker and taker engines.
+  - A one-command local devnet running Zcash and three EVM chains.
+- **A business:** run the market maker that fills these swaps and earn the spread, the way
+  [Boltz](https://boltz.exchange) does for Lightning. The protocol is symmetric, so anyone running the SDK can be a
+  maker, including peer to peer.
 
-- **Public good:** `@paralock/zcash` is an open-source, dependency-light TypeScript library for Zcash
-  transparent HTLCs. It builds v5 transactions, signs them with ZIP 244, and works on NU6.3 (Ironwood). It is
-  checked against the official test vectors and against a live node.
-- **Product:** a maker network that quotes and fills swaps, similar to intents but settled atomically. We run the
-  first maker.
+## How a swap works (and why nobody can cheat)
 
-## Why now
+Alice has 1 ZEC and wants dollars. Bob is a maker with stablecoins.
 
-- **No ZEC route to Tempo exists.** NEAR Intents supports 37 chains, but it offers ZEC only natively and on
-  Solana, Starknet, Aptos and NEAR. There is no EVM chain on that list, and Tempo isn't supported at all.
-- **Zcash's old RPC stack is gone.** zcashd halted for good on July 18, 2026, so builders lost the familiar RPC
-  wallet. The earlier ZEC atomic-swap tools are out of date too: XCAT dates from 2017, before today's transaction
-  format, and AtomicDEX's repository is archived.
-- **Tempo has the dollars.** It is a payments chain with TIP-20 stablecoins, memos and OUSD. Zcash has the
-  privacy. Paralock connects them without asking anyone to trust a bridge.
+1. **Alice picks a secret.** She keeps it to herself.
+2. **Alice locks 1 ZEC on Zcash.** Bob can take it only with the secret. If nobody does by block N, Alice takes it
+   back.
+3. **Bob checks the lock, then locks 1,270 USD on the EVM chain.** Alice can take it with the secret before time T.
+   After T, Bob takes it back. T ends long before N.
+4. **Alice claims the dollars.** Claiming makes the secret public.
+5. **Bob uses the secret to claim the ZEC.**
 
-## How a swap works
+| What goes wrong | What happens |
+|---|---|
+| Bob never locks | Alice refunds her ZEC after block N |
+| Alice never claims | The secret stays hidden, so Bob can't touch the ZEC. Bob refunds after T; Alice refunds after N |
+| Alice claims | That reveals the secret, and Bob has until block N, long after T, to use it |
+| Someone watches the mempool and copies the secret | Nothing to steal. The EVM lock always pays Alice, and the Zcash lock also requires Bob's signature |
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant T as Taker (has shielded ZEC)
-    participant Z as Zcash · P2SH HTLC
-    participant M as Maker
-    participant P as Tempo · ParalockHTLC
-    T->>M: quote(1 ZEC)
-    M-->>T: price, maker Zcash pubkey, timeouts
-    Note over T: secret s, H = sha256(s)
-    T->>T: unshield exactly what is needed (Ironwood → transparent)
-    T->>Z: lock ZEC: maker can claim with s; taker refunds after height N
-    T->>M: here is the funded HTLC
-    M->>Z: verify redeem script, amount, timeout
-    M->>P: lock OUSD for the taker under H (expires long before N)
-    T->>P: verify the lock, then claim with s (reveals s)
-    P-->>M: Claimed(H, s)
-    M->>Z: claim ZEC with s, then shield it again
-```
+**Enforcement:** the Zcash script and the EVM contract, not a person. The code also enforces that the Zcash window
+outlasts the EVM window by at least 2×. Each side checks the other's lock before committing anything further.
 
-**Safety rules the code enforces:**
-- The taker's Zcash refund window must be at least 2× the maker's Tempo lock. Whoever learns the secret always
-  has time to use it.
-- The taker checks the Tempo lock (recipient, token, amount, time left) before revealing anything.
-- The maker checks the Zcash redeem script byte for byte before locking dollars.
-- A hashlock can never be reused on Tempo, because its secret becomes public on the first claim.
+## Two modes
 
-**If something goes wrong:**
-- The maker never locks: the taker refunds the ZEC once the Zcash refund height is reached (enforced by
-  `OP_CHECKLOCKTIMEVERIFY`).
-- The taker never claims: the maker refunds the OUSD after the Tempo lock expires.
+- **htlc** (default): the secret is a 32-byte preimage, and the same sha256 hashlock appears on both chains.
+- **private** (`--private`, experimental): **adaptor signatures**, so no hash appears on either chain.
+  - On Zcash, the ZEC sits in an ordinary 2-of-2 multisig, with a time-locked refund the maker signs before the
+    taker funds it.
+  - On the EVM chain, the escrow releases on a signature from a one-time key.
+  - The secret is hidden inside the signatures: completing one reveals it only to the counterparty, who holds the
+    matching pre-signature.
+
+[docs/PRIVACY.md](docs/PRIVACY.md) covers all three privacy levels:
+1. **Hygiene (shipped):** shield before & after, fresh recipient, relayed claim, standard amounts, jitter.
+2. **Adaptor signatures (shipped, experimental).**
+3. **A fully shielded Zcash leg via FROST (research).**
+
+## What people can build with it
+
+- **"Pay in dollars" in Zcash wallets:** spend shielded savings anywhere stablecoins work, without an exchange
+  account.
+- **Private payroll and treasuries:** hold ZEC shielded and pay contributors in OUSD or USDC.
+- **Solvers and intents:** settle ZEC legs trustlessly instead of through a custodial bridge.
+- **OTC desks:** large ZEC trades through on-chain escrow instead of mutual trust.
+- **Fair exchange of digital goods:** make the secret a decryption key, so the seller gets paid only by revealing
+  it.
+- **Agents:** AI agents holding ZEC that need dollars just in time to pay x402/MPP APIs.
+- **Testing:** anyone building cross-chain Zcash protocols can run the full stack locally with `paralock devnet up`.
+
+## Why atomic swaps aren't mainstream yet, and what changes here
+
+HTLC swaps already run in production in Lightning, in Boltz and Lightning Loop, and in BTC⇄XMR swaps. They lost
+retail to exchanges and bridges because of UX:
+
+| Problem | Paralock |
+|---|---|
+| Finding a counterparty | Makers quote instantly; anyone can run one |
+| Slow chains | Tempo confirms in under a second. Zcash blocks are 75s, and the proposed NU7 upgrade cuts them to 25s |
+| Babysitting claims and refunds | The SDK watches both chains and claims or refunds automatically |
+| Gas on both chains | Claims can be relayed; the recipient needs no gas |
+| The "free option" (walking away when the price moves) | Short windows plus the maker's spread. It's a real cost, priced in, not hidden |
+
+## Why now, and how it differs from what exists
+
+- **The ZEC routes that exist aren't atomic.**
+  - [Zodl's CrossPay](https://support.zodl.com/article/24-using-crosspay-to-spend-zec) spends shielded ZEC
+    through NEAR Intents market makers. Deposits move through NEAR's PoA bridge, which holds them in a treasury.
+  - THORChain opened a ZEC pool in October 2026; its funds sit in validator-held vaults.
+  - Both are good UX, but you trust an intermediary while your swap is in flight. With Paralock, at no point does
+    anyone but the two parties hold the funds, and the SDK is self-hostable.
+- **Tempo isn't a NEAR Intents destination.** Paralock settles there natively, in OUSD.
+- **The old tools are gone.** zcashd halted for good on July 18, 2026. The earlier ZEC swap tools are out of date
+  too: XCAT predates today's transactions, and AtomicDEX's repository is archived.
+- **Non-malleable txids.** Zcash v5 txids (ZIP 244) don't commit to signatures, so refunds can be safely
+  pre-signed. That's what makes the private mode possible.
+
+Related work: [Train Protocol](https://www.train.tech) (PreHTLCs with solvers), and BTC⇄XMR adaptor-signature
+swaps (eigenwallet).
 
 ## Repository
 
 | Path | What it is |
 |---|---|
-| [`packages/zcash`](packages/zcash) | `@paralock/zcash`: HTLC redeem scripts, P2SH addresses, v5 transactions, ZIP 244 sighash, signing, ZIP 317 fees, a minimal Zebra/Zakura RPC client. Pure TypeScript ([noble](https://paulmillr.com/noble/) crypto only), so it runs in Node and in the browser. |
-| [`contracts`](contracts) | `ParalockHTLC.sol`: a sha256 hash-time-locked escrow for TIP-20 tokens. One storage slot per swap (state creation is expensive on Tempo), TIP-20 memos carry the hashlock, and a hashlock can never be reused. |
-| [`packages/tempo`](packages/tempo) | `@paralock/tempo`: a viem client for the escrow (lock, claim, refund, waiting for locks and for revealed secrets). |
-| [`packages/sdk`](packages/sdk) | `@paralock/sdk`: the `Maker` and `Taker` engines, timeout policy, pricing, the maker HTTP API, and devnet wiring. |
-| [`packages/cli`](packages/cli) | The `paralock` CLI: a local two-chain devnet, a maker server, and swaps from the terminal. |
-| [`apps/web`](apps/web) | The swap app: a live two-lane timeline of both chains. |
+| [`packages/zcash`](packages/zcash) | `@paralock/zcash`: HTLC and 2-of-2 multisig locks, v5 transactions, ZIP 244 sighash, signing, ZIP 317 fees, Zebra/Zakura RPC. Pure TypeScript ([noble](https://paulmillr.com/noble/) crypto only). |
+| [`packages/adaptor`](packages/adaptor) | `@paralock/adaptor`: ECDSA adaptor signatures on secp256k1 with DLEQ proofs (pre-sign, pre-verify, adapt, extract). |
+| [`contracts`](contracts) | `ParalockHTLC` (hashlock escrow) and `ParalockAdaptorEscrow` (signature-release escrow) for TIP-20 and ERC-20 stablecoins. One storage slot per swap. |
+| [`packages/evm`](packages/evm) | `@paralock/evm`: viem clients for both escrows on Tempo or any EVM chain. |
+| [`packages/sdk`](packages/sdk) | `@paralock/sdk`: `Maker` and `Taker` engines for both modes, timeout policy, privacy options, maker HTTP API, devnet wiring. |
+| [`packages/cli`](packages/cli) | The `paralock` CLI: devnet, maker server, swaps. |
+| [`apps/web`](apps/web) | The swap app. |
 
 ## Quickstart (local devnet)
 
@@ -78,44 +113,27 @@ You need Docker (or OrbStack), [Foundry](https://getfoundry.sh) ≥ 1.8, pnpm, a
 
 ```sh
 pnpm install && pnpm build
-pnpm paralock devnet up        # Zcash regtest (ths) + Tempo (anvil --network tempo) + contracts + local OUSD
-pnpm paralock maker            # terminal 1: the maker (also mines a Zcash block every 3s)
-pnpm paralock swap --zec 1     # terminal 2: unshield → lock → swap → maker reshields
-pnpm paralock swap --zec 0.5 --refund-demo   # the maker never locks; the taker refunds after the timeout
-pnpm --filter web dev          # the web app at http://localhost:3000
+pnpm paralock devnet up                               # Zcash regtest + Tempo, Base, Ethereum (anvil) + contracts
+pnpm paralock maker                                   # terminal 1: maker for every chain, both modes
+pnpm paralock swap --zec 1                            # terminal 2: ZEC → OUSD on Tempo (htlc)
+pnpm paralock swap --zec 1 --chain base --private     # ZEC → USDC on Base, no hash on either chain
+pnpm paralock swap --zec 0.5 --fresh-recipient --relay --standard-only
+pnpm paralock swap --zec 0.5 --refund-demo            # the maker never locks; the taker refunds after the timeout
+pnpm --filter web dev                                 # the web app
 ```
 
 Devnet roles:
-- **ths account 1:** the taker's wallet (shielded savings). Change and refunds come back here and are shielded again.
-- **ths account 2:** the taker's swap address. Each swap unshields exactly what it needs into this account, and
-  Paralock spends from it into the HTLC. The ths dashboard shows a stale transparent balance here, because ths
-  can't see spends it didn't make.
+- **ths account 1:** the taker's wallet (shielded savings). Change and refunds come back here and are shielded
+  again.
+- **ths account 2:** the taker's swap address. Each swap unshields exactly what it needs here, and Paralock spends
+  it into the lock. The ths dashboard shows a stale balance for it, because ths can't see spends it didn't make.
 - **ths account 5:** the maker. It shields the ZEC it claims.
-- **Tempo:** anvil dev account 0 is the maker and dev account 1 is the taker.
-
-The web app (`apps/web`) uses the real devnet whenever `.paralock/devnet.json` exists. Otherwise it falls back to a
-simulated maker for hosted previews; set `PARALOCK_BACKEND=mock|devnet` to force one. Its demo controls also show
-the two failure paths for real: the maker goes silent, or the taker never claims (both sides refund).
-
-Example run:
-
-```
-Quote: 1 ZEC → 1271.35 OUSD @ $1271.35/ZEC
-  Zcash refund window 120 blocks · Tempo lock 90s
-Unshielding 1 ZEC (+fees) from ths account 1's Ironwood balance…
-Swapping:
-  [zcash] zcash_locked    locked 100000000 zat in t2FGFyJ38Y2t41EKANhprvkaokyVdVgpeiu ef9a1e540356d690a8…
-  [tempo] tempo_locked    maker locked OUSD; verified
-  [tempo] tempo_claimed   received OUSD 0xcaa77a0c5441677e…
-  [zcash] completed       maker claimed the ZEC c7a471291320a28cea…
-
-Done: received 1271.35 OUSD on Tempo; status completed.
-```
+- **EVM:** anvil dev account 0 is the maker, 1 the taker, and 2 the relayer.
 
 ## Using the Zcash library on its own
 
 ```ts
-import { createHtlc, buildHtlcFunding, buildHtlcClaim, ZcashRpc, randomKeyPair } from "@paralock/zcash";
+import { createHtlc, buildHtlcFunding, buildHtlcClaim, ZcashRpc } from "@paralock/zcash";
 
 const rpc = new ZcashRpc("http://127.0.0.1:18232");
 const htlc = createHtlc(
@@ -124,7 +142,6 @@ const htlc = createHtlc(
 );
 const funding = buildHtlcFunding({ htlc, amount: 100_000_000n, utxos, key: taker, branchId: await rpc.getNextBranchId() });
 await rpc.sendRawTransaction(funding.hex);
-// later, with the revealed secret:
 const claim = buildHtlcClaim({ htlc, utxo, key: maker, preimage: secret, to: makerAddress, branchId });
 ```
 
@@ -132,32 +149,20 @@ const claim = buildHtlcClaim({ htlc, utxo, key: maker, preimage: secret, to: mak
 
 | Suite | What it covers |
 |---|---|
-| `packages/zcash` · `vitest` | ZIP 244 txid and **all six transparent sighash types** against the [official test vectors](https://github.com/zcash/zcash-test-vectors); v5 round-trip; **live regtest**: fund → claim → recover the secret from the chain; refund rejected before the timeout and accepted after it; wrong-key claim refused |
-| `contracts` · `forge test` | 52 tests: happy paths, wrong preimage, expiry edges, double claim, hashlock reuse, parameter tampering, fuzzing, real TIP-20 tokens in-process |
-| `packages/tempo` · `vitest` | Lock, claim, recover the secret, and refund on a local Tempo chain |
-
-Gas on Tempo: `lock` ≈ 305k (250k of that is the one new storage slot that TIP-1000 charges for), `claim` ≈ 56–61k,
-`refund` ≈ 54k.
-
-## Privacy: what leaks and what doesn't
-
-Honesty matters more than marketing here:
-- The Zcash side of the swap is a **transparent** P2SH output. Its amount and timing are public, and so is the
-  redeem script once it is spent.
-- The **same hash** appears on both chains, so an observer can link the two legs.
-- **Mitigation:** Paralock unshields only the amount being swapped, right before the swap, and the maker shields
-  the ZEC again right after. Your shielded balance and history never touch the swap.
-- **Roadmap:** scriptless swaps with adaptor signatures, so no hash appears on-chain and the two legs can't be
-  linked.
+| `packages/zcash` | ZIP 244 txid and all six transparent sighash types against the [official test vectors](https://github.com/zcash/zcash-test-vectors); live regtest: HTLC fund/claim/refund (refund rejected before the timeout), 2-of-2 claim with an adaptor-completed signature, pre-signed refund only after its lock time |
+| `packages/adaptor` | Pre-sign → pre-verify → adapt → valid ECDSA → extract, over random rounds; tampering rejected; EVM `ecrecover` compatible |
+| `contracts` | Both escrows: happy paths, wrong secret or signer, expiry edges, double claim, reuse, tampering, fuzzing, real TIP-20 tokens |
+| `packages/evm`, `packages/sdk` | Clients against local chains; policy, pricing and transport |
 
 ## Roadmap
 
-- Zcash testnet and Tempo Moderato, then mainnet with real OUSD (`0x20c0000000000000000000006a37da5c996874be`).
-- The reverse direction (USD → ZEC) and refunds that go straight back to a shielded address.
-- More dollar chains: the escrow is plain EVM, so Base, Arbitrum and Ethereum need only a deployment.
-- A request-for-quote maker network: several makers compete on price, and Paralock earns a small routing fee.
-- A Zcash payment method for [MPP](https://mpp.dev), so agents can pay HTTP-402 APIs from shielded ZEC.
-- Wallet integrations: a "swap to dollars" button for Zcash wallets.
+- **Networks:** Zcash testnet and Tempo Moderato, then mainnet with real OUSD.
+- **More routes:** USD → ZEC, and refunds straight to a shielded address.
+- **Maker network:** a request-for-quote network where many makers compete; Paralock earns a small routing fee.
+  P2P offers on top.
+- **Privacy level 3:** a fully shielded Zcash leg (FROST 2-of-2 plus Schnorr adaptor signatures).
+- **MPP:** a Zcash payment method, so agents can pay HTTP-402 APIs from shielded ZEC.
+- **Wallets:** "swap to dollars" integrations for Zcash wallets.
 
 ## License
 
