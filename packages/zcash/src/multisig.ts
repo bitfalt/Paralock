@@ -120,7 +120,7 @@ export function signMultisigSpend(spend: MultisigSpend, key: KeyPair): Uint8Arra
 export function finalizeMultisigSpend(
   spend: MultisigSpend,
   signatures: Record<string, Uint8Array>,
-  options: { /** Skip the signature checks (tests that need consensus to reject a bad spend). Default true. */ verify?: boolean } = {},
+  options: { /** Check both signatures before assembling. Default true; pass false only in tests that need consensus to reject a bad spend. */ verify?: boolean } = {},
 ): SignedTx {
   const [k1, k2] = spend.multisig.pubkeys;
   const s1 = signatures[k1];
