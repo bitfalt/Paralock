@@ -63,6 +63,18 @@ importers:
       '@paralock/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@paralock/zcash':
+        specifier: workspace:*
+        version: link:../../packages/zcash
+
+  examples/quickstart:
+    dependencies:
+      '@paralock/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@paralock/zcash':
+        specifier: workspace:*
+        version: link:../../packages/zcash
 
   examples/sell-a-secret:
     dependencies:

@@ -1,0 +1,10 @@
+{
+  "name": "@paralock/example-quickstart",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Hello world for @paralock/sdk: quote, swap ZEC for stablecoins, and refund, with createTaker.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": { "start": "tsx src/index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@paralock/sdk": "workspace:*", "@paralock/zcash": "workspace:*" }
+}
