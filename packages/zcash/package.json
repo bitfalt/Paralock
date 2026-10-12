@@ -1,0 +1,25 @@
+{
+  "name": "@paralock/zcash",
+  "version": "0.1.0",
+  "description": "Zcash transparent HTLCs in pure TypeScript: v5 transactions, ZIP-244 sighash, claim/refund for atomic swaps.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@scure/base": "^2.4.0"
+  }
+}
