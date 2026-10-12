@@ -182,18 +182,19 @@ export async function devnetTaker(cfg: DevnetFile, opts: Pick<TakerConfig, "onUp
    * Makes sure the swap address holds `amountZat` plus fees. With `fromShielded`, the missing amount is unshielded
    * from the wallet's Ironwood balance (topped up from the faucet if needed); otherwise the faucet pays it directly.
    */
-  async function prepareFunds(amountZat: bigint, { fromShielded }: { fromShielded: boolean }) {
+  async function prepareFunds(amountZat: bigint, { fromShielded }: { fromShielded: boolean }): Promise<string | undefined> {
     const need = amountZat + 50_000n;
     const have = (await zcash.getAddressUtxos([address])).reduce((n, u) => n + u.value, 0n);
-    if (have >= need) return;
+    if (have >= need) return undefined;
     const missing = need - have;
     if (!fromShielded) {
       await ths.faucet(address, missing);
-      return;
+      return undefined;
     }
     const account = await ths.account(wallet);
     if (BigInt(account.ironwood_zatoshi) < missing + 20_000n) await ths.faucet(account.unified_address, missing + 20_000n);
-    await ths.send({ from: wallet, to: swapAccount, sourcePool: "ironwood", destinationPool: "transparent", amountZat: missing });
+    const { txid } = await ths.send({ from: wallet, to: swapAccount, sourcePool: "ironwood", destinationPool: "transparent", amountZat: missing });
+    return txid;
   }
 
   /** Shields change and refunds that came back to the wallet's transparent address. */

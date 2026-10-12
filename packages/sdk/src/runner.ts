@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { type DevnetFile, devnetTaker } from "./devnet.js";
 import type { PrivacyOptions } from "./privacy.js";
 import { SwapFailedError } from "./taker.js";
-import type { EvmChain, Quote, Swap, SwapMode } from "./types.js";
+import type { EvmChain, Quote, Swap, SwapEvent, SwapMode } from "./types.js";
 
 /** Finds `.paralock/devnet.json` in `start` or any parent directory. */
 export function devnetFilePath(start = process.cwd()): string {
@@ -45,6 +45,8 @@ interface Job {
   refundable: boolean;
   error?: string;
   refunding?: boolean;
+  /** Steps outside the taker engine, e.g. unshielding the swap amount. */
+  extraEvents: SwapEvent[];
 }
 
 export type JobView = Swap & { refundable: boolean; error?: string; privacy?: PrivacyOptions; shield: boolean };
@@ -72,7 +74,7 @@ export class DevnetSwapRunner {
     const quote = this.quotes.get(quoteId);
     if (!quote) throw new Error("unknown or expired quote");
     this.quotes.delete(quoteId);
-    const job: Job = { quote, swap: pendingSwap(quote), opts, refundable: false };
+    const job: Job = { quote, swap: pendingSwap(quote), opts, refundable: false, extraEvents: [] };
     this.jobs.set(quoteId, job);
     void this.run(quoteId, job);
     return this.view(quoteId, job);
@@ -107,7 +109,11 @@ export class DevnetSwapRunner {
           saveRecipient({ address: account.address, privateKey: account.privateKey, swapId: id, chain: swap.quote.chain }),
       });
       this.takers.set(id, parties);
-      await parties.prepareFunds(job.quote.zecAmountZat, { fromShielded: job.opts.shield });
+      const unshieldTxid = await parties.prepareFunds(job.quote.zecAmountZat, { fromShielded: job.opts.shield });
+      if (unshieldTxid) {
+        const zec = (Number(job.quote.zecAmountZat) / 1e8).toString();
+        job.extraEvents.push({ status: "quoted", chain: "zcash", at: Date.now(), txid: unshieldTxid, detail: `Unshielded ${zec} ZEC into the swap address` });
+      }
       if (job.opts.makerOffline) {
         job.swap = structuredClone(await parties.taker.lockOnly(job.quote));
         job.refundable = true;
@@ -133,7 +139,8 @@ export class DevnetSwapRunner {
   }
 
   private view(id: string, job: Job): Swap {
-    return { ...job.swap, id };
+    const events = [...job.extraEvents, ...job.swap.events].sort((a, b) => a.at - b.at);
+    return { ...job.swap, id, events };
   }
 }
 
