@@ -260,7 +260,8 @@ To publish a new version:
 ## Testnet deployments
 
 Both escrows are deployed on six public testnets. Addresses, quote tokens and start blocks are in
-[`contracts/deployments/<chainId>.json`](contracts/deployments).
+[`contracts/deployments/<chainId>.json`](contracts/deployments). Every contract's source is verified with an exact
+bytecode match: on [Sourcify](https://sourcify.dev) for five chains, and on Tempo's contract verifier for Moderato.
 
 | Network | Chain id | `ParalockHTLC` | `ParalockAdaptorEscrow` | Quote token |
 |---|---|---|---|---|
@@ -274,7 +275,8 @@ Both escrows are deployed on six public testnets. Addresses, quote tokens and st
 \* Robinhood Chain Testnet has no USDC, so a 6-decimal `MockUSD` test token stands in. Only the deployer can mint
 it.
 
-The HyperEVM docs name no official testnet explorer, so that row has no links. Testnet USDC comes from
+The HyperEVM docs name no official testnet explorer, so that row links nowhere; its sources are on
+[Sourcify](https://repo.sourcify.dev/998/0xD9B278625B5946B8CD15dad6c0c776095B8D0513). Testnet USDC comes from
 [faucet.circle.com](https://faucet.circle.com).
 
 These contracts are experimental and not audited. The Zcash side runs on Zcash testnet (TAZ).
