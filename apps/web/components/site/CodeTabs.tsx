@@ -10,7 +10,6 @@ import { CopyButton } from "./CopyButton";
  * source, the CLI against packages/cli/src/main.ts, and the Rust program compiles against crates/paralock-core.
  */
 
-const GITHUB = "https://github.com/bitfalt/Paralock";
 
 interface Tab {
   id: string;
@@ -68,36 +67,41 @@ npx paralock swap --zec 1 --refund-demo
 `;
 
 const RUST = `
-// Cargo.toml: paralock-core = { git = "https://github.com/bitfalt/Paralock" }
-use paralock_core::keys::{KeyPair, Secret};
-use paralock_core::protocol::{self, MAINNET_POLICY};
-use paralock_core::zcash::{Htlc, HtlcParams, Network};
+// cargo add paralock --features evm,lightwalletd,price-feed
+use std::sync::Arc;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut rng = paralock_core::OsRng;
-    let (taker, maker) = (KeyPair::random(&mut rng), KeyPair::random(&mut rng));
-    let secret = Secret::random(&mut rng);
-    let tip = 3_000_000; // the current Zcash height, from your node
+use paralock::builder::*;
+use paralock::paralock_evm::testnet_deployment;
+use paralock::{CoinGecko, EvmChain, Hex, Network, SwapMode, SwapOptions, TakerPriceCheck};
 
-    // The maker claims with the secret; the taker can refund from tip + 144.
-    let htlc = Htlc::new(
-        HtlcParams {
-            hashlock: secret.hashlock(),
-            claim_pubkey: maker.public_key(),
-            refund_pubkey: taker.public_key(),
-            refund_height: tip + 144,
-        },
-        Network::Testnet,
-    )?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Zcash through a public lightwalletd server: no node to run.
+    let lwd = ZcashBackend::Lightwalletd { url: "testnet.zec.rocks:443".into() };
+    let zcash = ZcashOptions::new(Network::Testnet, lwd, std::env::var("ZEC_KEY")?);
 
-    // A maker accepts a lock only if it is its own template, byte for byte.
-    let parsed = Htlc::from_redeem_script(htlc.redeem_script(), Network::Testnet)?;
-    assert_eq!(parsed, htlc);
+    // Paralock's verified escrows on Base Sepolia ship with the crate.
+    let d = testnet_deployment(84532).ok_or("no deployment")?;
+    let htlc = Hex::from_bytes(d.htlc.as_slice());
+    let mut base = EvmChainOptions::new("https://sepolia.base.org", 84532, htlc, std::env::var("EVM_KEY")?);
+    base.adaptor_escrow = Some(Hex::from_bytes(d.adaptor_escrow.as_slice()));
+    base.from_block = Some(d.start_block);
 
-    // The ZEC refund must outlast a one-hour dollar lock by the 2x safety factor.
-    protocol::assert_safe_windows(&MAINNET_POLICY, tip + 144, tip, 3_600)?;
+    let taker = create_taker(
+        CreateTakerOptions::new(
+            zcash,
+            MakerEndpoint::Url("https://maker.example".into()),
+            StoreOption::Dir("./swaps".into()), // secrets are saved before anything is broadcast
+            TakerPriceCheck::Source(Arc::new(CoinGecko::new()?)),
+        )
+        .with_chain(EvmChain::Base, TakerEvmChainOptions::new(base, vec![])),
+    )
+    .await?;
 
-    println!("fund {}", htlc.address()); // a t2… P2SH address
+    // 0.1 ZEC for USDC, private mode: nothing on-chain links the two legs.
+    let quote = taker.quote(10_000_000, EvmChain::Base, SwapMode::Adaptor).await?;
+    let swap = taker.swap(&quote, SwapOptions::default()).await?;
+    println!("{} {:?}", swap.id, swap.status);
     Ok(())
 }
 `;
@@ -161,19 +165,25 @@ const TABS: Tab[] = [
     file: "src/main.rs",
     lang: "rust",
     code: RUST,
-    title: "paralock-core, the protocol in Rust",
+    title: "The same protocol, native in Rust",
     text: (
       <>
-        Pure and synchronous: no I/O, no clock, no network. A byte-for-byte port of the TypeScript packages, checked
-        against shared cross-language vectors. This program compiles as shown. <code>paralock-evm</code> adds alloy
-        clients for both escrows.
+        The <code>paralock</code> crate embeds a taker or a maker (served with axum) in a Rust service, with no Node.js
+        process. It speaks the same wire protocol as the TypeScript SDK, and this program compiles as shown. Prefer a
+        terminal? The <code>paralock</code> binary does the same from a <code>paralock.toml</code>.
       </>
     ),
     links: [
-      { label: "paralock-core", href: `${GITHUB}/tree/main/crates/paralock-core`, external: true },
-      { label: "paralock-evm", href: `${GITHUB}/tree/main/crates/paralock-evm`, external: true },
+      { label: "Rust SDK", href: "/docs/rust" },
+      { label: "Rust CLI", href: "/docs/rust-cli" },
+      { label: "docs.rs", href: "https://docs.rs/paralock", external: true },
     ],
-    note: <>Publication to crates.io is pending, so the dependency comes from GitHub (first line).</>,
+    note: (
+      <>
+        Install the binary with <code>curl -fsSL https://paralock.xyz/install | sh</code> or{" "}
+        <code>cargo install paralock-cli</code>.
+      </>
+    ),
   },
   {
     id: "mcp",

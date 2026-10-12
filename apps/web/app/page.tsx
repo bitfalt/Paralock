@@ -57,9 +57,9 @@ const PACKAGES = [
   { name: "@paralock/adaptor", where: "npm", href: "https://www.npmjs.com/package/@paralock/adaptor", text: "ECDSA adaptor signatures on secp256k1 with DLEQ proofs. Runs in browsers." },
   { name: "@paralock/evm", where: "npm", href: "https://www.npmjs.com/package/@paralock/evm", text: "viem clients for the hashlock and signature escrows, and a verified network registry." },
   { name: "@paralock/lightwalletd", where: "npm", href: "https://www.npmjs.com/package/@paralock/lightwalletd", text: "A public lightwalletd server as the Zcash backend. No full node to run." },
-  { name: "paralock-core", where: "Rust", href: `${GITHUB_URL}/tree/main/crates/paralock-core`, text: "The protocol in pure, synchronous Rust, byte-for-byte with the TypeScript packages." },
-  { name: "paralock-evm", where: "Rust", href: `${GITHUB_URL}/tree/main/crates/paralock-evm`, text: "alloy clients for both escrows, with a hardened send pipeline and Tempo fee tokens." },
-  { name: "paralock", where: "CLI", href: "/docs/cli", text: "The devnet, a maker, swaps, payments and recovery from the terminal." },
+  { name: "paralock", where: "crates.io", href: "/docs/rust", text: "The Rust SDK: taker and maker engines, axum maker server, alloy escrow clients. Speaks the same wire protocol as @paralock/sdk." },
+  { name: "paralock-core", where: "crates.io", href: "https://docs.rs/paralock-core", text: "The protocol in pure, synchronous Rust, byte-for-byte with the TypeScript packages. Builds for wasm32." },
+  { name: "paralock", where: "CLI", href: "/docs/cli", text: "npx paralock for the local devnet, or one native binary for any network: swaps, payments, recovery, a maker." },
 ];
 
 const DEV_FEATURES = [
@@ -168,16 +168,17 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
     q: "Is there a Rust SDK?",
     a: (
       <p>
-        The protocol core is in Rust:{" "}
-        <a className="textlink" href={`${GITHUB_URL}/tree/main/crates/paralock-core`} target="_blank" rel="noreferrer">
-          paralock-core
+        Yes, on crates.io.{" "}
+        <a className="textlink" href="/docs/rust">
+          paralock
         </a>{" "}
-        builds and checks the Zcash locks, adaptor signatures and escrow digests byte for byte like the TypeScript
-        packages, and{" "}
-        <a className="textlink" href={`${GITHUB_URL}/tree/main/crates/paralock-evm`} target="_blank" rel="noreferrer">
-          paralock-evm
+        embeds a taker or a maker in a Rust service and trades with TypeScript makers and takers on the same wire
+        protocol. It builds on paralock-core, the protocol checked byte for byte against shared vectors, and
+        paralock-evm, alloy clients for both escrows. The standalone{" "}
+        <a className="textlink" href="/docs/rust-cli">
+          paralock binary
         </a>{" "}
-        adds alloy clients for both escrows. Both are on GitHub; publication to crates.io is pending.
+        installs with one command.
       </p>
     ),
   },
@@ -403,8 +404,8 @@ export default function Landing() {
               <h2 id="testnets-title">It runs on public testnets.</h2>
               <p>
                 The escrows are deployed with verified source on six public testnets, and the SDK has swapped testnet ZEC
-                for OUSD on Tempo through a public lightwalletd server, without a node of its own. These are the real
-                transactions.
+                for OUSD on Tempo through a public lightwalletd server, without a node of its own, from TypeScript and
+                again from Rust. These are the real transactions.
               </p>
             </header>
             <div className="proof">
@@ -432,7 +433,7 @@ export default function Landing() {
                   </p>
                 </div>
                 <a className="textlink" href={`${GITHUB_URL}/blob/main/docs/TESTNET-RUNS.md`} target="_blank" rel="noreferrer">
-                  Both runs, step by step
+                  All three runs, step by step
                   <Icon name="external" size={13} />
                 </a>
               </div>
@@ -492,7 +493,7 @@ export default function Landing() {
                   </>
                 );
                 return (
-                  <li key={p.name}>
+                  <li key={`${p.where}:${p.name}`}>
                     {external ? (
                       <a href={p.href} target="_blank" rel="noreferrer">
                         {inner}
