@@ -1,0 +1,39 @@
+name: Sync major version tag
+
+permissions: {}
+
+on:
+  release:
+    types:
+      - created
+
+jobs:
+  sync-release-branch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    if: startsWith(github.event.release.tag_name, 'v0')
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@55fe3b63d9612623cc51e6c62d9d62fbcb175fb0 # 2026-09-29T01-25-15Z-55fe3b63
+      - name: Check out the repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+          ref: v0
+
+      # The email is derived from the bots user id,
+      # found here: https://api.github.com/users/github-actions%5Bbot%5D
+      - name: Configure Git
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+      - name: Sync Release Branch
+        run: |
+          git fetch --tags
+          git checkout v0
+          git reset --hard "${GITHUB_REF}"
+          git push --force

@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+pragma solidity >=0.8.13 <0.9.0;
+
+import {IAccountKeychain} from "./interfaces/IAccountKeychain.sol";
+import {IAddressRegistry} from "./interfaces/IAddressRegistry.sol";
+import {ICurrentCommittee} from "./interfaces/ICurrentCommittee.sol";
+import {IFeeManager} from "./interfaces/IFeeManager.sol";
+import {ISignatureVerifier} from "./interfaces/ISignatureVerifier.sol";
+import {ITIP403Registry} from "./interfaces/ITIP403Registry.sol";
+import {IReceivePolicyGuard} from "./interfaces/IReceivePolicyGuard.sol";
+import {ITIP20Factory} from "./interfaces/ITIP20Factory.sol";
+import {IStablecoinDEX} from "./interfaces/IStablecoinDEX.sol";
+import {IStorageCredits} from "./interfaces/IStorageCredits.sol";
+import {IValidatorConfig} from "./interfaces/IValidatorConfig.sol";
+import {IValidatorConfigV2} from "./interfaces/IValidatorConfigV2.sol";
+import {INonce} from "./interfaces/INonce.sol";
+
+/// @title Standard Precompiles Library for Tempo
+///
+/// @notice <https://github.com/tempoxyz/tempo/blob/main/crates/contracts/src/precompiles/mod.rs>
+library StdPrecompiles {
+    address internal constant TIP_FEE_MANAGER_ADDRESS = 0xfeEC000000000000000000000000000000000000;
+    address internal constant TIP403_REGISTRY_ADDRESS = 0x403c000000000000000000000000000000000000;
+    address internal constant TIP20_FACTORY_ADDRESS = 0x20Fc000000000000000000000000000000000000;
+    address internal constant STABLECOIN_DEX_ADDRESS = 0xDEc0000000000000000000000000000000000000;
+    address internal constant NONCE_ADDRESS = 0x4e4F4E4345000000000000000000000000000000;
+    address internal constant VALIDATOR_CONFIG_ADDRESS = 0xCccCcCCC00000000000000000000000000000000;
+    address internal constant ACCOUNT_KEYCHAIN_ADDRESS = 0xaAAAaaAA00000000000000000000000000000000;
+    address internal constant VALIDATOR_CONFIG_V2_ADDRESS = 0xCcCCCCcC00000000000000000000000000000001;
+    address internal constant ADDRESS_REGISTRY_ADDRESS = 0xfDC0000000000000000000000000000000000000;
+    address internal constant SIGNATURE_VERIFIER_ADDRESS = 0x5165300000000000000000000000000000000000;
+    address internal constant RECEIVE_POLICY_GUARD_ADDRESS = 0xB10C000000000000000000000000000000000000;
+    address internal constant STORAGE_CREDITS_ADDRESS = 0x1060000000000000000000000000000000000000;
+    address internal constant CURRENT_COMMITTEE_ADDRESS = 0xC077e00000000000000000000000000000000000;
+
+    IFeeManager internal constant TIP_FEE_MANAGER = IFeeManager(TIP_FEE_MANAGER_ADDRESS);
+    ITIP403Registry internal constant TIP403_REGISTRY = ITIP403Registry(TIP403_REGISTRY_ADDRESS);
+    ITIP20Factory internal constant TIP20_FACTORY = ITIP20Factory(TIP20_FACTORY_ADDRESS);
+    IStablecoinDEX internal constant STABLECOIN_DEX = IStablecoinDEX(STABLECOIN_DEX_ADDRESS);
+    INonce internal constant NONCE_PRECOMPILE = INonce(NONCE_ADDRESS);
+    IValidatorConfig internal constant VALIDATOR_CONFIG = IValidatorConfig(VALIDATOR_CONFIG_ADDRESS);
+    IAccountKeychain internal constant ACCOUNT_KEYCHAIN = IAccountKeychain(ACCOUNT_KEYCHAIN_ADDRESS);
+    IValidatorConfigV2 internal constant VALIDATOR_CONFIG_V2 = IValidatorConfigV2(VALIDATOR_CONFIG_V2_ADDRESS);
+    IAddressRegistry internal constant ADDRESS_REGISTRY = IAddressRegistry(ADDRESS_REGISTRY_ADDRESS);
+    ISignatureVerifier internal constant SIGNATURE_VERIFIER = ISignatureVerifier(SIGNATURE_VERIFIER_ADDRESS);
+    IReceivePolicyGuard internal constant RECEIVE_POLICY_GUARD = IReceivePolicyGuard(RECEIVE_POLICY_GUARD_ADDRESS);
+    IStorageCredits internal constant STORAGE_CREDITS = IStorageCredits(STORAGE_CREDITS_ADDRESS);
+    ICurrentCommittee internal constant CURRENT_COMMITTEE = ICurrentCommittee(CURRENT_COMMITTEE_ADDRESS);
+}
