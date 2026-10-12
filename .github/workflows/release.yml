@@ -67,9 +67,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
-      # The trusted publisher may only stage: each version waits for a maintainer to approve it with 2FA on
-      # npmjs.com (or `npm stage approve <id>`) before anyone can install it.
-      - name: Stage (dependency order, skipping published versions)
+      # crates.io has no staging: trusted publishing publishes directly, so run this only for reviewed versions.
+      - name: Publish (dependency order, skipping published versions)
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
