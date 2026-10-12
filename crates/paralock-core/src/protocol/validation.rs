@@ -589,8 +589,20 @@ pub struct ChainConfig {
 /// Whether [`validate_quote`] bounds the quoted exchange rate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PriceCheck {
-    /// Your own USD/ZEC price: the quote may be at most `max_slippage_bps` worse than it (spec §8.4).
+    /// Your own USD/ZEC price: the quote may be at most `max_slippage_bps` worse than it (spec §8.4). The maker's
+    /// fixed Zcash claim fee, which it prices into every quote (spec §8.3), counts as slippage here, so small swaps
+    /// fail the check (with 200 bps, below about 0.0067 ZEC); see [`PriceCheck::ReferenceWithFee`].
     Reference(f64),
+    /// [`PriceCheck::Reference`], with the maker's fixed Zcash claim fee allowed on top of the slippage, as spec §8.3
+    /// prices it: an exact-in quote is compared with the value of `zecAmountZat − fixed_fee_zat`, an exact-out quote
+    /// with `usdUnitsToZat(usdAmount) + fixed_fee_zat`. A maker charging more than `fixed_fee_zat` still has to stay
+    /// within the slippage for the excess.
+    ReferenceWithFee {
+        /// Your USD/ZEC price.
+        price: f64,
+        /// The fixed fee allowed, in zatoshi (the reference maker's `zcashFeeZat`: 10 000).
+        fixed_fee_zat: u64,
+    },
     /// No price check. **Risky:** nothing then bounds the rate, and the maker chooses the other side of the trade
     /// freely (any stablecoin amount, even one cent, for the ZEC you asked to sell, or any amount of ZEC for the
     /// dollars you asked for). Use it only when a person reviews the quoted amounts before anything is locked.
@@ -677,17 +689,22 @@ pub fn validate_quote(quote: &Quote, request: &QuoteRequest, ctx: &QuoteContext)
     if u128::from(quote.expires_at) < u128::from(ctx.now) + u128::from(limits.expiry_margin_seconds) {
         return Err(reject("quote has expired"));
     }
-    if let PriceCheck::Reference(price) = ctx.price {
+    let (price, fee) = match ctx.price {
+        PriceCheck::Reference(price) => (Some(price), 0),
+        PriceCheck::ReferenceWithFee { price, fixed_fee_zat } => (Some(price), fixed_fee_zat),
+        PriceCheck::Disabled => (None, 0),
+    };
+    if let Some(price) = price {
         let decimals = chain.decimals.unwrap_or(6);
         let slip = u128::from(limits.max_slippage_bps);
         if quote.exact_out {
-            let fair = usd_units_to_zat(quote.usd_amount, price, decimals)?;
+            let fair = usd_units_to_zat(quote.usd_amount, price, decimals)?.saturating_add(u128::from(fee));
             // Saturation keeps the comparison exact: a saturated right side exceeds any possible left side.
             if u128::from(quote.zec_amount_zat) * 10_000 > fair.saturating_mul(10_000 + slip) {
                 return Err(reject(format!("quote costs more than {} bps above your price", limits.max_slippage_bps)));
             }
         } else if slip < 10_000 {
-            let fair = zat_to_usd_units(quote.zec_amount_zat, price, decimals)?;
+            let fair = zat_to_usd_units(quote.zec_amount_zat.saturating_sub(fee), price, decimals)?;
             if quote.usd_amount.saturating_mul(10_000) < fair.saturating_mul(10_000 - slip) {
                 return Err(reject(format!("quote pays more than {} bps below your price", limits.max_slippage_bps)));
             }

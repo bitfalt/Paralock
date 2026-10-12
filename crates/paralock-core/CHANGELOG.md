@@ -118,6 +118,9 @@ describe how it differs from the pre-review code that SDKs were written against.
   `RefundHeightOutOfRange` (the reference's `adaptorSpends` message), `ExpiryHeightRequired`, `InvalidBranchId`,
   `TrailingTxData`, `OverwinteredFlag`, `BadPreV5VersionGroupId`. Lock spends refuse a UTXO of value 0
   ("UTXO <txid>:<vout> has an invalid value").
+- `PriceCheck::ReferenceWithFee { price, fixed_fee_zat }`: the slippage check with the maker's fixed Zcash claim fee
+  (priced into every quote, spec §8.3) allowed on top, so small swaps aren't refused because of it (with
+  `Reference`, 200 bps refuse swaps under about 0.0067 ZEC). Additive; `Reference` is unchanged.
 
 ### Changed (from the pre-review API)
 

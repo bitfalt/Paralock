@@ -70,6 +70,33 @@ fn exact_in(zat: u64, chain: EvmChain, mode: SwapMode) -> QuoteRequest {
 // H1: validate_quote compares the quote with the request, and the price check is an explicit choice.
 
 #[test]
+fn the_price_check_can_allow_the_makers_fixed_claim_fee() {
+    let maker = KeyPair::random(&mut rng("fee"));
+    let base = base_quote(&maker.public_key());
+    // A 0.005 ZEC swap at a $40 price and a 50 bps spread, quoted as spec §8.3 does (the 10 000 zat claim fee
+    // priced in): exact-in pays zatToUsdUnits(500 000 − 10 000, 39.8) = 195 020 units.
+    let small = Quote { zec_amount_zat: 500_000, usd_amount: 195_020, rate: 39.8, ..base.clone() };
+    let request = exact_in(500_000, EvmChain::Base, SwapMode::Adaptor);
+    // The fee is 2 % of this swap: as slippage, it fails a 200 bps bound.
+    assert!(protocol::validate_quote(&small, &request, &ctx(PriceCheck::Reference(40.0))).is_err());
+    let with_fee = PriceCheck::ReferenceWithFee { price: 40.0, fixed_fee_zat: 10_000 };
+    protocol::validate_quote(&small, &request, &ctx(with_fee)).unwrap();
+    // A larger fee than allowed still has to fit in the slippage.
+    let greedy = Quote { usd_amount: 180_000, ..small.clone() };
+    assert!(protocol::validate_quote(&greedy, &request, &ctx(with_fee)).is_err());
+    // Exact-out: usdUnitsToZat(100 000, 39.8) + 10 000 = 261 257 zat to pay $0.10.
+    let pay = QuoteRequest { amount: QuoteAmount::ExactOut(100_000), chain: EvmChain::Base, mode: SwapMode::Adaptor };
+    let small_pay = Quote { exact_out: true, usd_amount: 100_000, zec_amount_zat: 261_257, ..small };
+    assert!(protocol::validate_quote(&small_pay, &pay, &ctx(PriceCheck::Reference(40.0))).is_err());
+    protocol::validate_quote(&small_pay, &pay, &ctx(with_fee)).unwrap();
+    let greedy_pay = Quote { zec_amount_zat: 280_000, ..small_pay };
+    assert!(protocol::validate_quote(&greedy_pay, &pay, &ctx(with_fee)).is_err());
+    // Large swaps are unaffected: the same fair 1 ZEC quote passes both ways.
+    let request = exact_in(100_000_000, EvmChain::Base, SwapMode::Adaptor);
+    protocol::validate_quote(&base, &request, &ctx(with_fee)).unwrap();
+}
+
+#[test]
 fn h1_validate_quote_rejects_terms_other_than_requested() {
     let maker = KeyPair::random(&mut rng("q"));
     // The taker asked for: 1 ZEC, private (adaptor) mode, on Base.
