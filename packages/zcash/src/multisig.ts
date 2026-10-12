@@ -1,3 +1,4 @@
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex, concatBytes, toBytes } from "./bytes.js";
 import { type Network, p2shAddress, scriptPubKeyForAddress } from "./address.js";
 import { zip317Fee } from "./fee.js";
@@ -127,4 +128,15 @@ export function multisigSignaturesFromScriptSig(scriptSig: Uint8Array | string):
   const [dummy, s1, s2] = ops;
   if (dummy !== OP.OP_0 || !(s1 instanceof Uint8Array) || !(s2 instanceof Uint8Array)) throw new Error("not a 2-of-2 spend");
   return [s1, s2];
+}
+
+/** Checks a counterparty's signature (DER + SIGHASH_ALL byte) on a multisig spend, e.g. the maker's refund signature. */
+export function verifyMultisigSignature(spend: MultisigSpend, pubkey: Uint8Array | string, signature: Uint8Array | string): boolean {
+  const sig = toBytes(signature);
+  if (sig.length < 9 || sig[sig.length - 1] !== SIGHASH_ALL) return false;
+  try {
+    return secp256k1.verify(sig.slice(0, -1), spend.sighash, toBytes(pubkey), { prehash: false, format: "der", lowS: true });
+  } catch {
+    return false;
+  }
 }
