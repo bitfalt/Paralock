@@ -6,7 +6,7 @@ const MAX_BODY = 16 * 1024;
 
 /**
  * Runs the devnet market maker over HTTP and mines a Zcash block every few seconds (regtest has no miners). Quotes,
- * swaps and per-swap keys persist in `.paralock/maker`, so a restarted maker resumes every unfinished swap.
+ * swaps and per-swap keys persist in the state directory's `maker/`, so a restarted maker resumes every unfinished swap.
  */
 export async function runMaker(opts: { port: number }): Promise<void> {
   const cfg = readDevnet();

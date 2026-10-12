@@ -1,16 +1,18 @@
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { EVM_CHAIN_NAMES, type EvmChain, type EvmNetwork, type Hex, ThsClient, mnemonicFromThsLog } from "@paralock/sdk";
+import { dirname } from "node:path";
+import { deployParalockContracts, type ParalockDeployment } from "@paralock/evm";
+import { EVM_CHAIN_NAMES, type EvmChain, type EvmNetwork, ThsClient, mnemonicFromThsLog } from "@paralock/sdk";
 import {
   ANVIL_ADDRESSES,
   ANVIL_KEYS,
   DEVNET_EVM,
   type DevnetFile,
+  deploymentPath,
   EVM_CHAINS,
+  makerUrl,
   parseEvmChains,
   readDevnet,
-  repoRoot,
   SERVICE_PORTS,
   stateDir,
   statePath,
@@ -19,13 +21,16 @@ import {
 } from "./env.js";
 import { jsonRpc, portInUse, run, sleep, startDetached, stopPidFile, waitFor } from "./proc.js";
 
+/** Zcash regtest RPC of the ths environment. */
 export const ZCASH_RPC = `http://127.0.0.1:${SERVICE_PORTS.zcashRpc}`;
+/** The ths dashboard (wallet API). */
 export const THS_DASHBOARD = `http://127.0.0.1:${SERVICE_PORTS.thsDashboard}`;
+/** lightwalletd of the ths environment. */
 export const LIGHTWALLETD = `http://127.0.0.1:${SERVICE_PORTS.lightwalletd}`;
-export const MAKER_URL = `http://127.0.0.1:${SERVICE_PORTS.maker}`;
 
 const LABEL = EVM_CHAIN_NAMES;
 const pad = (s: string) => s.padEnd(16);
+/** RPC URL of the devnet anvil for `chain`. */
 export const evmRpc = (chain: EvmChain) => `http://127.0.0.1:${DEVNET_EVM[chain].port}`;
 const pidFile = (chain: EvmChain) => statePath(`anvil-${chain}.pid`);
 /** Pid file of the single Tempo anvil started by earlier Paralock versions. */
@@ -36,6 +41,7 @@ export const DEV_PROCESSES = {
   web: { pidFile: "web.pid", logFile: "web.log", pattern: /next/ },
 } as const;
 
+/** True if `ths status` reports a running environment. */
 export function thsRunning(): boolean {
   const res = run("ths", ["status"]);
   return res.status === 0 && /running/.test(res.stdout);
@@ -87,50 +93,62 @@ async function ensureAnvil(chain: EvmChain): Promise<void> {
   }
 }
 
-/** `contracts/deployments/<chainId>.json`, written by `contracts/script/Deploy.s.sol`. */
-interface Deployment {
-  chain?: EvmChain;
-  chainId: number;
-  htlc: Hex;
-  adaptorEscrow?: Hex;
-  quoteToken?: string;
-  startBlock: number;
-  tokens: Record<string, Hex>;
-}
-
-async function hasCode(rpc: string, address: Hex | undefined): Promise<boolean> {
+async function hasCode(rpc: string, address: string | undefined): Promise<boolean> {
   if (!address) return false;
   const code = await jsonRpc<string>(rpc, "eth_getCode", [address, "latest"]);
   return !!code && code !== "0x";
 }
 
-/** Deploys (or reuses) ParalockHTLC, ParalockAdaptorEscrow and the chain's local stablecoin. */
-async function ensureContracts(chain: EvmChain): Promise<Deployment> {
-  const { chainId, quoteToken } = DEVNET_EVM[chain];
-  const rpc = evmRpc(chain);
-  const file = join(repoRoot(), "contracts", "deployments", `${chainId}.json`);
-  if (existsSync(file)) {
-    const existing = JSON.parse(readFileSync(file, "utf8")) as Deployment;
-    const live = await Promise.all(
-      [existing.htlc, existing.adaptorEscrow, existing.tokens[quoteToken]].map((a) => hasCode(rpc, a)),
-    );
-    if (live.every(Boolean)) {
-      console.log(`• ${LABEL[chain]}: contracts already deployed (ParalockHTLC ${existing.htlc})`);
-      return existing;
-    }
+function readJson<T>(file: string): T | undefined {
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as T;
+  } catch {
+    return undefined;
   }
-  console.log(`• ${LABEL[chain]}: deploying ParalockHTLC, ParalockAdaptorEscrow and the local ${quoteToken}…`);
-  const res = spawnSync("forge", ["script", "script/Deploy.s.sol", "--rpc-url", rpc, "--broadcast"], {
-    cwd: join(repoRoot(), "contracts"),
-    // foundry.toml defaults to Tempo's EVM; plain chains need Ethereum's (receipts without Tempo fields).
-    env: { ...toolEnv(), FOUNDRY_NETWORK: chain === "tempo" ? "tempo" : "ethereum", PARALOCK_EVM_CHAIN: chain },
-    encoding: "utf8",
-  });
-  if (res.status !== 0) throw new Error(`forge script failed on ${LABEL[chain]}:\n${res.stdout}\n${res.stderr}`);
-  return JSON.parse(readFileSync(file, "utf8")) as Deployment;
 }
 
-function toNetwork(chain: EvmChain, d: Deployment): EvmNetwork {
+const list = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : items.join(""));
+
+/**
+ * Deploys ParalockHTLC, ParalockAdaptorEscrow and the chain's local stablecoin from the artifacts embedded in
+ * `@paralock/evm` (no Foundry), as `contracts/script/Deploy.s.sol` would: the OUSD stand-in on Tempo, a MockUSD "USDC"
+ * elsewhere, minted to anvil dev accounts 0 and 1. Contracts recorded in the chain's deployment file (or in the
+ * previous devnet.json) are reused while the chain still holds them. Writes the deployment file.
+ */
+async function ensureContracts(chain: EvmChain, earlier: EvmNetwork | undefined): Promise<ParalockDeployment> {
+  const { chainId } = DEVNET_EVM[chain];
+  const file = deploymentPath(chainId);
+  let result: Awaited<ReturnType<typeof deployParalockContracts>>;
+  try {
+    result = await deployParalockContracts({
+      rpcUrl: evmRpc(chain),
+      chainId,
+      chain,
+      tempo: chain === "tempo",
+      account: ANVIL_KEYS[0]!,
+      previous: readJson<ParalockDeployment>(file) ?? earlier,
+      mintTo: [ANVIL_ADDRESSES[0]!, ANVIL_ADDRESSES[1]!],
+    });
+  } catch (err) {
+    throw new Error(`${LABEL[chain]}: deploying the contracts failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const { deployment, reused } = result;
+  const names = {
+    htlc: "ParalockHTLC",
+    adaptorEscrow: "ParalockAdaptorEscrow",
+    quoteToken: `the local ${deployment.quoteToken}`,
+  } as const;
+  const parts = Object.keys(names) as (keyof typeof names)[];
+  const created = parts.filter((p) => !reused[p]).map((p) => names[p]);
+  const kept = parts.filter((p) => reused[p]).map((p) => names[p]);
+  if (!created.length) console.log(`• ${LABEL[chain]}: contracts already deployed (ParalockHTLC ${deployment.htlc})`);
+  else console.log(`• ${LABEL[chain]}: deployed ${list(created)}${kept.length ? `; kept ${list(kept)}` : ""}`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(deployment, null, 2)}\n`);
+  return deployment;
+}
+
+function toNetwork(chain: EvmChain, d: ParalockDeployment): EvmNetwork {
   const quoteToken = d.quoteToken ?? DEVNET_EVM[chain].quoteToken;
   if (!d.tokens[quoteToken]) throw new Error(`${LABEL[chain]} deployment has no ${quoteToken} token`);
   return {
@@ -145,18 +163,16 @@ function toNetwork(chain: EvmChain, d: Deployment): EvmNetwork {
   };
 }
 
-/** Chains of an existing `.paralock/devnet.json` whose anvil still answers with their contracts deployed. */
-async function liveChains(): Promise<DevnetFile["evm"]> {
+/** The previous devnet.json, if any (it may be from an older Paralock or half-written). */
+function previousDevnet(): Partial<DevnetFile> | undefined {
+  return readJson<Partial<DevnetFile>>(statePath("devnet.json"));
+}
+
+/** Chains of the previous devnet.json whose anvil still answers with their contracts deployed. */
+async function liveChains(previous: Partial<DevnetFile> | undefined): Promise<DevnetFile["evm"]> {
   const kept: DevnetFile["evm"] = {};
-  if (!existsSync(statePath("devnet.json"))) return kept;
-  let previous: Partial<DevnetFile>;
-  try {
-    previous = JSON.parse(readFileSync(statePath("devnet.json"), "utf8")) as Partial<DevnetFile>;
-  } catch {
-    return kept;
-  }
   for (const chain of EVM_CHAINS) {
-    const net = previous.evm?.[chain];
+    const net = previous?.evm?.[chain];
     if (!net) continue;
     const id = await jsonRpc<string>(net.rpc, "eth_chainId");
     if (id && Number.parseInt(id, 16) === net.chainId && (await hasCode(net.rpc, net.htlc))) kept[chain] = net;
@@ -164,32 +180,49 @@ async function liveChains(): Promise<DevnetFile["evm"]> {
   return kept;
 }
 
+/** Options of `devnetUp`. */
+export interface DevnetUpOptions {
+  /** A file with the output of `ths start`, for a ths that Paralock did not start (it holds the mnemonic). */
+  thsLog?: string;
+  /** EVM chains to start (`--evm`); default `DEFAULT_EVM_CHAINS`. */
+  evm?: string | readonly string[];
+  /** Port of the devnet maker, recorded in devnet.json. Default: the previous devnet's, else 7420. */
+  makerPort?: number;
+}
+
 /**
- * Starts (or reuses) Zcash and the requested EVM chains, deploys the contracts and writes `.paralock/devnet.json`.
- * Chains of an earlier `devnet up` that are still running stay in the file, so `--evm arbitrum` adds Arbitrum.
+ * Starts (or reuses) Zcash and the requested EVM chains, deploys the contracts and writes devnet.json into the state
+ * directory. Chains of an earlier `devnet up` that are still running stay in the file, so `--evm arbitrum` adds
+ * Arbitrum.
  */
-export async function devnetUp(opts: { thsLog?: string; evm?: string | readonly string[] }): Promise<DevnetFile> {
+export async function devnetUp(opts: DevnetUpOptions): Promise<DevnetFile> {
   const chains = parseEvmChains(opts.evm);
   mkdirSync(stateDir(), { recursive: true });
-  const [thsMnemonic, kept] = await Promise.all([ensureZcash(opts), liveChains(), ...chains.map(ensureAnvil)]);
+  const previous = previousDevnet();
+  const [thsMnemonic, kept] = await Promise.all([ensureZcash(opts), liveChains(previous), ...chains.map(ensureAnvil)]);
   for (const chain of EVM_CHAINS) {
     if (kept[chain] && !chains.includes(chain)) console.log(`• ${LABEL[chain]}: keeping the running devnet chain`);
   }
 
   const fresh: DevnetFile["evm"] = {};
-  // One at a time: the forge scripts share the contracts' build cache.
-  for (const chain of chains) fresh[chain] = toNetwork(chain, await ensureContracts(chain));
+  await Promise.all(
+    chains.map(async (chain) => {
+      fresh[chain] = toNetwork(chain, await ensureContracts(chain, kept[chain]));
+    }),
+  );
   const evm: DevnetFile["evm"] = {};
   for (const chain of EVM_CHAINS) {
     const net = fresh[chain] ?? kept[chain];
     if (net) evm[chain] = net;
   }
+  const maker =
+    opts.makerPort !== undefined ? makerUrl(opts.makerPort) : (previous?.maker?.url ?? makerUrl(SERVICE_PORTS.maker));
 
   const cfg: DevnetFile = {
     zcash: { network: "regtest", rpc: ZCASH_RPC, lightwalletd: LIGHTWALLETD, dashboard: THS_DASHBOARD },
     evm,
     thsMnemonic,
-    maker: { url: MAKER_URL, thsAccount: 5, evmKey: ANVIL_KEYS[0]! },
+    maker: { url: maker, thsAccount: 5, evmKey: ANVIL_KEYS[0]! },
     taker: { thsAccount: 1, swapAccount: 2, evmKey: ANVIL_KEYS[1]! },
     relayer: { evmKey: ANVIL_KEYS[2]! },
   };
@@ -198,6 +231,7 @@ export async function devnetUp(opts: { thsLog?: string; evm?: string | readonly 
   console.log(`\nDevnet ready → ${path}`);
   console.log(`  ${pad("Zcash")} RPC ${ZCASH_RPC} · lightwalletd ${LIGHTWALLETD} · dashboard ${THS_DASHBOARD}`);
   for (const net of Object.values(evm)) printNetwork(net!);
+  console.log(`  ${pad("Maker")} ${maker}`);
   console.log(`  ${pad("EVM keys")} maker = anvil dev 0 (${ANVIL_ADDRESSES[0]})`);
   console.log(`  ${pad("")} taker = dev 1 (${ANVIL_ADDRESSES[1]}), relayer = dev 2 (${ANVIL_ADDRESSES[2]})`);
 
@@ -225,7 +259,10 @@ function printNetwork(net: EvmNetwork, block?: string): void {
   console.log(`  ${pad("")} ${net.quoteToken} ${net.tokens[net.quoteToken]} · events from block ${net.startBlock}`);
 }
 
-/** Stops what Paralock started (ths, its anvils, and the maker / web app of `paralock dev`); leaves the rest running. */
+/**
+ * Stops ths, the anvils Paralock started and the maker / web app of `paralock dev` (anvils and makers it did not start
+ * keep running), then deletes devnet.json and the ths log.
+ */
 export async function devnetDown(): Promise<void> {
   for (const [name, proc] of Object.entries(DEV_PROCESSES)) {
     if (stopPidFile(statePath(proc.pidFile), proc.pattern)) console.log(`Stopped the ${name}.`);
@@ -239,8 +276,10 @@ export async function devnetDown(): Promise<void> {
   console.log("Devnet stopped. Processes Paralock did not start were left running.");
 }
 
+/** Prints the devnet's state directory, Zcash height and each chain's block and contracts. */
 export async function devnetStatus(): Promise<void> {
   const cfg = readDevnet();
+  console.log(`  ${pad("State")} ${stateDir()}`);
   const height = await jsonRpc<number>(cfg.zcash.rpc, "getblockcount");
   console.log(`  ${pad("Zcash")} RPC ${cfg.zcash.rpc} · regtest height ${height ?? "unreachable"}`);
   for (const chain of EVM_CHAINS) {

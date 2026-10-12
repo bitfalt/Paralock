@@ -1,21 +1,52 @@
 {
-  "name": "@paralock/cli",
+  "name": "paralock",
   "version": "0.2.0",
-  "description": "paralock CLI: local Zcash + multi-chain EVM devnet, doctor, maker server, and swaps from the terminal.",
+  "description": "Paralock CLI: run a local Zcash regtest + multi-chain EVM devnet, a market maker, and trustless ZEC <-> stablecoin swaps and payments from the terminal. `npx paralock dev`.",
+  "keywords": [
+    "zcash",
+    "atomic-swap",
+    "cross-chain",
+    "htlc",
+    "adaptor-signatures",
+    "stablecoin",
+    "devnet",
+    "anvil",
+    "tempo",
+    "cli"
+  ],
   "license": "MIT",
+  "author": "bitfalt (https://github.com/bitfalt)",
+  "homepage": "https://paralock.xyz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitfalt/Paralock.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/bitfalt/Paralock/issues"
+  },
   "type": "module",
   "bin": {
     "paralock": "dist/main.js"
   },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -p .",
-    "typecheck": "tsc -p . --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@paralock/sdk": "workspace:*",
     "@paralock/evm": "workspace:*",
+    "@paralock/sdk": "workspace:*",
     "@paralock/zcash": "workspace:*"
-  },
-  "private": true
+  }
 }

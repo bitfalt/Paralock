@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { EVM_CHAIN_NAMES, type EvmChain } from "@paralock/sdk";
-import { DEV_PROCESSES, devnetUp, MAKER_URL, THS_DASHBOARD } from "./devnet.js";
+import { DEV_PROCESSES, devnetUp, THS_DASHBOARD } from "./devnet.js";
 import { runDoctor } from "./doctor.js";
-import { type DevnetFile, repoRoot, SERVICE_PORTS, statePath } from "./env.js";
+import { checkoutRoot, type DevnetFile, devnetMakerPort, makerPort, SERVICE_PORTS, stateDir, statePath } from "./env.js";
 import { commandOf, httpGet, isNextServer, livePid, portInUse, sleep, startDetached, stopPidFile, waitFor } from "./proc.js";
+import { invocation, selfCommand } from "./runtime.js";
 
 /** `paralock dev`: doctor, devnet, maker and (optionally) the web app, each reused if it is already running. */
 
@@ -16,8 +16,14 @@ interface MakerHealth {
   chains: EvmChain[];
 }
 
-async function makerHealth(): Promise<MakerHealth | undefined> {
-  const body = await httpGet(`${MAKER_URL}/health`);
+/** Printed by `dev --web` outside a checkout: the web app ships with the repository, not with the CLI. */
+const WEB_OUTSIDE_CHECKOUT = `The web app is not part of the paralock CLI. To run it against this devnet, use a checkout:
+  git clone https://github.com/bitfalt/Paralock && cd Paralock
+  pnpm install && pnpm build && pnpm paralock dev --web
+Hosted preview (public testnets, not this devnet): https://paralock.xyz/app`;
+
+async function makerHealth(url: string): Promise<MakerHealth | undefined> {
+  const body = await httpGet(`${url}/health`);
   if (!body) return undefined;
   try {
     const health = JSON.parse(body) as MakerHealth;
@@ -27,11 +33,10 @@ async function makerHealth(): Promise<MakerHealth | undefined> {
   }
 }
 
-function startMaker(): void {
-  const main = fileURLToPath(new URL("./main.js", import.meta.url));
+function startMaker(port: number): void {
   const { pidFile, logFile } = DEV_PROCESSES.maker;
-  const pid = startDetached(process.execPath, [main, "maker", "--port", String(SERVICE_PORTS.maker)], statePath(logFile));
-  writePid(pidFile, pid);
+  const { command, args } = selfCommand(["maker", "--port", String(port)]);
+  writePid(pidFile, startDetached(command, args, statePath(logFile)));
 }
 
 /** Records a process `dev` started, so `devnet down` can stop it. */
@@ -42,8 +47,9 @@ function writePid(file: string, pid: number): void {
 /** Reuses a healthy maker; restarts one `dev` started if it does not quote every devnet chain yet. */
 async function ensureMaker(cfg: DevnetFile): Promise<{ outcome: Outcome; missing: EvmChain[] }> {
   const { pidFile, pattern, logFile } = DEV_PROCESSES.maker;
+  const port = makerPort(cfg.maker.url);
   const chains = Object.keys(cfg.evm) as EvmChain[];
-  const health = await makerHealth();
+  const health = await makerHealth(cfg.maker.url);
   let outcome: Outcome = "started";
   if (health) {
     const missing = chains.filter((c) => !health.chains.includes(c));
@@ -51,15 +57,15 @@ async function ensureMaker(cfg: DevnetFile): Promise<{ outcome: Outcome; missing
     if (livePid(statePath(pidFile), pattern) === undefined) return { outcome: "reused", missing };
     console.log(`• Maker: restarting to quote ${missing.map((c) => EVM_CHAIN_NAMES[c]).join(", ")} too…`);
     stopPidFile(statePath(pidFile), pattern);
-    await waitFor(async () => !(await portInUse(SERVICE_PORTS.maker)), 15_000);
+    await waitFor(async () => !(await portInUse(port)), 15_000);
     outcome = "restarted";
-  } else if (await portInUse(SERVICE_PORTS.maker)) {
-    throw new Error(`port ${SERVICE_PORTS.maker} is taken by something that is not a Paralock maker`);
+  } else if (await portInUse(port)) {
+    throw new Error(`port ${port} is taken by something that is not a Paralock maker; pick another with --maker-port`);
   } else {
-    console.log("• Maker: starting in the background…");
+    console.log(`• Maker: starting in the background on port ${port}…`);
   }
-  startMaker();
-  if (!(await waitFor(makerHealth, 120_000, 1_000))) {
+  startMaker(port);
+  if (!(await waitFor(() => makerHealth(cfg.maker.url), 120_000, 1_000))) {
     throw new Error(`the maker did not come up; see ${statePath(logFile)}`);
   }
   return { outcome, missing: [] };
@@ -76,8 +82,8 @@ function runningNextDev(web: string): string | undefined {
 }
 
 /** Reuses the web app if it already runs (on `port` or elsewhere for this checkout), otherwise starts `next dev`. */
-async function ensureWeb(port: number): Promise<{ outcome: Outcome; url: string }> {
-  const web = join(repoRoot(), "apps", "web");
+async function ensureWeb(checkout: string, port: number): Promise<{ outcome: Outcome; url: string }> {
+  const web = join(checkout, "apps", "web");
   if (await isNextServer(port)) return { outcome: "reused", url: `http://localhost:${port}` };
   const existing = runningNextDev(web);
   if (existing) return { outcome: "reused", url: existing };
@@ -99,44 +105,56 @@ async function ensureWeb(port: number): Promise<{ outcome: Outcome; url: string 
   throw new Error(`the web app did not start; see ${statePath(logFile)}`);
 }
 
-export async function devCommand(opts: {
+/** Options of `devCommand`. */
+export interface DevOptions {
   evm?: string | readonly string[];
   thsLog?: string;
+  /** Also run the web app (checkout only). */
   web?: boolean;
   webPort?: number;
-}): Promise<void> {
+  /** Port of the maker; default: the running devnet's, else 7420. */
+  makerPort?: number;
+}
+
+/** `paralock dev`: runs `doctor`, then `devnet up`, the maker and (with `web`, in a checkout) the web app. */
+export async function devCommand(opts: DevOptions): Promise<void> {
+  const checkout = checkoutRoot();
+  const web = opts.web && checkout !== undefined;
+  if (opts.web && !checkout) console.log(`${WEB_OUTSIDE_CHECKOUT}\n\nStarting the devnet and the maker without it.\n`);
   const webPort = opts.webPort ?? SERVICE_PORTS.web;
-  if (!(await runDoctor({ evm: opts.evm, webPort: opts.web ? webPort : undefined }))) {
+  const port = devnetMakerPort(opts.makerPort);
+  if (!(await runDoctor({ evm: opts.evm, webPort: web ? webPort : undefined, makerPort: port }))) {
     process.exitCode = 1;
     return;
   }
   console.log("");
-  const cfg = await devnetUp({ evm: opts.evm, thsLog: opts.thsLog });
+  const cfg = await devnetUp({ evm: opts.evm, thsLog: opts.thsLog, makerPort: port });
   console.log("");
   const maker = await ensureMaker(cfg);
-  const web = opts.web ? await ensureWeb(webPort) : undefined;
+  const app = web ? await ensureWeb(checkout!, webPort) : undefined;
 
   const chains = Object.keys(cfg.evm) as EvmChain[];
   const row = (label: string, value: string) => console.log(`  ${label.padEnd(16)} ${value}`);
+  const logOf = (outcome: Outcome, file: string) => (outcome === "reused" ? "" : `; log ${statePath(file)}`);
   console.log("\nParalock is running");
-  if (web) {
-    const log = web.outcome === "reused" ? "" : `; log .paralock/${DEV_PROCESSES.web.logFile}`;
-    row("Web app", `${web.url}   (${web.outcome}${log})`);
-  }
-  row("Maker", `${MAKER_URL}   (${maker.outcome}${maker.outcome === "reused" ? "" : `; log .paralock/${DEV_PROCESSES.maker.logFile}`})`);
+  if (app) row("Web app", `${app.url}   (${app.outcome}${logOf(app.outcome, DEV_PROCESSES.web.logFile)})`);
+  else if (opts.web) row("Web app", "needs a checkout (see above); hosted preview at https://paralock.xyz/app");
+  row("Maker", `${cfg.maker.url}   (${maker.outcome}${logOf(maker.outcome, DEV_PROCESSES.maker.logFile)})`);
   if (maker.missing.length) {
     row("", `note: this maker was not started by \`paralock dev\` and does not quote ${maker.missing.join(", ")} yet;`);
     row("", "restart it (paralock maker) to quote every devnet chain");
   }
   row("Zcash dashboard", THS_DASHBOARD);
   for (const [i, c] of chains.entries()) row(i ? "" : "EVM chains", `${EVM_CHAIN_NAMES[c].padEnd(16)} ${cfg.evm[c]!.rpc}`);
+  row("State", stateDir());
 
+  const cli = invocation();
   const second = chains.find((c) => c !== "tempo") ?? "tempo";
   const next: [string, string][] = [
-    ["pnpm paralock swap --zec 1", "swap ZEC for stablecoins on Tempo (htlc mode)"],
-    [`pnpm paralock swap --zec 1 --chain ${second} --private`, `private (adaptor) swap on ${EVM_CHAIN_NAMES[second]}`],
-    ["pnpm paralock devnet status", "heights and contract addresses"],
-    ["pnpm paralock devnet down", "stop everything Paralock started"],
+    [`${cli} swap --zec 1`, "swap ZEC for stablecoins on Tempo (htlc mode)"],
+    [`${cli} swap --zec 1 --chain ${second} --private`, `private (adaptor) swap on ${EVM_CHAIN_NAMES[second]}`],
+    [`${cli} devnet status`, "heights and contract addresses"],
+    [`${cli} devnet down`, "stop everything Paralock started"],
   ];
   const width = Math.max(...next.map(([cmd]) => cmd.length)) + 3;
   console.log("\nNext:");

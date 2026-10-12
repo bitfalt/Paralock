@@ -1,5 +1,5 @@
 {
-  "name": "paralock",
+  "name": "paralock-monorepo",
   "private": true,
   "description": "Trustless atomic swaps between private money and dollars. First route: shielded ZEC <-> stablecoins on Tempo.",
   "license": "MIT",

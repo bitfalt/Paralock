@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { EVM_CHAIN_NAMES } from "@paralock/sdk";
 import { thsRunning } from "./devnet.js";
-import { DEVNET_EVM, parseEvmChains, repoRoot, SERVICE_PORTS } from "./env.js";
+import { checkoutRoot, DEVNET_EVM, parseEvmChains, SERVICE_PORTS, stateDir } from "./env.js";
 import { httpGet, isParalockWeb, jsonRpc, portInUse, run } from "./proc.js";
 
 /** `paralock doctor`: checks everything the local stack needs and prints a fix for each problem. */
@@ -84,17 +84,17 @@ function checkThs(): Check {
   };
 }
 
-function checkFoundry(): Check[] {
+/** The devnet needs only anvil from Foundry: the contracts are deployed from artifacts embedded in the CLI. */
+function checkAnvil(): Check[] {
   const anvil = run("anvil", ["--version"]);
-  const forge = run("forge", ["--version"]);
   const anvilVersion = anvil.status === 0 ? version(anvil.stdout) : undefined;
   const tempo = anvil.status === 0 && /possible values:[^\]]*\btempo\b/.test(run("anvil", ["--help"]).stdout);
   return [
     {
-      name: "Foundry ≥ 1.8 (anvil, forge)",
-      ok: !!anvilVersion && atLeast(anvilVersion, [1, 8]) && forge.status === 0,
+      name: "anvil ≥ 1.8 (Foundry)",
+      ok: !!anvilVersion && atLeast(anvilVersion, [1, 8]),
       required: true,
-      detail: anvilVersion ? `anvil ${anvilVersion.join(".")}${forge.status === 0 ? "" : ", forge missing"}` : "not found",
+      detail: anvilVersion ? `anvil ${anvilVersion.join(".")}` : "not found",
       fix: anvilVersion ? "foundryup" : FOUNDRY_INSTALL,
     },
     {
@@ -107,9 +107,8 @@ function checkFoundry(): Check[] {
   ];
 }
 
-function checkWorkspace(): Check[] {
-  const root = repoRoot();
-  const libs = ["forge-std", "tempo-std"].filter((lib) => !existsSync(join(root, "contracts", "lib", lib, "src")));
+/** Inside a checkout, `pnpm paralock` runs the built packages: they need installing and building. */
+function checkWorkspace(root: string): Check[] {
   const unbuilt: string[] = [];
   for (const dir of readdirSync(join(root, "packages"))) {
     const manifest = join(root, "packages", dir, "package.json");
@@ -120,6 +119,7 @@ function checkWorkspace(): Check[] {
   }
   const installed = existsSync(join(root, "node_modules"));
   return [
+    checkPnpm(),
     {
       name: "dependencies installed",
       ok: installed,
@@ -133,13 +133,6 @@ function checkWorkspace(): Check[] {
       required: true,
       detail: unbuilt.length ? `not built: ${unbuilt.join(", ")}` : "every package has its dist/",
       fix: "pnpm build",
-    },
-    {
-      name: "contract libraries",
-      ok: libs.length === 0,
-      required: true,
-      detail: libs.length ? `missing contracts/lib/${libs.join(", contracts/lib/")}` : "forge-std, tempo-std",
-      fix: "git submodule update --init --recursive",
     },
   ];
 }
@@ -158,7 +151,7 @@ async function checkPort(port: number, what: string, ours: () => Promise<string 
   } satisfies Check;
 }
 
-async function checkPorts(opts: { evm?: string | readonly string[]; webPort?: number }): Promise<Check[]> {
+async function checkPorts(opts: DoctorOptions): Promise<Check[]> {
   const ths = thsRunning();
   const zcash = async () => (ths ? "the running ths environment" : undefined);
   const checks: Promise<Check>[] = [
@@ -175,9 +168,10 @@ async function checkPorts(opts: { evm?: string | readonly string[]; webPort?: nu
       }),
     );
   }
+  const makerPort = opts.makerPort ?? SERVICE_PORTS.maker;
   checks.push(
-    checkPort(SERVICE_PORTS.maker, "maker", async () =>
-      (await httpGet(`http://127.0.0.1:${SERVICE_PORTS.maker}/health`))?.includes('"ok":true') ? "a Paralock maker" : undefined,
+    checkPort(makerPort, "maker", async () =>
+      (await httpGet(`http://127.0.0.1:${makerPort}/health`))?.includes('"ok":true') ? "a Paralock maker" : undefined,
     ),
   );
   const webPort = opts.webPort ?? SERVICE_PORTS.web;
@@ -192,18 +186,29 @@ async function checkPorts(opts: { evm?: string | readonly string[]; webPort?: nu
   return Promise.all(checks);
 }
 
+/** Options of `runDoctor`. */
+export interface DoctorOptions {
+  /** EVM chains whose anvil ports to check (`--evm`). */
+  evm?: string | readonly string[];
+  /** Web app port; checked as required only when set (`dev --web`). */
+  webPort?: number;
+  /** Maker port. Default 7420. */
+  makerPort?: number;
+}
+
 /** Runs every check, prints the results, and returns true if all required checks passed. */
-export async function runDoctor(opts: { evm?: string | readonly string[]; webPort?: number } = {}): Promise<boolean> {
+export async function runDoctor(opts: DoctorOptions = {}): Promise<boolean> {
+  const checkout = checkoutRoot();
   const checks: Check[] = [
     checkNode(),
-    checkPnpm(),
+    ...(checkout ? checkWorkspace(checkout) : []),
     checkDocker(),
     checkThs(),
-    ...checkFoundry(),
-    ...checkWorkspace(),
+    ...checkAnvil(),
     ...(await checkPorts(opts)),
   ];
   console.log("Paralock doctor");
+  console.log(`  state: ${stateDir()}${checkout ? " (this checkout)" : process.env.PARALOCK_HOME?.trim() ? " ($PARALOCK_HOME)" : ""}`);
   for (const c of checks) {
     const mark = c.ok ? "✓" : c.required ? "✗" : "!";
     console.log(`  ${mark} ${c.name.padEnd(34)} ${c.detail ?? ""}`);
@@ -216,6 +221,7 @@ export async function runDoctor(opts: { evm?: string | readonly string[]; webPor
   return failed.length === 0;
 }
 
-export async function doctorCommand(opts: { evm?: string | readonly string[] }): Promise<void> {
+/** `paralock doctor`: exits with code 1 if a required check failed. */
+export async function doctorCommand(opts: DoctorOptions): Promise<void> {
   if (!(await runDoctor(opts))) process.exitCode = 1;
 }

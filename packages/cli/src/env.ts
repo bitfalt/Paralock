@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import type { EvmChain, EvmNetwork, Hex } from "@paralock/sdk";
+import { join } from "node:path";
+import { type EvmChain, type EvmNetwork, findParalockCheckout, type Hex, paralockStateDir } from "@paralock/sdk";
 
-/** `.paralock/devnet.json`, written by `paralock devnet up`. Same shape as the SDK's `DevnetFile`. */
+/** `devnet.json` in the state directory, written by `paralock devnet up`. Same shape as the SDK's `DevnetFile`. */
 export interface DevnetFile {
   zcash: { network: "regtest"; rpc: string; lightwalletd: string; dashboard: string };
   /** One entry per EVM chain the devnet runs (`--evm`). */
@@ -16,7 +16,7 @@ export interface DevnetFile {
    * `swapAccount` holds the unshielded amount Paralock spends into the Zcash lock. Anvil dev account 1 on EVM chains.
    */
   taker: { thsAccount: number; swapAccount: number; evmKey: Hex };
-  /** Submits claims on the taker's behalf (adaptor mode): anvil dev account 2. */
+  /** Submits claims on the taker's behalf (`--relay`, in either mode): anvil dev account 2. */
   relayer: { evmKey: Hex };
 }
 
@@ -26,6 +26,7 @@ export const EVM_CHAINS: readonly EvmChain[] = ["tempo", "base", "ethereum", "ar
 /** Chains `devnet up` starts without `--evm`: the light common path. `--evm all` starts every chain. */
 export const DEFAULT_EVM_CHAINS: readonly EvmChain[] = ["tempo", "base", "ethereum"];
 
+/** How the devnet runs one EVM chain. */
 export interface DevnetChainSpec {
   port: number;
   chainId: number;
@@ -45,8 +46,17 @@ export const DEVNET_EVM: Record<EvmChain, DevnetChainSpec> = {
   hyperevm: { port: 8550, chainId: 31342, quoteToken: "USDC" },
 };
 
-/** Ports of the local services (besides the anvils). */
+/** Default ports of the local services (besides the anvils). The maker's can be changed with `--maker-port`. */
 export const SERVICE_PORTS = { zcashRpc: 18232, lightwalletd: 9067, thsDashboard: 32805, maker: 7420, web: 3000 } as const;
+
+/** The maker URL for `port` (devnet.json's `maker.url`). */
+export const makerUrl = (port: number): string => `http://127.0.0.1:${port}`;
+
+/** The port of a maker URL such as devnet.json's `maker.url`. */
+export function makerPort(url: string): number {
+  const { port, protocol } = new URL(url);
+  return port ? Number(port) : protocol === "https:" ? 443 : 80;
+}
 
 /** Parses `--evm tempo,base` or `--evm all` (default: `DEFAULT_EVM_CHAINS`). */
 export function parseEvmChains(value: string | readonly string[] | undefined): EvmChain[] {
@@ -61,18 +71,26 @@ export function parseEvmChains(value: string | readonly string[] | undefined): E
   return EVM_CHAINS.filter((c) => names.includes(c));
 }
 
-/** Repo root: the nearest ancestor with pnpm-workspace.yaml (falls back to the cwd). */
-export function repoRoot(start = process.cwd()): string {
-  let dir = start;
-  while (dir !== dirname(dir)) {
-    if (existsSync(join(dir, "pnpm-workspace.yaml"))) return dir;
-    dir = dirname(dir);
-  }
-  return start;
-}
+/** The Paralock checkout the CLI runs in (see `findParalockCheckout`), or undefined (an npm install or the binary). */
+export const checkoutRoot = (): string | undefined => findParalockCheckout();
 
-export const stateDir = () => join(repoRoot(), ".paralock");
-export const statePath = (file: string) => join(stateDir(), file);
+/**
+ * Where the devnet's state lives: `<checkout>/.paralock` inside a Paralock checkout, else `$PARALOCK_HOME`, else
+ * `~/.paralock` (`paralockStateDir`).
+ */
+export const stateDir = (): string => paralockStateDir();
+
+/** `file` inside `stateDir()`. */
+export const statePath = (file: string): string => join(stateDir(), file);
+
+/**
+ * Where `devnet up` records each local chain's contracts: `contracts/deployments/<chainId>.json` in a checkout (as
+ * `contracts/script/Deploy.s.sol` does), else `deployments/<chainId>.json` in the state directory.
+ */
+export function deploymentPath(chainId: number): string {
+  const checkout = checkoutRoot();
+  return checkout ? join(checkout, "contracts", "deployments", `${chainId}.json`) : statePath(join("deployments", `${chainId}.json`));
+}
 
 /** PATH including the usual install locations of ths, Foundry and Docker (OrbStack / Docker Desktop). */
 export function toolEnv(): NodeJS.ProcessEnv {
@@ -101,6 +119,7 @@ export const ANVIL_ADDRESSES: Hex[] = [
   "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
 ];
 
+/** Writes `devnet.json` into the state directory and returns its path. */
 export function writeDevnet(cfg: DevnetFile): string {
   mkdirSync(stateDir(), { recursive: true });
   const path = statePath("devnet.json");
@@ -108,9 +127,22 @@ export function writeDevnet(cfg: DevnetFile): string {
   return path;
 }
 
+/** The maker port to use: `override` if given, else the running devnet's (devnet.json `maker.url`), else 7420. */
+export function devnetMakerPort(override?: number): number {
+  if (override !== undefined) return override;
+  try {
+    const cfg = JSON.parse(readFileSync(statePath("devnet.json"), "utf8")) as Partial<DevnetFile>;
+    if (cfg.maker?.url) return makerPort(cfg.maker.url);
+  } catch {
+    // no devnet yet
+  }
+  return SERVICE_PORTS.maker;
+}
+
+/** Reads the state directory's `devnet.json`; throws with a hint if there is none. */
 export function readDevnet(): DevnetFile {
   const path = statePath("devnet.json");
-  if (!existsSync(path)) throw new Error("no devnet found; run `paralock devnet up` first");
+  if (!existsSync(path)) throw new Error(`no devnet found at ${path}; run \`paralock devnet up\` first`);
   const cfg = JSON.parse(readFileSync(path, "utf8")) as Partial<DevnetFile>;
   if (!cfg.evm) throw new Error(`${path} is from an older Paralock (no "evm" section); run \`paralock devnet up\` again`);
   return cfg as DevnetFile;

@@ -4,22 +4,28 @@ import type { EvmChain } from "@paralock/sdk";
 import { devCommand } from "./dev.js";
 import { devnetDown, devnetStatus, devnetUp } from "./devnet.js";
 import { doctorCommand } from "./doctor.js";
+import { devnetMakerPort } from "./env.js";
 import { runMaker } from "./maker-server.js";
+import { invocation, VERSION } from "./runtime.js";
 import { listSwaps, refundSwap, resumeSwap, runSwap } from "./swap.js";
 
-const HELP = `paralock: trustless swaps between shielded ZEC and dollars on EVM chains
+const HELP = `paralock ${VERSION}: trustless swaps between shielded ZEC and dollars on EVM chains (local devnet)
 
 Usage:
-  paralock doctor [--evm <chains>]        Check prerequisites (Node, pnpm, Docker, ths, Foundry, ports, builds)
-  paralock dev [--evm <chains>] [--web] [--web-port 3000] [--ths-log <file>]
-                                          Everything at once: doctor, devnet up, the maker (and the web app with
-                                          --web) in the background; reuses whatever is already running
-  paralock devnet up [--evm <chains>] [--ths-log <file>]
-                                          Start local Zcash (ths) + EVM chains (anvil) and deploy contracts;
+  paralock doctor [--evm <chains>] [--maker-port <port>]
+                                          Check prerequisites: Node ≥ 20, Docker, ths, anvil ≥ 1.8, ports; plus
+                                          pnpm and builds in a checkout
+  paralock dev [--evm <chains>] [--maker-port 7420] [--web] [--web-port 3000] [--ths-log <file>]
+                                          Everything at once: doctor, devnet up and the maker in the background
+                                          (plus the web app with --web, from a checkout only); reuses whatever is
+                                          already running
+  paralock devnet up [--evm <chains>] [--maker-port 7420] [--ths-log <file>]
+                                          Start local Zcash (ths) + EVM chains (anvil) and deploy the contracts;
                                           adds to the chains of a running devnet
-  paralock devnet status                  Show devnet heights and addresses
+  paralock devnet status                  Show the state directory, devnet heights and addresses
   paralock devnet down                    Stop what Paralock started (ths, anvils, maker, web) and delete the devnet
-  paralock maker [--port 7420]            Run the devnet market maker (all devnet chains, both modes)
+  paralock maker [--port <port>]          Run the devnet market maker (all devnet chains, both modes); default port:
+                                          the devnet's maker port (7420 unless set with --maker-port)
   paralock swap --zec <amount> [options]  Swap ZEC for stablecoins as the devnet taker
       --chain <chain>                     Where to receive the stablecoins (default tempo)
       --private                           Adaptor-signature mode: no hash on either chain
@@ -29,23 +35,41 @@ Usage:
       --jitter <ms>                       Random delay before claiming
       --no-shield                         Don't unshield first / reshield after
       --refund-demo                       Lock ZEC and let the maker vanish; refund after the timeout
-  paralock pay --usd <amount> --to <0x…> [--chain <chain>] [--private] [--relay] [--label <text>]
+  paralock pay --usd <amount> --to <0x…> [--chain <chain>] [--private] [--relay] [--label <text>] [--no-shield]
                                           Pay someone an exact dollar amount from shielded ZEC
-  paralock swaps                          List unfinished swaps saved in .paralock/taker
-  paralock resume <id>                    Continue a saved swap after a crash or restart
+  paralock swaps                          List unfinished swaps saved in the state directory (taker/)
+  paralock resume <id> [--no-shield]      Continue a saved swap after a crash or restart, then reshield change
   paralock refund <id> [--no-shield]      Refund a saved swap's ZEC once its refund height is reached
+  paralock --version                      Print the version
 
 <chains>: comma-separated, from tempo, base, ethereum, arbitrum, robinhood, hyperevm, or "all".
   Default: tempo,base,ethereum. Each runs on its own anvil (ports 8545-8550, chain ids 31337-31342).
+
+State (devnet.json, ths log, swap stores, keys): <checkout>/.paralock inside a Paralock checkout, otherwise
+  $PARALOCK_HOME, otherwise ~/.paralock.
 `;
+
+/** Parses a `--port`-style value. */
+function portOption(name: string, value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error(`${name} must be a port number, got "${value}"`);
+  return port;
+}
 
 async function main() {
   const [cmd, sub, ...rest] = process.argv.slice(2);
+  if (cmd === "--version" || cmd === "-v" || cmd === "version") return console.log(VERSION);
   if (cmd === "devnet") {
-    const { values } = parseArgs({ args: rest, options: { "ths-log": { type: "string" }, evm: { type: "string" } } });
+    const { values } = parseArgs({
+      args: rest,
+      options: { "ths-log": { type: "string" }, evm: { type: "string" }, "maker-port": { type: "string" } },
+    });
     if (sub === "up") {
-      await devnetUp({ thsLog: values["ths-log"], evm: values.evm?.split(",") });
-      console.log("\nNext: `paralock maker` in one terminal, then `paralock swap --zec 1` in another.");
+      const makerPort = portOption("--maker-port", values["maker-port"]);
+      await devnetUp({ thsLog: values["ths-log"], evm: values.evm?.split(","), makerPort });
+      const cli = invocation();
+      console.log(`\nNext: \`${cli} maker\` in one terminal, then \`${cli} swap --zec 1\` in another.`);
       return;
     }
     if (sub === "down") return devnetDown();
@@ -53,8 +77,8 @@ async function main() {
   }
   const args = [sub, ...rest].filter((a): a is string => a !== undefined);
   if (cmd === "doctor") {
-    const { values } = parseArgs({ args, options: { evm: { type: "string" } } });
-    return doctorCommand({ evm: values.evm });
+    const { values } = parseArgs({ args, options: { evm: { type: "string" }, "maker-port": { type: "string" } } });
+    return doctorCommand({ evm: values.evm, makerPort: portOption("--maker-port", values["maker-port"]) ?? devnetMakerPort() });
   }
   if (cmd === "dev") {
     const { values } = parseArgs({
@@ -64,25 +88,28 @@ async function main() {
         "ths-log": { type: "string" },
         web: { type: "boolean" },
         "web-port": { type: "string" },
+        "maker-port": { type: "string" },
       },
     });
     return devCommand({
       evm: values.evm,
       thsLog: values["ths-log"],
       web: !!values.web || values["web-port"] !== undefined,
-      webPort: values["web-port"] ? Number(values["web-port"]) : undefined,
+      webPort: portOption("--web-port", values["web-port"]),
+      makerPort: portOption("--maker-port", values["maker-port"]),
     });
   }
   if (cmd === "maker") {
     const { values } = parseArgs({ args, options: { port: { type: "string" } } });
-    return runMaker({ port: Number(values.port ?? 7420) });
+    return runMaker({ port: portOption("--port", values.port) ?? devnetMakerPort() });
   }
   if (cmd === "swaps") return listSwaps();
   if (cmd === "resume" || cmd === "refund") {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "no-shield": { type: "boolean" } } });
     const id = positionals[0];
     if (!id) throw new Error(`usage: paralock ${cmd} <swap id>`);
-    return cmd === "resume" ? resumeSwap(id) : refundSwap(id, { shield: !values["no-shield"] });
+    const shield = !values["no-shield"];
+    return cmd === "resume" ? resumeSwap(id, { shield }) : refundSwap(id, { shield });
   }
   if (cmd === "pay") {
     const { values } = parseArgs({
@@ -137,6 +164,11 @@ async function main() {
         jitterMs: values.jitter ? Number(values.jitter) : undefined,
       },
     });
+  }
+  if (cmd !== undefined && !["help", "--help", "-h"].includes(cmd)) {
+    process.stderr.write(`unknown command: ${[cmd, cmd === "devnet" ? sub : undefined].filter(Boolean).join(" ")}\n\n${HELP}`);
+    process.exitCode = 1;
+    return;
   }
   process.stdout.write(HELP);
 }

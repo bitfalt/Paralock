@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { existsSync, openSync, readFileSync, rmSync } from "node:fs";
 import { connect } from "node:net";
-import { repoRoot, toolEnv } from "./env.js";
+import { checkoutRoot, toolEnv } from "./env.js";
 
 /** Process and network helpers shared by `devnet`, `doctor` and `dev`. */
 
@@ -83,8 +83,9 @@ export function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs
 }
 
 /**
- * Starts `cmd` in its own process group, detached from this process, appending its output to `logFile`.
- * Returns the pid (also the process group id).
+ * Starts `cmd` in its own process group, detached from this process, appending its output to `logFile`. It runs in
+ * the checkout root inside a Paralock checkout, else in this process's directory, so a `paralock` child resolves the
+ * same state directory. Returns the pid (also the process group id).
  */
 export function startDetached(
   cmd: string,
@@ -97,7 +98,7 @@ export function startDetached(
     detached: true,
     stdio: ["ignore", out, out],
     env: { ...toolEnv(), ...opts.env },
-    cwd: opts.cwd ?? repoRoot(),
+    cwd: opts.cwd ?? checkoutRoot() ?? process.cwd(),
   });
   child.unref();
   if (!child.pid) throw new Error(`could not start ${cmd}`);

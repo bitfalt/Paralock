@@ -45,7 +45,7 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
     onUpdate: printStep,
     onFreshRecipient: (account, swap) => {
       saveRecipient({ address: account.address, privateKey: account.privateKey, swapId: swap.id, chain: opts.chain });
-      console.log(`  fresh recipient ${account.address} (key saved to .paralock/recipients.jsonl)`);
+      console.log(`  fresh recipient ${account.address} (key saved to ${statePath("recipients.jsonl")})`);
     },
   });
 
@@ -110,11 +110,15 @@ export async function listSwaps(): Promise<void> {
   }
 }
 
-/** Continues a saved swap (e.g. after a crash) and prints its progress. */
-export async function resumeSwap(id: string): Promise<void> {
-  const { taker } = await devnetTaker(readDevnet(), { store: statePath("taker"), onUpdate: printStep });
+/**
+ * Continues a saved swap (e.g. after a crash) and prints its progress. Like `swap`, it then shields change and refunds
+ * that came back to the wallet, unless `shield` is false (`--no-shield`).
+ */
+export async function resumeSwap(id: string, opts: { shield: boolean }): Promise<void> {
+  const { taker, reshield } = await devnetTaker(readDevnet(), { store: statePath("taker"), onUpdate: printStep });
   const swap = await taker.resume(id, { claim: true });
   console.log(`Swap ${swap.id}: ${swap.status}`);
+  if (opts.shield && (await reshield())) console.log("Change and refunds shielded back into Ironwood.");
 }
 
 /** Refunds a saved swap's ZEC once its refund height is reached. */
