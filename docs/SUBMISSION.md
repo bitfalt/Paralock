@@ -88,38 +88,34 @@ earn the spread.
    - **Private mode:** removes that link (adaptor signatures).
    - **Next:** a fully shielded leg with FROST. See docs/PRIVACY.md.
 
-## Pitch video script (~3:00 at ~125 wpm, about 370 words)
+## Pitch video script (2:00 max; 237 words, about 1:55 at ~125 wpm)
 
-**[0:00, hook]** Zcash is the strongest privacy money there is. But to spend it in dollars today, your ZEC goes
-through a bridge, an exchange or a solver network. Somebody else holds your money in the middle.
+The form asks you to introduce yourself, say what you're building and why you're the one to build it.
 
-**[0:15, solution]** Paralock removes that somebody. Two locks, one key. You lock ZEC on Zcash. A market maker
-locks dollars on an EVM chain like Tempo or Base. One secret opens both. When you claim your dollars, the secret
-becomes public, and the maker uses it to take the ZEC. If anyone walks away, both sides get refunds. The code
-enforces it, not a company.
+**[intro]** Hi, I'm bitfalt. I'm a backend engineer working on zero-knowledge infrastructure, and a computer
+engineering master's student in Costa Rica.
 
-**[0:45, privacy]** You unshield only what you swap, and everything else stays shielded. In private mode, adaptor
-signatures hide the secret inside the signatures themselves, so not even a hash links the two chains.
+**[problem]** Zcash has the strongest privacy in crypto. But the moment you want to spend it in dollars, you have to
+hand your ZEC to a bridge, an exchange or a solver. Somebody holds your money in the middle.
 
-**[1:05, proof]** This isn't a slideshow. The escrows are live, with verified source, on six public EVM testnets.
-And we ran real swaps from the Zcash testnet to Tempo, through a public server, with no node of our own. The first
-one failed safely: the quote expired, the maker never locked, and the ZEC came back through the refund path. That
-found a real bug, which we fixed. The next run settled in three minutes and thirty-nine seconds. Every transaction
-is public.
+**[what]** I'm building Paralock, an open-source toolkit that removes that somebody. Two locks, one key. You lock ZEC
+on Zcash, a market maker locks stablecoins on a chain like Tempo or Base, and one secret opens both. Either both
+sides get paid, or both get refunded. In private mode, not even a hash links the two chains.
 
-**[1:40, open source]** Everything is open source and published. A TypeScript SDK on npm. A Rust SDK on
-crates.io, so a market maker can run as one native binary. Both speak the same protocol, checked against a shared
-set of test vectors. One command starts a full local network for developers, and the docs are written for coding
-agents too, with an MCP server.
+**[developers]** It's built for developers. There's a TypeScript SDK on npm, a Rust SDK and a native binary on
+crates.io, a one-command local network, and docs that coding agents can read. Wallets can add "swap to dollars"
+without ever holding user funds. And it already runs on public testnets, with every transaction published.
 
-**[2:10, business]** The toolkit is free. The business is liquidity: we host the market makers that quote these
-swaps and earn the spread on every one. Wallets and apps integrate the SDK; our payment-link app, Pay, is one
-example. The protocol is open, so more makers can join.
+**[business]** The business is liquidity. The toolkit is free; we host the market makers and earn the spread on every
+swap.
 
-**[2:35, close]** I'm bitfalt. I build backend infrastructure for zero-knowledge systems. Paralock: keep your savings
-private, spend them in dollars, and trust no one in between. Thank you.
+**[why me]** Why me? I build backend systems for zero-knowledge infrastructure every day, and this needed both sides:
+low-level Zcash transaction code and production-grade engineering. In one hackathon I shipped both SDKs, the
+contracts and real testnet swaps.
 
-## Demo video script (~2:30)
+**[close]** Paralock: keep it shielded, spend it in dollars, and trust no one in between. Thanks.
+
+## Demo video script (~2:30; 3:00 max, show the live product, not slides or code)
 
 1. **Landing (10 s):** paralock.xyz. Scroll past the testnet proof and the roadmap. Narrate: "Everything here links
    to something you can check."
