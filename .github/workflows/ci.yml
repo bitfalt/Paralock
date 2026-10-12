@@ -39,7 +39,8 @@ jobs:
       - run: pnpm --filter @paralock/lightwalletd test
       - run: pnpm --filter paralock test
       - name: Typecheck the examples
-        run: for d in examples/*/; do (cd "$d" && npx tsc --noEmit) || exit 1; done
+        # The TypeScript examples; examples/rust holds Cargo workspace members (built by the rust job).
+        run: for d in examples/*/; do [ -f "$d/tsconfig.json" ] || continue; (cd "$d" && npx tsc --noEmit) || exit 1; done
       - name: Typecheck and build the web app
         working-directory: apps/web
         env:

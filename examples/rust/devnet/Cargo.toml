@@ -1,0 +1,23 @@
+[package]
+name = "paralock-examples-devnet"
+description = "Devnet plumbing shared by the Rust examples: the CLI's state-dir rule, .paralock/devnet.json, key files, the ths faucet and a few regtest JSON-RPC calls. Not part of the SDK."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "devnet"
+
+[dependencies]
+paralock-core = { path = "../../../crates/paralock-core" }
+anyhow = "1.0.100"
+rand_core = { workspace = true }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+
+[lints]
+workspace = true
