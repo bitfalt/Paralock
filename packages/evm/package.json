@@ -39,14 +39,14 @@
     "usdc"
   ],
   "author": "bitfalt (https://github.com/bitfalt)",
-  "homepage": "https://github.com/bitfalt/Paralock#readme",
+  "homepage": "https://github.com/bitfalt/paralock#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bitfalt/Paralock.git",
+    "url": "git+https://github.com/bitfalt/paralock.git",
     "directory": "packages/evm"
   },
   "bugs": {
-    "url": "https://github.com/bitfalt/Paralock/issues"
+    "url": "https://github.com/bitfalt/paralock/issues"
   },
   "publishConfig": {
     "access": "public"

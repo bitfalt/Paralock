@@ -20,7 +20,7 @@ cargo install paralock-cli                                                  # fr
 The [installer](https://paralock.xyz/install) is a short POSIX shell script; read it before you pipe it to `sh`. It:
 
 1. picks the build for your machine: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu` (Linux builds need glibc 2.35 or newer), and the native build under Rosetta;
-2. downloads `paralock-<target>.tar.gz` and `SHA256SUMS` from the [GitHub release](https://github.com/bitfalt/Paralock/releases/tag/cli-v0.1.0) (the latest one, or `PARALOCK_VERSION`);
+2. downloads `paralock-<target>.tar.gz` and `SHA256SUMS` from the [GitHub release](https://github.com/bitfalt/paralock/releases/tag/cli-v0.1.0) (the latest one, or `PARALOCK_VERSION`);
 3. refuses to install unless the tarball's SHA-256 matches `SHA256SUMS`;
 4. installs the binary to `${PARALOCK_HOME:-$HOME/.paralock}/bin/paralock`, replacing an older one atomically, and prints the line to add that directory to your `PATH`.
 
@@ -51,7 +51,7 @@ On the devnet the taker uses its own Zcash key (`<state>/rust-cli/taker-zcash.ke
 
 ## Configuration: `paralock.toml`
 
-Without `--devnet`, the binary reads `paralock.toml` from `--config <file>`, else `$PARALOCK_CONFIG`, else `./paralock.toml`, else `<state>/paralock.toml`. This is the complete, commented example shipped with the crate ([`paralock.example.toml`](https://github.com/bitfalt/Paralock/blob/main/crates/paralock-cli/paralock.example.toml)):
+Without `--devnet`, the binary reads `paralock.toml` from `--config <file>`, else `$PARALOCK_CONFIG`, else `./paralock.toml`, else `<state>/paralock.toml`. This is the complete, commented example shipped with the crate ([`paralock.example.toml`](https://github.com/bitfalt/paralock/blob/main/crates/paralock-cli/paralock.example.toml)):
 
 ```toml title="paralock.toml" file="paralock.toml"
 # paralock.toml: the configuration of the `paralock` binary.

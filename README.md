@@ -6,7 +6,7 @@
 
 Trustless swaps and payments between shielded ZEC and stablecoins on EVM chains.
 
-[![CI](https://github.com/bitfalt/Paralock/actions/workflows/ci.yml/badge.svg)](https://github.com/bitfalt/Paralock/actions/workflows/ci.yml)
+[![CI](https://github.com/bitfalt/paralock/actions/workflows/ci.yml/badge.svg)](https://github.com/bitfalt/paralock/actions/workflows/ci.yml)
 [![npm: @paralock/sdk](https://img.shields.io/npm/v/@paralock/sdk?label=%40paralock%2Fsdk)](https://www.npmjs.com/package/@paralock/sdk)
 [![crates.io: paralock](https://img.shields.io/crates/v/paralock?label=crates.io)](https://crates.io/crates/paralock)
 [![docs.rs](https://img.shields.io/docsrs/paralock?label=docs.rs)](https://docs.rs/paralock)
@@ -256,7 +256,7 @@ npx paralock doctor        # checks every prerequisite and prints a fix for each
 npx paralock dev           # Tempo, Base and Ethereum; --evm all adds Arbitrum, Robinhood Chain and HyperEVM
 
 # From a clone (works today), with the web app on http://localhost:3000
-git clone https://github.com/bitfalt/Paralock && cd Paralock
+git clone https://github.com/bitfalt/paralock && cd paralock
 pnpm install && pnpm build
 pnpm paralock doctor
 pnpm paralock dev --web --evm all
@@ -386,13 +386,13 @@ reviewer's reproductions as regression tests (`tests/audit.rs`). This is not a t
 before mainnet.
 
 **Report a vulnerability** privately through a
-[GitHub security advisory](https://github.com/bitfalt/Paralock/security/advisories), not a public issue.
+[GitHub security advisory](https://github.com/bitfalt/paralock/security/advisories), not a public issue.
 
 ## For AI agents
 
 | You want to | Use |
 |---|---|
-| Have a coding assistant integrate Paralock | The skill: `npx skills add bitfalt/Paralock` ([`skills/paralock/SKILL.md`](skills/paralock/SKILL.md)) |
+| Have a coding assistant integrate Paralock | The skill: `npx skills add bitfalt/paralock` ([`skills/paralock/SKILL.md`](skills/paralock/SKILL.md)) |
 | Give a model the docs as text | [`llms.txt`](https://paralock.xyz/llms.txt) (index), [`llms-full.txt`](https://paralock.xyz/llms-full.txt) (everything), or any page as Markdown: `https://paralock.xyz/docs/<slug>.md` |
 | Let an assistant search the docs and fetch contract addresses | The read-only MCP server at `https://paralock.xyz/mcp`: `list_docs`, `read_doc`, `search_docs`, `get_deployments`. No key, never signs or sends anything |
 | Work on this repository | [`AGENTS.md`](AGENTS.md): map, commands, invariants, conventions, recipes |

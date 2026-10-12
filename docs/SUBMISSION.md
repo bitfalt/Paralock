@@ -64,8 +64,8 @@ earn the spread.
 
 **Links:**
 - Website and docs: https://paralock.xyz, https://paralock.xyz/docs
-- Repo: https://github.com/bitfalt/Paralock
-- Testnet runs: https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md
+- Repo: https://github.com/bitfalt/paralock
+- Testnet runs: https://github.com/bitfalt/paralock/blob/main/docs/TESTNET-RUNS.md
 - npm: https://www.npmjs.com/package/@paralock/sdk · crates.io: https://crates.io/crates/paralock
 - Pitch video: (YouTube link)
 - Demo video: (YouTube link)

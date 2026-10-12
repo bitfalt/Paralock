@@ -83,7 +83,7 @@ The `@paralock/tempo`-era aliases (`createTempoHtlc`, `createTempoClients`, `Tem
 token listed as `USDC` (`0xD9B278625B5946B8CD15dad6c0c776095B8D0513`, 6 decimals). A taker must accept it explicitly:
 `@paralock/sdk`'s `createTaker` without `tokens` on 46630 fails with a message pointing to it.
 
-The contracts live in [`contracts/`](https://github.com/bitfalt/Paralock/tree/main/contracts) (Foundry, 146 tests).
+The contracts live in [`contracts/`](https://github.com/bitfalt/paralock/tree/main/contracts) (Foundry, 146 tests).
 
 ## Status
 

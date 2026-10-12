@@ -139,4 +139,4 @@ there and in the unit tests. The "Changed" entries describe how the API differs 
 - `EvmClient` implementors: the taker now sends claims with `send_claim` (default: `claim`) and follows them; reporting
   `transaction_status` and implementing `bump_claim` lets it see and fix a stuck claim.
 
-[0.1.0]: https://github.com/bitfalt/Paralock/releases/tag/paralock-v0.1.0
+[0.1.0]: https://github.com/bitfalt/paralock/releases/tag/paralock-v0.1.0

@@ -114,7 +114,7 @@ claude mcp add --transport http paralock https://paralock.xyz/mcp
 { "mcpServers": { "paralock": { "url": "https://paralock.xyz/mcp" } } }
 
 # The skill, for coding agents that integrate the SDK
-npx skills add bitfalt/Paralock
+npx skills add bitfalt/paralock
 `;
 
 const TABS: Tab[] = [

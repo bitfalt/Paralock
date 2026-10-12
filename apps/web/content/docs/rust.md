@@ -232,7 +232,7 @@ The protocol keeps funds safe against the counterparty. Each party still trusts 
 
 ## Examples
 
-Six runnable examples live in [`examples/rust`](https://github.com/bitfalt/Paralock/tree/main/examples/rust). The devnet ones run against `npx paralock dev` (or `pnpm paralock dev` in a checkout):
+Six runnable examples live in [`examples/rust`](https://github.com/bitfalt/paralock/tree/main/examples/rust). The devnet ones run against `npx paralock dev` (or `pnpm paralock dev` in a checkout):
 
 | Example | What it shows | Runs on |
 |---|---|---|
@@ -244,7 +244,7 @@ Six runnable examples live in [`examples/rust`](https://github.com/bitfalt/Paral
 | `rust-testnet` | A real swap: TAZ over lightwalletd to OUSD on Tempo Moderato, with an in-process maker | Zcash testnet and Tempo Moderato |
 
 ```sh
-git clone https://github.com/bitfalt/Paralock && cd Paralock
+git clone https://github.com/bitfalt/paralock && cd paralock
 pnpm install && pnpm build && pnpm paralock dev --evm all   # the devnet and the TypeScript maker
 cargo run -p rust-quickstart                                # 0.1 ZEC to USDC on Base, htlc mode
 ```

@@ -17,7 +17,7 @@ Paralock is built to be used by agents as well as people. Coding assistants can 
 The skill teaches a coding agent how to integrate Paralock: the packages and what each is for, a taker and a maker in a few lines, the two modes, the safety rules below, local testing and a troubleshooting table. Install it in your project:
 
 ```sh
-npx skills add bitfalt/Paralock
+npx skills add bitfalt/paralock
 ```
 
 It installs `skills/paralock/SKILL.md` from the repository into each agent's skills folder (`.claude/skills` for Claude Code, `.agents/skills` for Codex, Cursor, OpenCode, Gemini CLI, GitHub Copilot, Zed, Cline and Pi), and `-a <agent>` picks the agents. The [skills CLI](https://github.com/vercel-labs/skills#supported-agents) lists every agent and path. Agents that support skills load it when a task matches: paying dollars from ZEC, accepting ZEC for a stablecoin payment, running a maker, or using Zcash HTLCs, 2-of-2 locks or ECDSA adaptor signatures from TypeScript.
@@ -216,7 +216,7 @@ Every tool above can reach the server. For one that can't (no MCP, or only local
 
 ## Working on the repository
 
-To work **on** Paralock rather than with it, read [`AGENTS.md`](https://github.com/bitfalt/Paralock/blob/main/AGENTS.md) at the repository root (`CLAUDE.md` imports it). It is written for Codex, Claude Code, Cursor, Copilot, Gemini and humans, and covers the repository map, the build and test commands, the protocol invariants, the code conventions, recipes (adding an EVM chain, an example, publishing) and known gotchas. The web app has its own `apps/web/AGENTS.md` with notes on its Next.js version.
+To work **on** Paralock rather than with it, read [`AGENTS.md`](https://github.com/bitfalt/paralock/blob/main/AGENTS.md) at the repository root (`CLAUDE.md` imports it). It is written for Codex, Claude Code, Cursor, Copilot, Gemini and humans, and covers the repository map, the build and test commands, the protocol invariants, the code conventions, recipes (adding an EVM chain, an example, publishing) and known gotchas. The web app has its own `apps/web/AGENTS.md` with notes on its Next.js version.
 
 ## Safety rules for agents that move funds
 

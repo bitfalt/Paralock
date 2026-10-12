@@ -31,7 +31,7 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 
   Why: anyone can check the code that holds the funds.
 
-- **The first public testnet swaps.** On 2026-10-12, Zcash testnet to Tempo Moderato: run 1 failed safely and refunded, and exposed a quote-expiry bug that the devnet's 3-second blocks hid; run 2, with the fix, swapped 0.015 TAZ for 19.39 OUSD in 3 min 39 s; run 3, driven by the Rust SDK, swapped 0.003 TAZ for 3.72 OUSD. Every transaction is in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md).
+- **The first public testnet swaps.** On 2026-10-12, Zcash testnet to Tempo Moderato: run 1 failed safely and refunded, and exposed a quote-expiry bug that the devnet's 3-second blocks hid; run 2, with the fix, swapped 0.015 TAZ for 19.39 OUSD in 3 min 39 s; run 3, driven by the Rust SDK, swapped 0.003 TAZ for 3.72 OUSD. Every transaction is in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/paralock/blob/main/docs/TESTNET-RUNS.md).
 
   Why: real block times and public infrastructure find bugs a local devnet can't.
 
@@ -39,7 +39,7 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 
   Why: they close the bug from run 1, and port the failure-handling fixes from the Rust reviews to TypeScript.
 
-- **The protocol spec and test vectors.** [`spec/PROTOCOL.md`](https://github.com/bitfalt/Paralock/blob/main/spec/PROTOCOL.md) (protocol v1.1) with cross-language vectors in [`spec/vectors`](https://github.com/bitfalt/Paralock/tree/main/spec/vectors).
+- **The protocol spec and test vectors.** [`spec/PROTOCOL.md`](https://github.com/bitfalt/paralock/blob/main/spec/PROTOCOL.md) (protocol v1.1) with cross-language vectors in [`spec/vectors`](https://github.com/bitfalt/paralock/tree/main/spec/vectors).
 
   Why: a second implementation can prove it is byte-for-byte compatible.
 
@@ -123,6 +123,6 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 
 ## Follow along
 
-- The [repository](https://github.com/bitfalt/Paralock) and its [issues](https://github.com/bitfalt/Paralock/issues) are where work happens.
+- The [repository](https://github.com/bitfalt/paralock) and its [issues](https://github.com/bitfalt/paralock/issues) are where work happens.
 - [Security model](/docs/security) lists what is still missing before real funds.
 - Ideas and questions are welcome as GitHub issues.

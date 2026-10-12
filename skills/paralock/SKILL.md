@@ -125,7 +125,7 @@ npx paralock swap --zec 1 --chain base --private
 npx paralock pay --usd 25 --to 0x… --chain tempo
 ```
 
-From a clone of github.com/bitfalt/Paralock, the same commands run as `pnpm paralock …` after
+From a clone of github.com/bitfalt/paralock, the same commands run as `pnpm paralock …` after
 `pnpm install && pnpm build`, and `dev --web` also starts the web app.
 
 `examples/quickstart`, `examples/payroll` and `examples/sell-a-secret` are complete apps that use the public API.

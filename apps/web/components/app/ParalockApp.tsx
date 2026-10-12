@@ -373,7 +373,7 @@ export function ParalockApp() {
         <nav aria-label="Footer">
           <Link href="/">Home</Link>
           <Link href="/#how">How it works</Link>
-          <a href="https://github.com/bitfalt/Paralock" target="_blank" rel="noreferrer">
+          <a href="https://github.com/bitfalt/paralock" target="_blank" rel="noreferrer">
             GitHub
           </a>
         </nav>

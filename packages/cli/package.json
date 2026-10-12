@@ -19,11 +19,11 @@
   "homepage": "https://paralock.xyz",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bitfalt/Paralock.git",
+    "url": "git+https://github.com/bitfalt/paralock.git",
     "directory": "packages/cli"
   },
   "bugs": {
-    "url": "https://github.com/bitfalt/Paralock/issues"
+    "url": "https://github.com/bitfalt/paralock/issues"
   },
   "type": "module",
   "bin": {

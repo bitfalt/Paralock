@@ -17,7 +17,7 @@ In production the maker is a separate service behind `makerHandler`, and the tak
 
 ## The first public runs
 
-The first public testnet swaps are recorded, with every transaction, in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md):
+The first public testnet swaps are recorded, with every transaction, in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/paralock/blob/main/docs/TESTNET-RUNS.md):
 
 | Run | Mode | Result |
 |---|---|---|
@@ -155,7 +155,7 @@ In htlc mode the refund is signed with `ZEC_TAKER_KEY`; in private mode it uses 
 
 ## With the Rust SDK
 
-[`examples/rust/rust-testnet`](https://github.com/bitfalt/Paralock/tree/main/examples/rust/rust-testnet) runs the same swap with the [Rust SDK](/docs/rust): a Rust taker and an in-process Rust maker, the `Lightwalletd` backend on `testnet.zec.rocks:443`, and the Moderato escrows from `paralock-evm`'s registry (`testnet_deployment(42431)`). It reads the same variables and `.paralock/testnet-*.json` files as the TypeScript example, with its own swap stores (`.paralock/testnet-swaps/rust-maker` and `rust-taker`), since the two SDKs' record formats differ.
+[`examples/rust/rust-testnet`](https://github.com/bitfalt/paralock/tree/main/examples/rust/rust-testnet) runs the same swap with the [Rust SDK](/docs/rust): a Rust taker and an in-process Rust maker, the `Lightwalletd` backend on `testnet.zec.rocks:443`, and the Moderato escrows from `paralock-evm`'s registry (`testnet_deployment(42431)`). It reads the same variables and `.paralock/testnet-*.json` files as the TypeScript example, with its own swap stores (`.paralock/testnet-swaps/rust-maker` and `rust-taker`), since the two SDKs' record formats differ.
 
 ```sh
 cargo run -p rust-testnet -- --quote-only           # keys, balance and a live quote; nothing moves

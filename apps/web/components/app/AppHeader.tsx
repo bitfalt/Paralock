@@ -29,7 +29,7 @@ export function AppHeader({ backend }: { backend: "devnet" | "mock" | null }) {
               {status.more && <span className="netstatus__more">{status.more}</span>}
             </span>
           </span>
-          <a className="iconlink" href="https://github.com/bitfalt/Paralock" target="_blank" rel="noreferrer" aria-label="Paralock on GitHub">
+          <a className="iconlink" href="https://github.com/bitfalt/paralock" target="_blank" rel="noreferrer" aria-label="Paralock on GitHub">
             <Icon name="github" size={18} />
           </a>
         </div>

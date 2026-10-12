@@ -3,7 +3,7 @@
 /** Public origin, without a trailing slash. */
 export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://paralock.xyz").replace(/\/+$/, "");
 
-export const GITHUB_URL = "https://github.com/bitfalt/Paralock";
+export const GITHUB_URL = "https://github.com/bitfalt/paralock";
 
 /** The page that `/docs` itself renders. `/docs/introduction` redirects there. */
 export const INDEX_SLUG = "introduction";

@@ -1,7 +1,7 @@
 # AGENTS.md: working on Paralock
 
 This file is for coding agents (Codex, Claude Code, Cursor, Copilot, Gemini, …) and humans. `CLAUDE.md` imports it.
-To *use* Paralock in another project, install the skill instead: `npx skills add bitfalt/Paralock`.
+To *use* Paralock in another project, install the skill instead: `npx skills add bitfalt/paralock`.
 
 ## What this is
 

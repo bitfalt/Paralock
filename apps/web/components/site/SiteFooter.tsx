@@ -3,7 +3,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Logo } from "@/components/ui/Logo";
 import "./site.css";
 
-const GITHUB = "https://github.com/bitfalt/Paralock";
+const GITHUB = "https://github.com/bitfalt/paralock";
 
 type FooterLink = { href: string; label: string; external?: boolean; file?: boolean };
 

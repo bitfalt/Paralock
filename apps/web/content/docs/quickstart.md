@@ -44,7 +44,7 @@ The CLI keeps the devnet's state (endpoints, keys, swap stores, logs) in `<check
 The CLI is all you need for steps 3 to 7 and 9 to 10. For the web app (step 8) and the SDK examples, work in a checkout:
 
 ```sh
-git clone https://github.com/bitfalt/Paralock && cd Paralock
+git clone https://github.com/bitfalt/paralock && cd paralock
 pnpm install && pnpm build
 ```
 

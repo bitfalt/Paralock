@@ -20,7 +20,7 @@ Paralock lets you swap shielded ZEC for stablecoins, or pay someone an exact dol
 - **Index:** [`/llms.txt`](/llms.txt) lists every page with a one-line summary
 - **Everything:** [`/llms-full.txt`](/llms-full.txt) has every page in one file
 - **Any page:** append `.md` to its URL, or ask for it with `Accept: text/markdown`
-- **Skill:** `npx skills add bitfalt/Paralock` teaches a coding agent the SDK and its safety rules
+- **Skill:** `npx skills add bitfalt/paralock` teaches a coding agent the SDK and its safety rules
 - **MCP server:** `https://paralock.xyz/mcp` is read-only and keyless, with `list_docs`, `read_doc`, `search_docs` and `get_deployments`
 
 ::: tabs
@@ -102,7 +102,7 @@ The SDK is a public good under the MIT license. The business model is running th
 | [Rust SDK](/docs/rust) | `paralock` on crates.io: taker and maker engines, Zcash RPC and lightwalletd backends, durable stores, the maker HTTP server and client. Built on `paralock-core` (the protocol core, also for wasm32) and `paralock-evm` (alloy clients). Wire-compatible with `@paralock/sdk` | 0.1.0 | Shipped |
 | [Rust CLI](/docs/rust-cli) | `paralock-cli`: a standalone `paralock` binary for swaps, payments, recovery and a maker on any network, configured by `paralock.toml`. Prebuilt for macOS and Linux | 0.1.0 | Shipped |
 | [Contracts](/docs/contracts) | `ParalockHTLC` and `ParalockAdaptorEscrow`, deployed and source-verified on Tempo Moderato, Base Sepolia, Sepolia, Arbitrum Sepolia, Robinhood Chain Testnet and HyperEVM Testnet | | Testnets only |
-| [Protocol spec](https://github.com/bitfalt/Paralock/blob/main/spec/PROTOCOL.md) | The wire protocol, both flows and the safety rules, with cross-language test vectors in `spec/vectors` | v1.1 | Draft |
+| [Protocol spec](https://github.com/bitfalt/paralock/blob/main/spec/PROTOCOL.md) | The wire protocol, both flows and the safety rules, with cross-language test vectors in `spec/vectors` | v1.1 | Draft |
 | Examples | TypeScript: `quickstart`, `payroll`, `sell-a-secret` on the devnet, and `testnet` on public testnets. Rust: six in `examples/rust` | | Shipped |
 | Web app | Pay with payment links, and Swap, at `/app` | | Shipped |
 | Agent docs | A skill, `llms.txt`, Markdown pages and an MCP server | | Shipped |
@@ -135,7 +135,7 @@ See [Rust SDK](/docs/rust) and [Rust CLI](/docs/rust-cli).
 
 | Feature | Status |
 |---|---|
-| htlc mode, end to end on the devnet and on public testnets ([first runs](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md)) | Shipped |
+| htlc mode, end to end on the devnet and on public testnets ([first runs](https://github.com/bitfalt/paralock/blob/main/docs/TESTNET-RUNS.md)) | Shipped |
 | Private mode (adaptor signatures) | Experimental |
 | Privacy hygiene: shield before and after, fresh recipient, relayed claim, standard amounts, jitter | Shipped |
 | Fully shielded Zcash leg (FROST) | In research |

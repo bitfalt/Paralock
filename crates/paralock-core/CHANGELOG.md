@@ -160,4 +160,4 @@ describe how it differs from the pre-review code that SDKs were written against.
 - `tests/audit.rs`: the security review's scenarios as regression tests. `tests/audit_fuzz.rs`: the review's mutation
   fuzzer (fast by default; `PARALOCK_FUZZ_ITERATIONS=200000` for the full campaign).
 
-[0.1.0]: https://github.com/bitfalt/Paralock/releases/tag/paralock-core-v0.1.0
+[0.1.0]: https://github.com/bitfalt/paralock/releases/tag/paralock-core-v0.1.0

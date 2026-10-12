@@ -90,7 +90,7 @@ export function llmsTxt(): string {
     "",
     `- [All docs in one file](${SITE_URL}/llms-full.txt): Every page above, concatenated in reading order`,
     `- [MCP server](${SITE_URL}/mcp): Streamable HTTP, read-only and keyless. Tools: \`list_docs\`, \`read_doc\`, \`search_docs\`, \`get_deployments\``,
-    `- [Agent skill](${GITHUB_URL}/blob/main/skills/paralock/SKILL.md): Install it into a project with \`npx skills add bitfalt/Paralock\``,
+    `- [Agent skill](${GITHUB_URL}/blob/main/skills/paralock/SKILL.md): Install it into a project with \`npx skills add bitfalt/paralock\``,
     `- [GitHub repository](${GITHUB_URL}): Source (MIT), Foundry contracts, examples and AGENTS.md`,
     ...NPM_PACKAGES.map((p) => `- [${p.name}](${npmUrl(p.name)}): ${p.text}`),
     "",

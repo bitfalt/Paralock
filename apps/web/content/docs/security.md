@@ -107,7 +107,7 @@ Never commit keys. Anvil's development keys are public, and `.paralock/` (the de
 | `crates/paralock-evm` | Both escrow clients against local anvils (plain EVM and Tempo), the send pipeline with fee bumps, code verification and the network registry |
 | `crates/paralock` | Both engines in both modes, crashes and resumes, store quarantine, claim tracking, the HTTP server against all 53 recorded exchanges in `spec/vectors/messages.json`, server limits, and the review's reproductions |
 
-The live regtest suites run only when a local node is up. End-to-end swaps have also been run on the devnet (htlc mode on Tempo; private mode on Tempo, Base and Ethereum; a fresh recipient with a relayed claim; the maker-vanishes refund in both modes; the taker-never-claims double refund) and on public testnets, recorded in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md).
+The live regtest suites run only when a local node is up. End-to-end swaps have also been run on the devnet (htlc mode on Tempo; private mode on Tempo, Base and Ethereum; a fresh recipient with a relayed claim; the maker-vanishes refund in both modes; the taker-never-claims double refund) and on public testnets, recorded in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/paralock/blob/main/docs/TESTNET-RUNS.md).
 
 ```sh
 pnpm --filter @paralock/sdk test
@@ -117,4 +117,4 @@ cargo test --workspace
 
 ## Reporting a vulnerability
 
-Please report security issues privately, not in a public issue. Use a private GitHub security advisory on [bitfalt/Paralock](https://github.com/bitfalt/Paralock/security/advisories) (Security tab, "Report a vulnerability"). If that option isn't available, open an issue that asks for a private security contact, without any details, and the maintainer will follow up. Use public [GitHub issues](https://github.com/bitfalt/Paralock/issues) for bugs that don't put funds at risk.
+Please report security issues privately, not in a public issue. Use a private GitHub security advisory on [bitfalt/paralock](https://github.com/bitfalt/paralock/security/advisories) (Security tab, "Report a vulnerability"). If that option isn't available, open an issue that asks for a private security contact, without any details, and the maintainer will follow up. Use public [GitHub issues](https://github.com/bitfalt/paralock/issues) for bugs that don't put funds at risk.

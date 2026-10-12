@@ -3,7 +3,7 @@ name: Release
 # Publishes every package whose version isn't on its registry yet, in dependency order. Run it by hand after bumping
 # versions on main. Uses trusted publishing (GitHub OIDC): no npm or crates.io token is stored in the repository.
 # One-time setup per package: npmjs.com → package → Settings → Trusted publishing → GitHub Actions
-# (bitfalt/Paralock, workflow release.yml, no environment; allowed actions: staging only, leave "npm publish" and
+# (bitfalt/paralock, workflow release.yml, no environment; allowed actions: staging only, leave "npm publish" and
 # "npm dist-tag" unticked); crates.io → crate → Settings → Trusted Publishing (same repo/workflow).
 # npm versions are staged, not published: approve each on npmjs.com (2FA) to make it installable.
 
@@ -77,7 +77,7 @@ jobs:
           for crate in paralock-core paralock-evm paralock paralock-cli; do
             [ -d "crates/$crate" ] || continue
             version=$(cargo metadata --no-deps --format-version 1 | jq -r --arg n "$crate" '.packages[] | select(.name == $n) | .version')
-            if curl -sf -A "paralock-release (github.com/bitfalt/Paralock)" "https://crates.io/api/v1/crates/$crate/$version" >/dev/null; then
+            if curl -sf -A "paralock-release (github.com/bitfalt/paralock)" "https://crates.io/api/v1/crates/$crate/$version" >/dev/null; then
               echo "::notice::$crate $version is already published"
               continue
             fi

@@ -4,7 +4,7 @@ import { Logo } from "@/components/ui/Logo";
 import { NavScroll } from "./NavScroll";
 import "./site.css";
 
-export const GITHUB_URL = "https://github.com/bitfalt/Paralock";
+export const GITHUB_URL = "https://github.com/bitfalt/paralock";
 
 // Section links point at the landing page so they also work from /docs.
 const LINKS = [

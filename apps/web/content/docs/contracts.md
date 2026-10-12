@@ -171,7 +171,7 @@ On Tempo an account's first transaction costs about 250k more (a new nonce slot)
 
 <!-- deployments -->
 
-The Solidity source is in [`contracts/src`](https://github.com/bitfalt/Paralock/tree/main/contracts/src).
+The Solidity source is in [`contracts/src`](https://github.com/bitfalt/paralock/tree/main/contracts/src).
 
 - **Same addresses on most chains.** Contract addresses come from the deployer's address and nonce. The deployer's nonces matched on most testnets, so `ParalockHTLC` and `ParalockAdaptorEscrow` have the same addresses there.
 - **Sepolia and Robinhood Chain Testnet differ.** On Sepolia a failed first deployment used up nonces. On Robinhood Chain Testnet a MockUSD token had to be deployed first. Both contracts therefore landed at other addresses on these two chains.

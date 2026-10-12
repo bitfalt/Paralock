@@ -10,13 +10,13 @@
 #   PARALOCK_VERSION=cli-v0.1.0   install that release instead of the latest (0.1.0 and v0.1.0 work too)
 #   PARALOCK_HOME=/opt/paralock   install to /opt/paralock/bin
 #
-# Paralock is experimental and not audited. Source: https://github.com/bitfalt/Paralock
+# Paralock is experimental and not audited. Source: https://github.com/bitfalt/paralock
 #
 # Everything runs inside main(), called on the last line, so a partly downloaded script does nothing.
 
 set -eu
 
-REPO="bitfalt/Paralock"
+REPO="bitfalt/paralock"
 
 say() {
   printf 'paralock-install: %s\n' "$1"

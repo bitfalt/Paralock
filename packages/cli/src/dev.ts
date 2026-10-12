@@ -18,7 +18,7 @@ interface MakerHealth {
 
 /** Printed by `dev --web` outside a checkout: the web app ships with the repository, not with the CLI. */
 const WEB_OUTSIDE_CHECKOUT = `The web app is not part of the paralock CLI. To run it against this devnet, use a checkout:
-  git clone https://github.com/bitfalt/Paralock && cd Paralock
+  git clone https://github.com/bitfalt/paralock && cd paralock
   pnpm install && pnpm build && pnpm paralock dev --web
 Hosted preview (public testnets, not this devnet): https://paralock.xyz/app`;
 

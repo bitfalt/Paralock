@@ -1,7 +1,7 @@
 # @paralock/lightwalletd
 
 Use a lightwalletd-compatible gRPC server (lightwalletd or Zaino) as the Zcash backend for
-[Paralock](https://github.com/bitfalt/Paralock) swaps. You don't have to run or sync a full node.
+[Paralock](https://github.com/bitfalt/paralock) swaps. You don't have to run or sync a full node.
 
 `LightwalletdClient` implements `ZcashNode` from [`@paralock/zcash`](https://www.npmjs.com/package/@paralock/zcash),
 so you can pass it anywhere the SDK takes a Zcash node.
