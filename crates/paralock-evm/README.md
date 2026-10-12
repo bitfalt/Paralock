@@ -11,7 +11,9 @@ The EVM layer of [Paralock](https://paralock.xyz): trustless swaps between shiel
   normalization and `address_of_public_key`, byte-for-byte equal to the contracts and to `spec/vectors/evm.json`.
 - **A hardened send pipeline.** Chain-id verification before every transaction, simulation with typed revert
   decoding, gas and fee estimation with an optional fee cap, process-wide nonce management, receipt waits with
-  timeouts, bounded retries with exponential backoff on transport errors and HTTP 429/5xx.
+  per-call timeouts, fee bumps (same nonce, +10 % or more), transaction status lookups, bounded retries with
+  exponential backoff on transport errors and HTTP 429/5xx.
+- **Escrow address checks.** `verify_escrow_code` compares an address's runtime code with the embedded build.
 - **Tempo.** Transactions that pay gas in a TIP-20 fee token, through Tempo's official
   [`tempo-alloy`](https://crates.io/crates/tempo-alloy).
 - **Networks.** `KNOWN_NETWORKS` (verified chain ids, RPCs, explorers and stablecoins) and `TESTNET_DEPLOYMENTS`
@@ -28,9 +30,16 @@ paralock-evm = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
-Features: `tempo` (default) enables Tempo `0x76` transactions with a fee token. Without it the crate drops the
-`tempo-alloy` dependency; Tempo chains still work with plain EIP-1559 transactions (see [Tempo fees](#tempo-fees)).
-MSRV 1.95 (alloy 2.x needs 1.94.1, `tempo-alloy` 1.95). The clients need a Tokio runtime.
+Features: `tempo` (default) enables Tempo `0x76` transactions with a fee token, through `tempo-alloy`, which brings
+about a hundred more crates (Tempo's primitives and a second crypto stack). If you don't need fee tokens, opt out:
+
+```toml
+paralock-evm = { version = "0.1", default-features = false }
+```
+
+Everything else works the same without it, Tempo chains included: they get plain EIP-1559 transactions and the
+protocol picks the fee token (see [Tempo fees](#tempo-fees)); only `EvmConfig::with_fee_token` is refused. MSRV 1.95
+(alloy 2.x needs 1.94.1, `tempo-alloy` 1.95). The clients need a Tokio runtime.
 
 ## Units
 
@@ -130,9 +139,50 @@ messages and `EvmConfig`'s `Debug`.
 5. The nonce is assigned under a process-wide lock per (RPC endpoint, chain id, account), so concurrent sends never
    collide; a transient failure to read the pending nonce is an error rather than a guess; the broadcast is
    idempotent (a lost response is detected by looking the transaction up by hash).
-6. The receipt is polled until `receipt_timeout` (`ReceiptTimeout` carries the hash so you can keep waiting). A mined
-   revert is `TransactionReverted { hash: Some(..) }`, named by replaying the call at its block (e.g. `SwapSettled` when
-   a competing claim landed first).
+6. The receipt is polled until `EvmConfig::receipt_timeout` (default 60 s), or a timeout given per call with
+   `send_and_confirm_with`. A mined revert is `TransactionReverted { hash: Some(..) }`, named by replaying the call at
+   its block (e.g. `SwapSettled` when a competing claim landed first).
+
+## Deadlines, stuck transactions and fee bumps
+
+A claim must be mined before the swap's expiry, so don't let a stuck transaction eat the window: wait for a part of
+the time left, and replace the transaction with higher fees if it is not mined by then. Every error raised after a
+transaction was signed carries its hash (`EvmError::tx_hash()`) and, where known, its nonce (`EvmError::nonce()`):
+`ReceiptTimeout { hash, nonce, .. }`, `BroadcastUnknown { hash, nonce, .. }` (the broadcast failed but the node may
+have the transaction), `TransactionReverted { hash: Some(..), .. }`, `NonceUsed`. Keep the hash when you convert the
+error, and wait for, look up or bump that transaction instead of sending the operation again.
+
+```rust,no_run
+use std::time::Duration;
+use alloy::primitives::B256;
+use paralock_evm::{EvmError, EvmHtlcClient, HtlcSwap, TxResult, TxStatus};
+
+async fn claim_before(htlc: &EvmHtlcClient, swap: &HtlcSwap, preimage: &B256) -> Result<TxResult, EvmError> {
+    let conn = htlc.connection();
+    let request = htlc.claim_request(swap, preimage)?; // checks the preimage
+    match conn.send_and_confirm_with(request, Duration::from_secs(10)).await {
+        Err(EvmError::ReceiptTimeout { hash, .. }) => {
+            if let TxStatus::Mined(result) = conn.transaction_status(hash).await? {
+                return Ok(result);
+            }
+            // Same call and nonce, both fee fields at least +10 % (or the current estimate, if higher).
+            let sent = conn.sent_transaction(hash).expect("sent by this process");
+            let bumped = conn.bump(&sent).await?;
+            // Catches whichever version is mined: the bump or the original.
+            conn.wait_for_sent(&bumped, Some(Duration::from_secs(10))).await
+        }
+        other => other,
+    }
+}
+```
+
+`submit` broadcasts without waiting and returns the `SentTx` record (hash, nonce, gas, fees, every replaced
+version); it is serializable, so a caller can persist it and still wait for or bump the transaction after a restart.
+`sent_transaction(hash)` finds the latest version of one this process sent; `bump` refuses a nonce that a mined
+transaction already used (`NonceUsed`: wait for it with `wait_for_sent`). `transaction_status(hash)` is
+`Pending`, `Mined(receipt)`, `Reverted(receipt)` or `Unknown` (never received, dropped, or replaced). The escrow
+clients' `claim_request` / `refund_request` build the calls (with the same client-side checks as `claim` / `refund`)
+for these connection methods.
 
 `approve_and_lock` checks the swap first (nothing is approved for a lock that would be refused), then serializes
 approve → lock per (account, token, escrow), so exact approvals are never overwritten by a concurrent lock. Use one
@@ -142,11 +192,22 @@ approve → lock per (account, token, escrow), so exact approvals are never over
 
 `get_lock` checks the node's chain id first (it is what a taker verifies before revealing). `get_lock` / `outcome`
 pin the latest block, read the on-chain state at that block, and scan logs newest-first from
-`ScanConfig::from_block` (the contract's deployment block) in windows of `max_block_range` blocks (halved
-automatically when a node refuses a window). Logs are checked against the filter, the HTLC commitment must equal the
-stored one while active, an escrow's `idOf(swap)` must equal its id, a revealed preimage must hash to the hashlock, and
-a published claim signature must be canonical and recover to the swap's signer. A settled entry whose events are not
-served yet is `SettlementNotIndexed` (retry); a lock older than `from_block` is `LockEventMissing`.
+`ScanConfig::from_block` (the contract's deployment block) in windows of `max_block_range` blocks. A window the node
+refuses is halved, down to one block: a JSON-RPC error, HTTP 400 or 413 (providers that cap the range at the
+gateway), or a message about the range or result size ("block range", "query returned more than", "range too
+large", …). Once a narrower window works, the client keeps it for later scans (`scan_window()`); a refusal that
+persists down to one block is returned as the error. Logs are checked against the filter, the HTLC commitment must
+equal the stored one while active, an escrow's `idOf(swap)` must equal its id, a revealed preimage must hash to the
+hashlock, and a published claim signature must be canonical and recover to the swap's signer. A settled entry whose
+events are not served yet is `SettlementNotIndexed` (retry); a lock older than `from_block` is `LockEventMissing`.
+
+## Checking escrow addresses
+
+Before trusting a configured escrow address, check that it holds this build's contract: `verify_escrow_code()` on
+either client (or `EvmConnection::verify_escrow_code(address, ParalockContract::…)`) compares the runtime code on the
+configured chain with the embedded artifact's `deployedBytecode`, byte for byte, and fails with `CodeMismatch`
+otherwise (no code, swapped addresses, another contract or another build). The public testnet deployments in
+`TESTNET_DEPLOYMENTS` match.
 
 ## Tempo fees
 
@@ -186,7 +247,7 @@ contracts that are still current. It refuses every known public network; use `co
 The SDK's `EvmClient` / `AdaptorEvmClient` map onto the clients one to one: `lock` = `approve_and_lock`, `claim`,
 `refund`, `get_locked_swap`, `get_lock` (`LockInfo { swap, block_number, tx_hash, … }`), `outcome`, `now`,
 `block_number`, `rpc_chain_id`, `token_balance`, `id_of`, `claim_digest`. Errors say whether retrying may help
-(`EvmError::is_transient`).
+(`EvmError::is_transient`) and which transaction is already out (`EvmError::tx_hash`, `EvmError::nonce`).
 
 ## Tests
 

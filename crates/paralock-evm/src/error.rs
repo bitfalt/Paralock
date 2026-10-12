@@ -6,7 +6,9 @@ use std::time::Duration;
 use alloy::primitives::{Address, B256, Bytes};
 use alloy::sol_types::{Panic, Revert, SolError, SolInterface};
 use alloy::transports::{RpcError, TransportError, TransportErrorKind};
+use serde::{Deserialize, Serialize};
 
+use crate::artifacts::ParalockContract;
 use crate::bindings::{
     ITIP20Errors::ITIP20ErrorsErrors, ITIP20Factory::ITIP20FactoryErrors, ITIP20Issuer::ITIP20IssuerErrors,
     MockUSD::MockUSDErrors, ParalockAdaptorEscrow::ParalockAdaptorEscrowErrors, ParalockHTLC::ParalockHTLCErrors,
@@ -57,14 +59,57 @@ pub enum EvmError {
         /// The decoded revert, when the node returned revert data.
         revert: Option<RevertReason>,
     },
-    /// A sent transaction was not mined within the receipt timeout. It may still be pending: wait again with
-    /// `wait_for_receipt`, or look it up by hash.
-    #[error("transaction {hash} was not mined within {timeout:?}")]
+    /// A sent transaction was not mined within the receipt timeout. It may still be pending: wait again
+    /// (`wait_for_receipt` / `wait_for_sent`), check `transaction_status`, or replace it with higher fees (`bump`,
+    /// same nonce). Retrying the operation from scratch instead would send a second transaction.
+    #[error("transaction {hash}{} was not mined within {timeout:?}", nonce_suffix(*nonce))]
     ReceiptTimeout {
-        /// The transaction hash.
+        /// The transaction hash (the newest version, if it was replaced with higher fees).
         hash: B256,
+        /// Its nonce, when known (always for transactions this process sent).
+        nonce: Option<u64>,
         /// The timeout that elapsed.
         timeout: Duration,
+    },
+    /// The broadcast of a signed transaction failed and the node could not be asked whether it received it anyway
+    /// (e.g. the response was lost and the follow-up lookup failed too). It **may have been sent**: look it up
+    /// (`transaction_status`, `wait_for_receipt`) or replace it (`bump`) before sending the operation again.
+    #[error("broadcast of transaction {hash} (nonce {nonce}) may have failed: {message}")]
+    BroadcastUnknown {
+        /// The signed transaction's hash.
+        hash: B256,
+        /// Its nonce.
+        nonce: u64,
+        /// The broadcast error, with the RPC URL redacted.
+        message: String,
+    },
+    /// A transaction cannot be replaced: its nonce is already used by a mined transaction (this one, an earlier
+    /// version of it, or another transaction of the account). Wait for its receipt instead (`wait_for_sent`).
+    #[error("nonce {nonce} of transaction {hash} is already used by a mined transaction")]
+    NonceUsed {
+        /// The transaction that was to be replaced.
+        hash: B256,
+        /// Its nonce.
+        nonce: u64,
+    },
+    /// The receipt of a mined transaction is malformed (e.g. it has no status).
+    #[error("invalid receipt for transaction {hash}: {message}")]
+    InvalidReceipt {
+        /// The transaction hash.
+        hash: B256,
+        /// What is wrong with the receipt.
+        message: String,
+    },
+    /// The address does not hold the runtime code of the expected Paralock contract (no code, another contract or
+    /// another build). Refuse to use it as an escrow.
+    #[error("{}", code_mismatch_message(address, *expected, *empty))]
+    CodeMismatch {
+        /// The checked address.
+        address: Address,
+        /// The contract it was expected to hold.
+        expected: ParalockContract,
+        /// True when the address holds no code at all.
+        empty: bool,
     },
     /// A waiter gave up.
     #[error("timed out after {timeout:?} waiting for {what}")]
@@ -137,15 +182,46 @@ pub enum EvmError {
 
 impl EvmError {
     /// True when retrying the same operation later may succeed: transient RPC failures, receipt or wait timeouts,
-    /// and events that are not indexed yet.
+    /// an uncertain broadcast, and events that are not indexed yet.
+    ///
+    /// When [`EvmError::tx_hash`] is `Some`, a transaction may already be out: retry by waiting for (or bumping)
+    /// that transaction, not by sending the operation again.
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Rpc { transient, .. } => *transient,
             Self::ReceiptTimeout { .. }
+            | Self::BroadcastUnknown { .. }
             | Self::Timeout { .. }
             | Self::SettlementNotIndexed { .. }
             | Self::LockEventMissing { .. } => true,
             _ => false,
+        }
+    }
+
+    /// The hash of the transaction this error is about, if one was signed and (possibly) broadcast: a receipt
+    /// timeout, an uncertain broadcast, a mined revert, a nonce already used, or a malformed receipt. `None` means
+    /// the failing step sent nothing (an earlier step of a multi-transaction call, such as the approval in
+    /// `approve_and_lock`, may have).
+    ///
+    /// Keep it when converting this error into another type: it is what lets a caller wait for, look up or replace
+    /// the transaction instead of sending a second one.
+    pub fn tx_hash(&self) -> Option<B256> {
+        match self {
+            Self::ReceiptTimeout { hash, .. }
+            | Self::BroadcastUnknown { hash, .. }
+            | Self::NonceUsed { hash, .. }
+            | Self::InvalidReceipt { hash, .. } => Some(*hash),
+            Self::TransactionReverted { hash, .. } => *hash,
+            _ => None,
+        }
+    }
+
+    /// The nonce of the transaction this error is about, when known (see [`EvmError::tx_hash`]).
+    pub fn nonce(&self) -> Option<u64> {
+        match self {
+            Self::ReceiptTimeout { nonce, .. } => *nonce,
+            Self::BroadcastUnknown { nonce, .. } | Self::NonceUsed { nonce, .. } => Some(*nonce),
+            _ => None,
         }
     }
 
@@ -164,6 +240,15 @@ impl EvmError {
             _ => None,
         }
     }
+}
+
+fn code_mismatch_message(address: &Address, expected: ParalockContract, empty: bool) -> String {
+    let what = if empty { " (it has no code)" } else { "" };
+    format!("{address} does not hold the {} runtime code of this build{what}", expected.name())
+}
+
+fn nonce_suffix(nonce: Option<u64>) -> String {
+    nonce.map(|n| format!(" (nonce {n})")).unwrap_or_default()
 }
 
 fn reverted_message(hash: Option<&B256>, revert: Option<&RevertReason>) -> String {
@@ -199,7 +284,8 @@ pub enum SignatureError {
 }
 
 /// Which contract a revert came from, to resolve error names shared between contracts (`InvalidAmount()`, …).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub enum RevertSource {
     /// `ParalockHTLC`.
@@ -381,9 +467,7 @@ pub(crate) fn is_transient(err: &TransportError) -> bool {
             TransportErrorKind::Custom(_) => true,
             _ => false,
         },
-        E::ErrorResp(payload) => {
-            payload.is_retry_err() || (payload.code == -32603 && payload.message.contains("timeout"))
-        }
+        E::ErrorResp(payload) => is_retryable_payload(payload),
         E::NullResp => true,
         E::DeserError { text, .. } => {
             // Gateways sometimes answer a JSON-RPC request with an HTML or plain-text error page.
@@ -392,6 +476,62 @@ pub(crate) fn is_transient(err: &TransportError) -> bool {
         }
         _ => false,
     }
+}
+
+/// True for JSON-RPC error responses worth retrying: rate limits and node timeouts. Not a refusal of an
+/// `eth_getLogs` range or result size, even under a rate-limit code (Infura answers "query returned more than 10000
+/// results" with -32005): the same request would be refused again, so the scan narrows its window at once instead.
+pub(crate) fn is_retryable_payload(payload: &alloy::rpc::json_rpc::ErrorPayload) -> bool {
+    (payload.is_retry_err() || (payload.code == -32603 && payload.message.contains("timeout")))
+        && !mentions_range_limit(&payload.message)
+}
+
+/// Phrases with which nodes and providers refuse an `eth_getLogs` range or result size (lowercase), as in
+/// `@paralock/evm`'s `isRangeRefusal`.
+const RANGE_REFUSALS: [&str; 22] = [
+    "block range",
+    "range too large",
+    "range is too large",
+    "range too wide",
+    "range is too wide",
+    "range too big",
+    "range is too big",
+    "too many blocks",
+    "too many results",
+    "too many logs",
+    "query returned more than",
+    "limit exceeded",
+    "exceed max",
+    "exceeds max",
+    "exceed the max",
+    "exceeds the max",
+    "exceed limit",
+    "exceeds limit",
+    "exceed the limit",
+    "exceeds the limit",
+    "response size",
+    "payload too large",
+];
+
+/// True when the node refused an `eth_getLogs` request in a way a smaller block range may fix: any JSON-RPC error
+/// response, HTTP 400 or 413 (providers that reject large ranges at the gateway), or an error that mentions the
+/// range or result size ("block range", "query returned more than", "range too large", …). Transport failures,
+/// timeouts, rate limits (HTTP 429, "rate limit") and other HTTP errors are not refusals.
+pub(crate) fn is_range_refusal(err: &TransportError) -> bool {
+    match err {
+        RpcError::ErrorResp(_) => true,
+        RpcError::Transport(kind) => match kind.as_http_error() {
+            Some(http) if http.status == 400 || http.status == 413 => true,
+            Some(http) if http.status == 429 => false,
+            _ => mentions_range_limit(&err.to_string()),
+        },
+        _ => mentions_range_limit(&err.to_string()),
+    }
+}
+
+fn mentions_range_limit(message: &str) -> bool {
+    let message = message.to_lowercase();
+    !message.contains("rate limit") && RANGE_REFUSALS.iter().any(|phrase| message.contains(phrase))
 }
 
 #[cfg(test)]
@@ -482,5 +622,82 @@ mod tests {
         assert!(err.to_string().contains("SwapSettled"));
         assert_eq!(SignatureError::SOutOfRange.to_string(), "signature s is out of range");
         assert_eq!(SignatureError::InvalidRecovery(29).to_string(), "invalid signature recovery value 29");
+    }
+
+    #[test]
+    fn errors_after_a_broadcast_carry_the_hash_and_nonce() {
+        let hash = B256::repeat_byte(0xab);
+        let timeout = EvmError::ReceiptTimeout { hash, nonce: Some(7), timeout: Duration::from_secs(5) };
+        assert_eq!((timeout.tx_hash(), timeout.nonce()), (Some(hash), Some(7)));
+        assert!(timeout.is_transient());
+        let text = timeout.to_string();
+        assert!(text.contains(&hash.to_string()) && text.contains("nonce 7"), "{text}");
+        let unknown_nonce = EvmError::ReceiptTimeout { hash, nonce: None, timeout: Duration::from_secs(5) };
+        assert_eq!(unknown_nonce.nonce(), None);
+        assert!(!unknown_nonce.to_string().contains("nonce"), "{unknown_nonce}");
+
+        let uncertain = EvmError::BroadcastUnknown { hash, nonce: 3, message: "connection reset".into() };
+        assert_eq!((uncertain.tx_hash(), uncertain.nonce()), (Some(hash), Some(3)));
+        assert!(uncertain.is_transient());
+        assert!(uncertain.to_string().contains(&hash.to_string()));
+
+        let used = EvmError::NonceUsed { hash, nonce: 3 };
+        assert_eq!((used.tx_hash(), used.nonce(), used.is_transient()), (Some(hash), Some(3), false));
+        let mined = EvmError::TransactionReverted { hash: Some(hash), revert: None };
+        assert_eq!(mined.tx_hash(), Some(hash));
+        assert!(mined.to_string().contains(&hash.to_string()));
+        let receipt = EvmError::InvalidReceipt { hash, message: "no status".into() };
+        assert_eq!(receipt.tx_hash(), Some(hash));
+        // Nothing was sent.
+        assert_eq!(EvmError::TransactionReverted { hash: None, revert: None }.tx_hash(), None);
+        assert_eq!(EvmError::ReadOnly.tx_hash(), None);
+        assert_eq!(EvmError::FeeCapExceeded { estimated: 2, cap: 1 }.nonce(), None);
+
+        let code =
+            EvmError::CodeMismatch { address: Address::repeat_byte(1), expected: ParalockContract::Htlc, empty: true };
+        assert!(code.to_string().contains("ParalockHTLC") && code.to_string().contains("no code"), "{code}");
+    }
+
+    #[test]
+    fn range_refusals_are_told_apart_from_failures() {
+        use alloy::rpc::json_rpc::ErrorPayload;
+        let http = |status: u16, body: &str| TransportErrorKind::http_error(status, body.to_owned());
+        let rpc_error = |code: i64, message: &str| {
+            TransportError::ErrorResp(ErrorPayload { code, message: message.to_owned().into(), data: None })
+        };
+        // Refusals: a smaller window may succeed.
+        assert!(is_range_refusal(&http(413, "")));
+        assert!(is_range_refusal(&http(413, "<html><body>413 Request Entity Too Large</body></html>")));
+        assert!(is_range_refusal(&http(400, "Bad Request")));
+        assert!(is_range_refusal(&http(503, "query returned more than 10000 results")));
+        assert!(is_range_refusal(&http(500, "eth_getLogs block range is too large, max is 1k")));
+        assert!(is_range_refusal(&rpc_error(-32005, "query returned more than 10000 results")));
+        assert!(is_range_refusal(&rpc_error(-32602, "invalid params")));
+        let text = TransportError::deser_err(
+            serde_json::from_str::<serde_json::Value>("nope").unwrap_err(),
+            "Log response size exceeded. You can make eth_getLogs requests with up to a 2K block range",
+        );
+        assert!(is_range_refusal(&text));
+        assert!(is_range_refusal(&TransportErrorKind::custom_str("exceeds the max range of 10000 blocks")));
+        // Failures a smaller window cannot fix.
+        assert!(!is_range_refusal(&TransportErrorKind::custom_str("error sending request: connection refused")));
+        assert!(!is_range_refusal(&http(429, "rate limit exceeded")));
+        assert!(!is_range_refusal(&http(500, "internal server error")));
+        assert!(!is_range_refusal(&http(401, "invalid API key")));
+        assert!(!is_range_refusal(&TransportErrorKind::custom_str("daily rate limit exceeded")));
+        assert!(!is_range_refusal(&TransportError::NullResp));
+    }
+
+    #[test]
+    fn range_refusals_are_not_retried_as_rate_limits() {
+        use alloy::rpc::json_rpc::ErrorPayload;
+        let payload = |code: i64, message: &str| ErrorPayload { code, message: message.to_owned().into(), data: None };
+        assert!(is_retryable_payload(&payload(-32005, "project ID request rate exceeded")));
+        assert!(is_retryable_payload(&payload(429, "Too Many Requests")));
+        assert!(is_retryable_payload(&payload(-32603, "request timeout")));
+        assert!(!is_retryable_payload(&payload(-32005, "query returned more than 10000 results")));
+        assert!(!is_retryable_payload(&payload(-32000, "execution reverted")));
+        let refusal = TransportError::ErrorResp(payload(-32005, "query returned more than 10000 results"));
+        assert!(!is_transient(&refusal) && is_range_refusal(&refusal));
     }
 }

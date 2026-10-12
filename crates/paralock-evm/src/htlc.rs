@@ -1,10 +1,13 @@
 //! [`EvmHtlcClient`]: client for a deployed `ParalockHTLC` (htlc mode).
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use alloy::primitives::{Address, B256, U256};
 use alloy::sol_types::SolEvent;
 
+use crate::artifacts::ParalockContract;
 use crate::bindings::ParalockHTLC;
 use crate::config::EvmConfig;
 use crate::connection::{EventLog, EvmConnection, LogQuery, TxRequest, TxResult};
@@ -31,6 +34,8 @@ pub struct EvmHtlcClient {
     conn: EvmConnection,
     contract: Address,
     scan: ScanConfig,
+    /// The current `eth_getLogs` window: `scan.max_block_range`, narrowed when the node refuses it. Shared by clones.
+    window: Arc<AtomicU64>,
 }
 
 const SOURCE: Option<RevertSource> = Some(RevertSource::Htlc);
@@ -38,7 +43,8 @@ const SOURCE: Option<RevertSource> = Some(RevertSource::Htlc);
 impl EvmHtlcClient {
     /// A client for the `ParalockHTLC` at `contract`, scanning events from `scan.from_block` (its deployment block).
     pub fn new(conn: EvmConnection, contract: Address, scan: ScanConfig) -> Self {
-        Self { conn, contract, scan }
+        let window = Arc::new(AtomicU64::new(scan.max_block_range.max(1)));
+        Self { conn, contract, scan, window }
     }
 
     /// Connects (verifying the chain id) and builds the client.
@@ -66,9 +72,21 @@ impl EvmHtlcClient {
         self.conn.address()
     }
 
-    /// The event-scan settings.
+    /// The event-scan settings, as configured.
     pub fn scan_config(&self) -> ScanConfig {
         self.scan
+    }
+
+    /// The block span of one `eth_getLogs` request now: [`ScanConfig::max_block_range`], or less once the node
+    /// refused a wider window and a narrower one worked (kept for later scans by this client and its clones).
+    pub fn scan_window(&self) -> u64 {
+        self.window.load(Ordering::Relaxed)
+    }
+
+    /// Checks that the contract address, on the configured chain, holds exactly this build's `ParalockHTLC`
+    /// runtime code (else [`EvmError::CodeMismatch`]). Call it once before trusting a configured escrow address.
+    pub async fn verify_escrow_code(&self) -> Result<(), EvmError> {
+        self.conn.verify_escrow_code(self.contract, ParalockContract::Htlc).await
     }
 
     /// EVM time: the latest block's timestamp (Unix seconds).
@@ -210,19 +228,34 @@ impl EvmHtlcClient {
     }
 
     /// Pays `swap.recipient` by revealing `preimage`. Any account may submit it; the funds only ever go to the
-    /// recipient fixed at lock time. The preimage is checked against the hashlock before anything is sent.
+    /// recipient fixed at lock time. The preimage is checked against the hashlock before anything is sent. Waits up
+    /// to the configured receipt timeout; to choose the wait per call, or to bump a stuck claim, send
+    /// [`EvmHtlcClient::claim_request`] through the connection instead.
     pub async fn claim(&self, swap: &HtlcSwap, preimage: &B256) -> Result<TxResult, EvmError> {
+        self.conn.send_and_confirm(self.claim_request(swap, preimage)?).await
+    }
+
+    /// The claim of `swap` with `preimage` as a transaction to send through [`EvmHtlcClient::connection`]:
+    /// `send_and_confirm_with(request, timeout)` to wait at most `timeout` (e.g. part of the claim window), or
+    /// `submit` + `wait_for_sent` + `bump` to replace it with higher fees if it is not mined in time. The preimage is
+    /// checked against the hashlock first ([`EvmError::PreimageMismatch`]).
+    pub fn claim_request(&self, swap: &HtlcSwap, preimage: &B256) -> Result<TxRequest, EvmError> {
         if hashlock_of(preimage) != swap.hashlock {
             return Err(EvmError::PreimageMismatch { hashlock: swap.hashlock });
         }
         let call = ParalockHTLC::claimCall { s: (*swap).into(), preimage: *preimage };
-        self.conn.send_and_confirm(TxRequest::call(self.contract, &call, SOURCE)).await
+        Ok(TxRequest::call(self.contract, &call, SOURCE))
     }
 
     /// Returns the funds to `swap.sender` once `swap.expiry` has passed. Any account may submit it.
     pub async fn refund(&self, swap: &HtlcSwap) -> Result<TxResult, EvmError> {
-        let call = ParalockHTLC::refundCall { s: (*swap).into() };
-        self.conn.send_and_confirm(TxRequest::call(self.contract, &call, SOURCE)).await
+        self.conn.send_and_confirm(self.refund_request(swap)).await
+    }
+
+    /// The refund of `swap` as a transaction to send through [`EvmHtlcClient::connection`] (see
+    /// [`EvmHtlcClient::claim_request`]).
+    pub fn refund_request(&self, swap: &HtlcSwap) -> TxRequest {
+        TxRequest::call(self.contract, &ParalockHTLC::refundCall { s: (*swap).into() }, SOURCE)
     }
 
     async fn scan(
@@ -242,7 +275,7 @@ impl EvmHtlcClient {
             key: hashlock,
             from_block: self.scan.from_block,
             to_block: tip,
-            max_block_range: self.scan.max_block_range,
+            window: &self.window,
         };
         self.conn.scan_logs(&query, done).await
     }

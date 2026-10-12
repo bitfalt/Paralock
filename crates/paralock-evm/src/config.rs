@@ -89,7 +89,11 @@ pub struct EvmConfig {
     pub rpc_retry_backoff: Duration,
     /// Cap on a single retry delay, including server `Retry-After` hints. Default 5 s.
     pub rpc_max_backoff: Duration,
-    /// How long to wait for a sent transaction to be mined. Default 180 s.
+    /// How long `send_and_confirm` (and every escrow call that sends) waits for a transaction to be mined before
+    /// returning [`EvmError::ReceiptTimeout`] with its hash and nonce. Default 60 s
+    /// ([`EvmConfig::DEFAULT_RECEIPT_TIMEOUT`]). Keep it well inside the shortest deadline the caller must react to
+    /// (a claim window), or pass one per call with `EvmConnection::send_and_confirm_with`, so a stuck transaction
+    /// can still be replaced with higher fees (`EvmConnection::bump`) in time.
     pub receipt_timeout: Duration,
     /// Head-room added to `eth_estimateGas`, in percent. Default 20.
     pub gas_limit_buffer_percent: u64,
@@ -101,6 +105,9 @@ pub struct EvmConfig {
 }
 
 impl EvmConfig {
+    /// The default [`EvmConfig::receipt_timeout`]: 60 s (five Ethereum blocks, many more on the L2s and Tempo).
+    pub const DEFAULT_RECEIPT_TIMEOUT: Duration = Duration::from_secs(60);
+
     /// Settings for `rpc_url` on `chain_id`, read-only, with the defaults documented on each field.
     pub fn new(rpc_url: impl Into<String>, chain_id: u64) -> Self {
         Self {
@@ -114,7 +121,7 @@ impl EvmConfig {
             rpc_retries: 3,
             rpc_retry_backoff: Duration::from_millis(250),
             rpc_max_backoff: Duration::from_secs(5),
-            receipt_timeout: Duration::from_secs(180),
+            receipt_timeout: Self::DEFAULT_RECEIPT_TIMEOUT,
             gas_limit_buffer_percent: 20,
             max_fee_per_gas: None,
             max_lock_seconds: 10_000_000,
@@ -150,7 +157,7 @@ impl EvmConfig {
         self
     }
 
-    /// Sets the receipt timeout.
+    /// Sets the receipt timeout (see [`EvmConfig::receipt_timeout`]).
     pub fn with_receipt_timeout(mut self, timeout: Duration) -> Self {
         self.receipt_timeout = timeout;
         self
@@ -265,5 +272,14 @@ mod tests {
         let tempo = EvmConfig::new("http://x", 42431).with_fee_token(TEMPO_TOKENS.path_usd).validate();
         assert_eq!(tempo.is_ok(), cfg!(feature = "tempo"));
         assert!(EvmConfig::new("http://x", 0).validate().is_err());
+    }
+
+    #[test]
+    fn receipt_timeout_default_and_validation() {
+        let config = EvmConfig::new("http://x", 8453);
+        assert_eq!(config.receipt_timeout, Duration::from_secs(60));
+        assert_eq!(config.receipt_timeout, EvmConfig::DEFAULT_RECEIPT_TIMEOUT);
+        assert!(config.clone().with_receipt_timeout(Duration::ZERO).validate().is_err());
+        assert!(config.with_receipt_timeout(Duration::from_secs(5)).validate().is_ok());
     }
 }

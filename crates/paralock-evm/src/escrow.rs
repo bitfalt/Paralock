@@ -17,8 +17,9 @@ pub struct ScanConfig {
     /// value after the deployment makes older locks invisible ([`EvmError::LockEventMissing`]); 0 (the default) scans
     /// the whole chain, which is slow on public networks.
     pub from_block: u64,
-    /// Largest block span per `eth_getLogs` request (public RPCs cap it; a refused window is halved automatically).
-    /// Default 50,000.
+    /// Largest block span per `eth_getLogs` request. Public RPCs cap it: a window the node refuses (JSON-RPC error,
+    /// HTTP 400/413, or a range/result-size message) is halved automatically, and the client keeps the narrower
+    /// window that worked (`scan_window()`). Default 50,000.
     pub max_block_range: u64,
 }
 

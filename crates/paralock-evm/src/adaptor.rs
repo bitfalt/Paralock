@@ -1,11 +1,14 @@
 //! [`AdaptorEscrowClient`]: client for a deployed `ParalockAdaptorEscrow` (adaptor mode).
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use alloy::primitives::{Address, B256, U256};
 use alloy::sol_types::{SolCall, SolEvent};
 use serde::{Deserialize, Serialize};
 
+use crate::artifacts::ParalockContract;
 use crate::bindings::ParalockAdaptorEscrow;
 use crate::config::EvmConfig;
 use crate::connection::{EventLog, EvmConnection, LogQuery, TxRequest, TxResult};
@@ -23,6 +26,8 @@ pub struct AdaptorEscrowClient {
     conn: EvmConnection,
     contract: Address,
     scan: ScanConfig,
+    /// The current `eth_getLogs` window: `scan.max_block_range`, narrowed when the node refuses it. Shared by clones.
+    window: Arc<AtomicU64>,
 }
 
 const SOURCE: Option<RevertSource> = Some(RevertSource::AdaptorEscrow);
@@ -51,7 +56,8 @@ pub struct AdaptorLock {
 impl AdaptorEscrowClient {
     /// A client for the `ParalockAdaptorEscrow` at `contract`, scanning events from `scan.from_block`.
     pub fn new(conn: EvmConnection, contract: Address, scan: ScanConfig) -> Self {
-        Self { conn, contract, scan }
+        let window = Arc::new(AtomicU64::new(scan.max_block_range.max(1)));
+        Self { conn, contract, scan, window }
     }
 
     /// Connects (verifying the chain id) and builds the client.
@@ -79,9 +85,21 @@ impl AdaptorEscrowClient {
         self.conn.address()
     }
 
-    /// The event-scan settings.
+    /// The event-scan settings, as configured.
     pub fn scan_config(&self) -> ScanConfig {
         self.scan
+    }
+
+    /// The block span of one `eth_getLogs` request now: [`ScanConfig::max_block_range`], or less once the node
+    /// refused a wider window and a narrower one worked (kept for later scans by this client and its clones).
+    pub fn scan_window(&self) -> u64 {
+        self.window.load(Ordering::Relaxed)
+    }
+
+    /// Checks that the contract address, on the configured chain, holds exactly this build's `ParalockAdaptorEscrow`
+    /// runtime code (else [`EvmError::CodeMismatch`]). Call it once before trusting a configured escrow address.
+    pub async fn verify_escrow_code(&self) -> Result<(), EvmError> {
+        self.conn.verify_escrow_code(self.contract, ParalockContract::AdaptorEscrow).await
     }
 
     /// EVM time: the latest block's timestamp (Unix seconds).
@@ -240,8 +258,18 @@ impl AdaptorEscrowClient {
     /// funds only ever go to the recipient fixed at lock time.
     ///
     /// The signature is normalized first (`v` 0/1 → 27/28, high `s` → low `s`, as `normalizeClaimSignature`) and must
-    /// recover to `swap.signer` over this chain's digest, else [`EvmError::WrongSigner`] and nothing is sent.
+    /// recover to `swap.signer` over this chain's digest, else [`EvmError::WrongSigner`] and nothing is sent. Waits up
+    /// to the configured receipt timeout; to choose the wait per call, or to bump a stuck claim, send
+    /// [`AdaptorEscrowClient::claim_request`] through the connection instead.
     pub async fn claim(&self, swap: &AdaptorSwap, signature: &ClaimSignature) -> Result<TxResult, EvmError> {
+        self.conn.send_and_confirm(self.claim_request(swap, signature)?).await
+    }
+
+    /// The claim of `swap` with `signature` as a transaction to send through [`AdaptorEscrowClient::connection`]:
+    /// `send_and_confirm_with(request, timeout)` to wait at most `timeout` (e.g. part of the claim window), or
+    /// `submit` + `wait_for_sent` + `bump` to replace it with higher fees if it is not mined in time. The signature
+    /// is normalized and checked against `swap.signer` first, as in [`AdaptorEscrowClient::claim`].
+    pub fn claim_request(&self, swap: &AdaptorSwap, signature: &ClaimSignature) -> Result<TxRequest, EvmError> {
         let sig = signature.normalized()?;
         let id = swap.id();
         let recovered = sig.recover(&self.claim_digest(id))?;
@@ -249,13 +277,18 @@ impl AdaptorEscrowClient {
             return Err(EvmError::WrongSigner { expected: swap.signer, recovered });
         }
         let call = ParalockAdaptorEscrow::claimCall { s: (*swap).into(), v: sig.v, r: sig.r, sigS: sig.s };
-        self.conn.send_and_confirm(TxRequest::call(self.contract, &call, SOURCE)).await
+        Ok(TxRequest::call(self.contract, &call, SOURCE))
     }
 
     /// Returns the funds to `swap.sender` once `swap.expiry` has passed. Any account may submit it.
     pub async fn refund(&self, swap: &AdaptorSwap) -> Result<TxResult, EvmError> {
-        let call = ParalockAdaptorEscrow::refundCall { s: (*swap).into() };
-        self.conn.send_and_confirm(TxRequest::call(self.contract, &call, SOURCE)).await
+        self.conn.send_and_confirm(self.refund_request(swap)).await
+    }
+
+    /// The refund of `swap` as a transaction to send through [`AdaptorEscrowClient::connection`] (see
+    /// [`AdaptorEscrowClient::claim_request`]).
+    pub fn refund_request(&self, swap: &AdaptorSwap) -> TxRequest {
+        TxRequest::call(self.contract, &ParalockAdaptorEscrow::refundCall { s: (*swap).into() }, SOURCE)
     }
 
     async fn scan(&self, id: B256, tip: u64, done: impl FnMut(&[EventLog]) -> bool) -> Result<Vec<EventLog>, EvmError> {
@@ -270,7 +303,7 @@ impl AdaptorEscrowClient {
             key: id,
             from_block: self.scan.from_block,
             to_block: tip,
-            max_block_range: self.scan.max_block_range,
+            window: &self.window,
         };
         self.conn.scan_logs(&query, done).await
     }

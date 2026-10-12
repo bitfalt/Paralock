@@ -247,7 +247,7 @@ async fn deploy(conn: &EvmConnection, artifact: &ContractArtifact, check_code: b
     let address = result.contract_address.ok_or_else(|| {
         EvmError::InvalidResponse(format!("{} deployment {} created no contract", artifact.contract_name, result.hash))
     })?;
-    if check_code && conn.code_at(address).await? != artifact.deployed_bytecode {
+    if check_code && !conn.holds_code(address, &artifact.deployed_bytecode).await? {
         return Err(EvmError::InvalidResponse(format!(
             "{} at {address} does not hold the expected runtime code",
             artifact.contract_name
@@ -257,14 +257,14 @@ async fn deploy(conn: &EvmConnection, artifact: &ContractArtifact, check_code: b
     Ok(address)
 }
 
-/// True if `address` holds exactly `artifact`'s runtime code.
+/// True if `address` holds exactly `artifact`'s runtime code (the rule of [`EvmConnection::verify_escrow_code`]).
 async fn is_current(
     conn: &EvmConnection,
     address: Option<Address>,
     artifact: &ContractArtifact,
 ) -> Result<bool, EvmError> {
     match address {
-        Some(address) => Ok(conn.code_at(address).await? == artifact.deployed_bytecode),
+        Some(address) => conn.holds_code(address, &artifact.deployed_bytecode).await,
         None => Ok(false),
     }
 }

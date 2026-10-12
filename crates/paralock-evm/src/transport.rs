@@ -9,7 +9,7 @@ use alloy::transports::http::reqwest;
 use alloy::transports::{RpcError, TransportError, TransportFut};
 use tower::{Layer, Service};
 
-use crate::error::{EvmError, is_transient};
+use crate::error::{EvmError, is_retryable_payload, is_transient};
 
 /// Retry policy of the transport: `max_retries` extra attempts on transient failures (connection errors, timeouts,
 /// HTTP 429 and 5xx, rate-limit error payloads), waiting `initial_backoff · 2^attempt` (±25 % jitter, capped at
@@ -78,8 +78,8 @@ where
                 let err = match inner.call(request.clone()).await {
                     Ok(response) => match response.as_error() {
                         // Only rate-limit style error payloads are retried; any other error response (a revert,
-                        // "nonce too low", …) is the answer.
-                        Some(payload) if payload.is_retry_err() => TransportError::ErrorResp(payload.clone()),
+                        // "nonce too low", an `eth_getLogs` range refusal, …) is the answer.
+                        Some(payload) if is_retryable_payload(payload) => TransportError::ErrorResp(payload.clone()),
                         _ => return Ok(response),
                     },
                     Err(err) => err,

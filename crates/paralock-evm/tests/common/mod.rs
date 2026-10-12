@@ -5,6 +5,7 @@
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use alloy::primitives::{Address, U256};
@@ -214,4 +215,176 @@ macro_rules! env_or_skip {
             }
         }
     };
+}
+
+// ------------------------------------------------------------------------------------------------- RPC proxy
+
+/// What [`RpcProxy`] does with one JSON-RPC request.
+#[derive(Clone, Debug)]
+pub enum Rule {
+    /// Forward it to the node and relay the answer.
+    Forward,
+    /// Answer with this HTTP status and body without forwarding (a provider refusing the request).
+    Fail(u16, String),
+    /// Forward it (the node acts on it), then answer with this HTTP status and body (a lost response).
+    ForwardThenFail(u16, String),
+    /// Answer HTTP 200 with a JSON-RPC error with this code and message, without forwarding.
+    RpcError(i64, String),
+}
+
+/// One request seen by an [`RpcProxy`].
+#[derive(Clone, Debug)]
+pub struct Seen {
+    pub method: String,
+    pub params: serde_json::Value,
+    /// The HTTP status the proxy answered with.
+    pub status: u16,
+    /// True when the answer was a JSON-RPC error made up by the proxy.
+    pub rpc_error: bool,
+}
+
+type RuleFn = dyn Fn(&str, &serde_json::Value) -> Rule + Send + Sync;
+
+/// An HTTP JSON-RPC proxy in front of a node, on a free port, that applies a [`Rule`] per request (one request per
+/// connection, `Connection: close`). Stopped on drop.
+pub struct RpcProxy {
+    pub url: String,
+    seen: Arc<Mutex<Vec<Seen>>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for RpcProxy {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+impl RpcProxy {
+    /// Starts a proxy for `upstream` (a node URL) applying `rule`.
+    pub async fn start(
+        upstream: &str,
+        rule: impl Fn(&str, &serde_json::Value) -> Rule + Send + Sync + 'static,
+    ) -> Self {
+        let listener = loop {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            if !(8545..=8550).contains(&listener.local_addr().unwrap().port()) {
+                break listener;
+            }
+        };
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let rule: Arc<RuleFn> = Arc::new(rule);
+        let upstream = upstream.to_owned();
+        let client = paralock_evm::alloy::transports::http::reqwest::Client::new();
+        let log = Arc::clone(&seen);
+        let task = tokio::spawn(async move {
+            loop {
+                let Ok((socket, _)) = listener.accept().await else { return };
+                let (rule, log, client, upstream) =
+                    (Arc::clone(&rule), Arc::clone(&log), client.clone(), upstream.clone());
+                tokio::spawn(async move {
+                    let _ = serve(socket, &*rule, &log, &client, &upstream).await;
+                });
+            }
+        });
+        Self { url, seen, task }
+    }
+
+    /// The requests seen so far.
+    pub fn seen(&self) -> Vec<Seen> {
+        self.seen.lock().unwrap().clone()
+    }
+
+    /// How many requests of `method` were refused (answered with an error made up by the proxy, or a non-200 status).
+    pub fn refused(&self, method: &str) -> usize {
+        self.seen().iter().filter(|s| s.method == method && (s.status != 200 || s.rpc_error)).count()
+    }
+}
+
+/// The block span of an `eth_getLogs` request's params.
+pub fn log_span(params: &serde_json::Value) -> u64 {
+    let block = |key: &str| {
+        let hex = params[0][key].as_str().unwrap();
+        u64::from_str_radix(hex.trim_start_matches("0x"), 16).unwrap()
+    };
+    block("toBlock") - block("fromBlock") + 1
+}
+
+async fn serve(
+    mut socket: tokio::net::TcpStream,
+    rule: &RuleFn,
+    log: &Mutex<Vec<Seen>>,
+    client: &paralock_evm::alloy::transports::http::reqwest::Client,
+    upstream: &str,
+) -> std::io::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let header_end = loop {
+        let n = socket.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok(());
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break pos + 4;
+        }
+    };
+    let head = String::from_utf8_lossy(&buf[..header_end]).to_lowercase();
+    let length: usize =
+        head.lines().find_map(|l| l.strip_prefix("content-length:")).map(|v| v.trim().parse().unwrap()).unwrap_or(0);
+    while buf.len() < header_end + length {
+        let n = socket.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok(());
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    let body = buf[header_end..header_end + length].to_vec();
+    let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let method = request["method"].as_str().unwrap_or_default().to_owned();
+    let params = request["params"].clone();
+    let forward = || async {
+        let response =
+            client.post(upstream).header("content-type", "application/json").body(body.clone()).send().await.unwrap();
+        let status = response.status().as_u16();
+        (status, response.text().await.unwrap())
+    };
+    let mut rpc_error = false;
+    let (status, text) = match rule(&method, &params) {
+        Rule::Forward => forward().await,
+        Rule::Fail(status, text) => (status, text),
+        Rule::ForwardThenFail(status, text) => {
+            forward().await;
+            (status, text)
+        }
+        Rule::RpcError(code, message) => {
+            rpc_error = true;
+            let error = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request["id"].clone(),
+                "error": { "code": code, "message": message },
+            });
+            (200, error.to_string())
+        }
+    };
+    log.lock().unwrap().push(Seen { method, params, status, rpc_error });
+    let reason = match status {
+        200 => "OK",
+        400 => "Bad Request",
+        413 => "Payload Too Large",
+        502 => "Bad Gateway",
+        _ => "Error",
+    };
+    let response = format!(
+        "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
+        text.len()
+    );
+    socket.write_all(response.as_bytes()).await?;
+    socket.shutdown().await
+}
+
+/// A configuration for `url` (e.g. a proxy) on `chain_id`, polling fast.
+pub fn config_at(url: &str, chain_id: u64) -> EvmConfig {
+    EvmConfig::new(url, chain_id).with_polling_interval(Duration::from_millis(50))
 }

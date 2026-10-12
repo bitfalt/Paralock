@@ -5,18 +5,20 @@
 
 mod common;
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use alloy::primitives::{Address, B256, U256};
 use alloy::signers::SignerSync;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol_types::SolCall;
-use common::{DEPLOYER, MAKER, Net, RELAYER, TAKER, TestEnv};
+use common::{DEPLOYER, MAKER, Net, RELAYER, RpcProxy, Rule, TAKER, TestEnv};
 use paralock_evm::bindings::{IERC20, ParalockAdaptorEscrow, ParalockHTLC};
 use paralock_evm::{
-    AdaptorSwap, ClaimSignature, DeployOptions, EscrowStatus, EvmConfig, EvmConnection, EvmError, EvmHtlcClient,
-    HtlcSwap, Outcome, ParalockContract, PreviousDeployment, SECP256K1_N, ScanConfig, TEMPO_TOKENS, TxRequest,
-    deploy_paralock_contracts, hashlock_of, random_salt,
+    AdaptorEscrowClient, AdaptorSwap, ClaimSignature, DeployOptions, EscrowStatus, EvmConfig, EvmConnection, EvmError,
+    EvmHtlcClient, HtlcSwap, Outcome, ParalockContract, PreviousDeployment, RevertSource, SECP256K1_N, ScanConfig,
+    SentTx, TEMPO_TOKENS, TxRequest, TxStatus, deploy_paralock_contracts, hashlock_of, random_salt,
 };
 
 const AMOUNT: u64 = 25_000_000; // 25 USD
@@ -230,6 +232,7 @@ async fn htlc_lock_then_claim_tempo() {
     htlc_lock_then_claim(Net::Tempo).await;
 }
 
+#[cfg(feature = "tempo")]
 #[tokio::test]
 async fn htlc_lock_then_claim_tempo_fee_token() {
     htlc_lock_then_claim(Net::TempoFeeToken).await;
@@ -355,6 +358,7 @@ async fn adaptor_lock_then_claim_tempo() {
     adaptor_lock_then_claim(Net::Tempo).await;
 }
 
+#[cfg(feature = "tempo")]
 #[tokio::test]
 async fn adaptor_lock_then_claim_tempo_fee_token() {
     adaptor_lock_then_claim(Net::TempoFeeToken).await;
@@ -590,6 +594,7 @@ async fn event_scans_handle_small_windows_and_a_late_start_block() {
     assert!(matches!(err, EvmError::LockEventMissing { status: EscrowStatus::Settled, .. }), "{err}");
 }
 
+#[cfg(feature = "tempo")]
 #[tokio::test]
 async fn tempo_fee_token_pays_the_gas() {
     let env = env_or_skip!(Net::Tempo);
@@ -638,7 +643,314 @@ async fn tempo_fee_token_pays_the_gas() {
     assert_eq!(beta.token_balance(TEMPO_TOKENS.path_usd, who).await.unwrap(), U256::ZERO);
 }
 
+#[cfg(feature = "tempo")]
 alloy::sol! {
     function transfer(address to, uint256 amount) external returns (bool);
 }
+#[cfg(feature = "tempo")]
 use transferCall as TransferCall;
+
+// ------------------------------------------------------------------------------------------------- receipts and bumps
+
+/// An approval of `token` (a harmless transaction to send).
+fn approval(token: Address, amount: u64) -> TxRequest {
+    let call = IERC20::approveCall { spender: Address::repeat_byte(0x77), amount: U256::from(amount) };
+    TxRequest::call(token, &call, Some(RevertSource::Token))
+}
+
+/// A claim that is not mined in time: the per-call wait returns quickly with the hash and nonce, the transaction is
+/// pending, and a fee bump (same nonce, ≥ +10 % on both fees) replaces it and is what gets mined.
+async fn a_stuck_claim_is_reported_then_bumped(net: Net) {
+    let env = env_or_skip!(net);
+    let maker = env.htlc(&env.maker);
+    let relayer = env.htlc(&env.relayer);
+    let conn = relayer.connection();
+    let (swap, preimage) = htlc_swap(&env, 3600).await;
+    maker.approve_and_lock(&swap).await.unwrap();
+    let n = nonce(conn, common::address(RELAYER)).await;
+
+    common::set_automine(conn, false).await;
+    let request = relayer.claim_request(&swap, &preimage).unwrap();
+    let started = Instant::now();
+    let err = conn.send_and_confirm_with(request, Duration::from_millis(300)).await.unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(10), "the per-call timeout applies, not the default");
+    let EvmError::ReceiptTimeout { hash, nonce: Some(timed_out_nonce), .. } = err else { panic!("{err}") };
+    assert_eq!(timed_out_nonce, n);
+    assert_eq!((err.tx_hash(), err.nonce()), (Some(hash), Some(n)));
+    assert!(err.is_transient());
+    assert!(err.to_string().contains(&hash.to_string()), "{err}");
+    assert_eq!(conn.transaction_status(hash).await.unwrap(), TxStatus::Pending);
+    // Waiting on the bare hash again reports the nonce too.
+    let err = conn.wait_for_receipt(hash, Some(Duration::from_millis(100))).await.unwrap_err();
+    assert!(matches!(err, EvmError::ReceiptTimeout { nonce: Some(m), .. } if m == n), "{err}");
+
+    // The record is found by the hash from the error; the bump keeps call, nonce and gas, and raises both fees.
+    let sent = conn.sent_transaction(hash).expect("recorded");
+    assert_eq!(
+        (sent.hash, sent.nonce, sent.from, sent.to),
+        (hash, n, common::address(RELAYER), Some(maker.contract()))
+    );
+    assert!(matches!(conn.bump_by(&sent, 5).await, Err(EvmError::InvalidInput(_))));
+    let bumped = conn.bump(&sent).await.unwrap();
+    assert_ne!(bumped.hash, hash);
+    assert_eq!((bumped.nonce, &bumped.replaces, bumped.gas_limit), (n, &vec![hash], sent.gas_limit));
+    assert_eq!((bumped.to, &bumped.data, bumped.fee_token), (sent.to, &sent.data, sent.fee_token));
+    for (old, new) in [
+        (sent.max_fee_per_gas, bumped.max_fee_per_gas),
+        (sent.max_priority_fee_per_gas, bumped.max_priority_fee_per_gas),
+    ] {
+        assert!(new > old && new * 100 >= old * 110, "{old} -> {new}");
+    }
+    assert_eq!(conn.sent_transaction(hash), Some(bumped.clone()), "the latest version, by any of its hashes");
+    assert_eq!(conn.transaction_status(bumped.hash).await.unwrap(), TxStatus::Pending);
+    assert_eq!(conn.transaction_status(hash).await.unwrap(), TxStatus::Unknown, "replaced in the mempool");
+    assert_eq!(nonce(conn, common::address(RELAYER)).await, n + 1, "one pending transaction, not two");
+
+    common::mine(conn).await;
+    let mined = conn.wait_for_sent(&bumped, Some(Duration::from_secs(10))).await.unwrap();
+    assert_eq!(mined.hash, bumped.hash);
+    if net == Net::TempoFeeToken {
+        assert_eq!(mined.fee_token, Some(TEMPO_TOKENS.path_usd));
+    }
+    assert!(matches!(conn.transaction_status(bumped.hash).await.unwrap(), TxStatus::Mined(r) if r == mined));
+    assert_eq!(maker.outcome(swap.hashlock).await.unwrap(), Outcome::Claimed { revealed: preimage });
+    // The nonce is used now: no further bump.
+    let err = conn.bump(&bumped).await.unwrap_err();
+    assert!(matches!(err, EvmError::NonceUsed { hash: h, nonce: m } if h == bumped.hash && m == n), "{err}");
+    // The original record (from before the bump) leads to the mined version too.
+    assert_eq!(conn.wait_for_sent(&sent, Some(Duration::from_secs(5))).await.unwrap().hash, bumped.hash);
+    // A record restored elsewhere (no in-process history: a read-only connection) whose latest version was never
+    // mined: the version it replaces, which was, is found.
+    let mut json = serde_json::to_value(&bumped).unwrap();
+    json["hash"] = serde_json::to_value(hash).unwrap();
+    json["replaces"] = serde_json::json!([bumped.hash]);
+    let reordered: SentTx = serde_json::from_value(json).unwrap();
+    let observer = EvmConnection::connect(common::config(&env.anvil, env.chain_id)).await.unwrap();
+    assert_eq!(observer.wait_for_sent(&reordered, Some(Duration::from_secs(5))).await.unwrap().hash, bumped.hash);
+    let err = observer.wait_for_receipt(hash, Some(Duration::from_millis(100))).await.unwrap_err();
+    assert!(matches!(err, EvmError::ReceiptTimeout { nonce: None, .. }), "replaced and unknown: {err}");
+
+    // The next transaction takes the next nonce: no gap, no reuse.
+    common::set_automine(conn, true).await;
+    conn.send_and_confirm(approval(env.token, 1)).await.unwrap();
+    assert_eq!(nonce(conn, common::address(RELAYER)).await, n + 2);
+}
+
+#[tokio::test]
+async fn a_stuck_claim_is_reported_then_bumped_plain() {
+    a_stuck_claim_is_reported_then_bumped(Net::Plain).await;
+}
+
+#[tokio::test]
+async fn a_stuck_claim_is_reported_then_bumped_tempo() {
+    a_stuck_claim_is_reported_then_bumped(Net::Tempo).await;
+}
+
+#[cfg(feature = "tempo")]
+#[tokio::test]
+async fn a_stuck_claim_is_reported_then_bumped_tempo_fee_token() {
+    a_stuck_claim_is_reported_then_bumped(Net::TempoFeeToken).await;
+}
+
+#[tokio::test]
+async fn a_lost_broadcast_response_keeps_the_hash() {
+    let env = env_or_skip!(Net::Plain);
+    // The node takes the transaction, but the gateway answers 502 and cannot be asked about it either.
+    let proxy = RpcProxy::start(&env.anvil.url, |method, _| match method {
+        "eth_sendRawTransaction" => Rule::ForwardThenFail(502, "bad gateway".into()),
+        "eth_getTransactionByHash" => Rule::Fail(502, "bad gateway".into()),
+        _ => Rule::Forward,
+    })
+    .await;
+    let config = common::config_at(&proxy.url, env.chain_id).with_signer(common::signer(RELAYER)).with_rpc_policy(
+        Duration::from_secs(5),
+        0,
+        Duration::from_millis(10),
+    );
+    let conn = EvmConnection::connect(config).await.unwrap();
+    let n = nonce(&env.relayer, common::address(RELAYER)).await;
+
+    let err = conn.submit(approval(env.token, 1)).await.unwrap_err();
+    let EvmError::BroadcastUnknown { hash, nonce: m, .. } = err else { panic!("{err}") };
+    assert_eq!(m, n);
+    assert!(err.is_transient());
+    assert_eq!(err.tx_hash(), Some(hash));
+    // It is out (and mined: automine), as a direct connection shows.
+    let mined = env.relayer.wait_for_receipt(hash, Some(Duration::from_secs(10))).await.unwrap();
+    assert!(matches!(env.relayer.transaction_status(hash).await.unwrap(), TxStatus::Mined(r) if r == mined));
+    assert_eq!(conn.sent_transaction(hash).map(|s| s.nonce), Some(n));
+
+    // send_and_confirm waits for an uncertain broadcast instead of failing: here it was mined.
+    let result = conn.send_and_confirm(approval(env.token, 2)).await.unwrap();
+    assert!(matches!(env.relayer.transaction_status(result.hash).await.unwrap(), TxStatus::Mined(_)));
+    assert_eq!(nonce(&env.relayer, common::address(RELAYER)).await, n + 2);
+}
+
+#[tokio::test]
+async fn a_dropped_broadcast_times_out_with_its_hash_and_is_bumped_out() {
+    let env = env_or_skip!(Net::Plain);
+    // The gateway drops broadcasts (HTTP 502, nothing forwarded) until told otherwise.
+    let dropping = Arc::new(AtomicBool::new(true));
+    let flag = Arc::clone(&dropping);
+    let proxy = RpcProxy::start(&env.anvil.url, move |method, _| match method {
+        "eth_sendRawTransaction" if flag.load(Ordering::SeqCst) => Rule::Fail(502, "bad gateway".into()),
+        _ => Rule::Forward,
+    })
+    .await;
+    let config = common::config_at(&proxy.url, env.chain_id).with_signer(common::signer(RELAYER)).with_rpc_policy(
+        Duration::from_secs(5),
+        0,
+        Duration::from_millis(10),
+    );
+    let conn = EvmConnection::connect(config).await.unwrap();
+    let n = nonce(&env.relayer, common::address(RELAYER)).await;
+
+    let err = conn.send_and_confirm_with(approval(env.token, 1), Duration::from_millis(300)).await.unwrap_err();
+    let EvmError::ReceiptTimeout { hash, nonce: Some(m), .. } = err else { panic!("{err}") };
+    assert_eq!(m, n);
+    assert_eq!(conn.transaction_status(hash).await.unwrap(), TxStatus::Unknown);
+
+    // Re-broadcast with the same nonce and higher fees once the gateway works again.
+    dropping.store(false, Ordering::SeqCst);
+    let sent = conn.sent_transaction(hash).expect("recorded");
+    let bumped = conn.bump(&sent).await.unwrap();
+    let mined = conn.wait_for_sent(&bumped, Some(Duration::from_secs(10))).await.unwrap();
+    assert_eq!((mined.hash, bumped.nonce), (bumped.hash, n));
+    assert_eq!(nonce(&env.relayer, common::address(RELAYER)).await, n + 1);
+    // And the account keeps sending normally.
+    conn.send_and_confirm(approval(env.token, 2)).await.unwrap();
+    assert_eq!(nonce(&env.relayer, common::address(RELAYER)).await, n + 2);
+}
+
+// ------------------------------------------------------------------------------------------------- log windows
+
+/// Locks and claims an HTLC swap with blocks in between, so that scans cross several windows.
+async fn settled_swap(env: &TestEnv) -> (HtlcSwap, B256, u64) {
+    let maker = env.htlc(&env.maker);
+    let (swap, preimage) = htlc_swap(env, 3600).await;
+    let lock = maker.approve_and_lock(&swap).await.unwrap().lock;
+    for _ in 0..12 {
+        common::mine(&env.maker).await;
+    }
+    env.htlc(&env.taker).claim(&swap, &preimage).await.unwrap();
+    for _ in 0..12 {
+        common::mine(&env.maker).await;
+    }
+    (swap, preimage, lock.block_number)
+}
+
+#[tokio::test]
+async fn event_scans_narrow_the_window_when_a_provider_refuses_large_ranges() {
+    const LIMIT: u64 = 6;
+    let env = env_or_skip!(Net::Plain);
+    let (swap, preimage, lock_block) = settled_swap(&env).await;
+    let refusals = [
+        Rule::Fail(413, String::new()),
+        Rule::Fail(413, "<html><body><h1>413 Request Entity Too Large</h1></body></html>".into()),
+        Rule::Fail(400, "eth_getLogs is limited to a 6 block range".into()),
+        Rule::Fail(503, "query returned more than 10000 results".into()),
+        Rule::RpcError(-32005, "query returned more than 10000 results".into()),
+    ];
+    for refusal in refusals {
+        let proxy = RpcProxy::start(&env.anvil.url, move |method, params| {
+            if method == "eth_getLogs" && common::log_span(params) > LIMIT { refusal.clone() } else { Rule::Forward }
+        })
+        .await;
+        // The default retries (a 503 is retried before it counts as a refusal), with a short backoff.
+        let config = common::config_at(&proxy.url, env.chain_id).with_rpc_policy(
+            Duration::from_secs(5),
+            3,
+            Duration::from_millis(5),
+        );
+        let conn = EvmConnection::connect(config).await.unwrap();
+        let scan = ScanConfig { from_block: env.deployment.start_block, max_block_range: 1_000 };
+        let htlc = EvmHtlcClient::new(conn.clone(), env.deployment.htlc, scan);
+        assert_eq!(htlc.scan_window(), 1_000);
+
+        let lock = htlc.get_lock(swap.hashlock).await.unwrap().unwrap();
+        assert_eq!((lock.swap, lock.block_number), (swap, lock_block));
+        let refused = proxy.refused("eth_getLogs");
+        assert!(refused > 0, "the proxy refused nothing");
+        assert!(htlc.scan_window() <= LIMIT, "window {}", htlc.scan_window());
+        assert_eq!(htlc.scan_config().max_block_range, 1_000, "the configuration is kept as given");
+
+        // Later scans (and clones) start from the narrowed window: no new refusals.
+        let clone = htlc.clone();
+        assert_eq!(clone.outcome(swap.hashlock).await.unwrap(), Outcome::Claimed { revealed: preimage });
+        assert_eq!(htlc.get_locked_swap(swap.hashlock).await.unwrap(), Some(swap));
+        assert_eq!(proxy.refused("eth_getLogs"), refused);
+    }
+
+    // A provider that refuses even one block: the error comes back (after log2(window) attempts), and the window is
+    // not narrowed by a refusal that no narrower window fixed.
+    let proxy = RpcProxy::start(&env.anvil.url, |method, _| {
+        if method == "eth_getLogs" { Rule::Fail(413, String::new()) } else { Rule::Forward }
+    })
+    .await;
+    let conn = EvmConnection::connect(common::config_at(&proxy.url, env.chain_id)).await.unwrap();
+    let scan = ScanConfig { from_block: env.deployment.start_block, max_block_range: 1_000 };
+    let htlc = EvmHtlcClient::new(conn, env.deployment.htlc, scan);
+    let err = htlc.get_lock(swap.hashlock).await.unwrap_err();
+    assert!(matches!(&err, EvmError::Rpc { method: "eth_getLogs", .. }), "{err}");
+    assert!(proxy.refused("eth_getLogs") <= 11, "{} attempts", proxy.refused("eth_getLogs"));
+    assert_eq!(htlc.scan_window(), 1_000);
+}
+
+#[tokio::test]
+async fn adaptor_scans_narrow_the_window_too() {
+    const LIMIT: u64 = 3;
+    let env = env_or_skip!(Net::Plain);
+    let maker = env.escrow(&env.maker);
+    let (swap, one_time) = adaptor_swap(&env, 3600).await;
+    let id = maker.approve_and_lock(&swap).await.unwrap().id;
+    for _ in 0..8 {
+        common::mine(&env.maker).await;
+    }
+    let signature = sign(&one_time, &maker.claim_digest(id));
+    env.escrow(&env.taker).claim(&swap, &signature).await.unwrap();
+    let proxy = RpcProxy::start(&env.anvil.url, |method, params| {
+        if method == "eth_getLogs" && common::log_span(params) > LIMIT {
+            Rule::Fail(400, "block range too large".into())
+        } else {
+            Rule::Forward
+        }
+    })
+    .await;
+    let conn = EvmConnection::connect(common::config_at(&proxy.url, env.chain_id)).await.unwrap();
+    let escrow = AdaptorEscrowClient::new(conn, env.deployment.adaptor_escrow, env.scan());
+    assert_eq!(escrow.outcome(id).await.unwrap(), Outcome::Claimed { revealed: signature });
+    assert!(escrow.scan_window() <= LIMIT);
+    let refused = proxy.refused("eth_getLogs");
+    assert_eq!(escrow.get_locked_swap(id).await.unwrap(), Some(swap));
+    assert_eq!(proxy.refused("eth_getLogs"), refused);
+}
+
+// ------------------------------------------------------------------------------------------------- escrow code
+
+#[tokio::test]
+async fn escrow_addresses_are_checked_against_the_embedded_bytecode() {
+    let env = env_or_skip!(Net::Plain);
+    env.htlc(&env.taker).verify_escrow_code().await.unwrap();
+    env.escrow(&env.taker).verify_escrow_code().await.unwrap();
+    assert!(env.taker.has_contract_code(env.deployment.htlc, ParalockContract::Htlc).await.unwrap());
+
+    // Swapped addresses, a token, an account without code.
+    let swapped = EvmHtlcClient::new(env.taker.clone(), env.deployment.adaptor_escrow, env.scan());
+    let err = swapped.verify_escrow_code().await.unwrap_err();
+    assert!(matches!(err, EvmError::CodeMismatch { expected: ParalockContract::Htlc, empty: false, .. }), "{err}");
+    let swapped = AdaptorEscrowClient::new(env.taker.clone(), env.deployment.htlc, env.scan());
+    assert!(matches!(swapped.verify_escrow_code().await, Err(EvmError::CodeMismatch { empty: false, .. })));
+    let err = env.taker.verify_escrow_code(env.token, ParalockContract::Htlc).await.unwrap_err();
+    assert!(matches!(err, EvmError::CodeMismatch { address, .. } if address == env.token), "{err}");
+    let eoa = common::address(TAKER);
+    let err = env.taker.verify_escrow_code(eoa, ParalockContract::AdaptorEscrow).await.unwrap_err();
+    assert!(matches!(err, EvmError::CodeMismatch { empty: true, .. }), "{err}");
+    assert!(err.to_string().contains("ParalockAdaptorEscrow"), "{err}");
+    assert!(!env.taker.has_contract_code(env.token, ParalockContract::Htlc).await.unwrap());
+
+    // Checked on the configured chain.
+    use alloy::providers::Provider;
+    let _: serde_json::Value = env.taker.provider().raw_request("anvil_setChainId".into(), (31340u64,)).await.unwrap();
+    let err = env.htlc(&env.taker).verify_escrow_code().await.unwrap_err();
+    assert!(matches!(err, EvmError::ChainIdMismatch { .. }), "{err}");
+}

@@ -13,16 +13,18 @@ authors.workspace = true
 readme = "README.md"
 keywords = ["evm", "htlc", "atomic-swap", "tempo", "alloy"]
 categories = ["cryptography::cryptocurrencies", "api-bindings", "network-programming"]
-include = ["src/**/*.rs", "artifacts/*.json", "build.rs", "Cargo.toml", "README.md", "LICENSE"]
+include = ["src/**/*.rs", "artifacts/*.json", "build.rs", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE"]
 
 [package.metadata.docs.rs]
 all-features = true
 
 [features]
 default = ["tempo"]
-## Tempo transactions (type 0x76) that pay gas in a chosen TIP-20 fee token, through Tempo's official `tempo-alloy`.
-## Without it, Tempo chains still work with plain EIP-1559 transactions (the protocol then picks the fee token: the
-## account's FeeManager preference, else pathUSD), and `EvmConfig::fee_token` is rejected.
+## Tempo transactions (type 0x76) that pay gas in a chosen TIP-20 fee token, through Tempo's official `tempo-alloy`
+## (about a hundred more crates, including a second crypto stack). Without it (`default-features = false`), Tempo
+## chains still work with plain EIP-1559 transactions (the protocol then picks the fee token: the account's FeeManager
+## preference, else pathUSD), and `EvmConfig::fee_token` is rejected. Everything else is identical, and the crate is
+## built, linted and tested both ways.
 tempo = ["dep:tempo-alloy"]
 
 [dependencies]
@@ -53,7 +55,7 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time", "sync", "net", "io-util"] }
 proptest = { workspace = true }
 
 [lints]

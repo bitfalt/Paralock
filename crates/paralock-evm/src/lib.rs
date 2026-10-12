@@ -11,9 +11,13 @@
 //!   [`claim_digest`], [`ClaimSignature`] normalization), identical to the contracts and to `spec/vectors/evm.json`;
 //! - [`EvmConnection`]: chain-id verification before anything is sent, simulation with typed revert decoding
 //!   ([`EvmError::TransactionReverted`], [`RevertReason`]), gas and fee estimation with a fee cap, process-wide nonce
-//!   management, receipt waits with timeouts, and bounded retries with backoff on transport errors and 429/5xx;
+//!   management, receipt waits with per-call timeouts ([`EvmConnection::send_and_confirm_with`]), fee bumps that
+//!   replace a stuck transaction ([`EvmConnection::bump`]), status lookups ([`EvmConnection::transaction_status`]),
+//!   and bounded retries with backoff on transport errors and 429/5xx. Every error raised after a transaction was
+//!   signed carries its hash ([`EvmError::tx_hash`]);
+//! - escrow address checks against the embedded bytecode ([`EvmConnection::verify_escrow_code`]);
 //! - Tempo transactions that pay gas in a TIP-20 fee token, through Tempo's official `tempo-alloy` (feature `tempo`,
-//!   on by default; see [`tempo`]);
+//!   on by default; opt out with `default-features = false` if you don't need fee tokens; see [`tempo`]);
 //! - [`KNOWN_NETWORKS`] (verified public networks and stablecoins) and [`TESTNET_DEPLOYMENTS`] (Paralock's public
 //!   testnet contracts), and [`deploy_paralock_contracts`] for local chains.
 //!
@@ -68,7 +72,7 @@ mod transport;
 pub use adaptor::{AdaptorEscrowClient, AdaptorLock, AdaptorLockReceipt};
 pub use artifacts::{ContractArtifact, ParalockContract};
 pub use config::{EvmConfig, EvmSigner};
-pub use connection::{BlockInfo, EvmConnection, TxRequest, TxResult, fetch_chain_id};
+pub use connection::{BlockInfo, EvmConnection, SentTx, TxRequest, TxResult, TxStatus, fetch_chain_id};
 pub use deploy::{
     DeployOptions, DeployResult, LOCAL_MINT_AMOUNT, PreviousDeployment, Reused, deploy_paralock_contracts,
     local_ousd_salt,
