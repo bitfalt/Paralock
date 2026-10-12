@@ -5,7 +5,7 @@ description: Run a complete ZEC-to-stablecoin swap on a local devnet, then drive
 
 This page takes you from nothing to a completed swap on your machine. The local devnet runs a Zcash regtest chain, three EVM chains by default (six with `--evm all`), both escrow contracts and a maker, so nothing touches a public network and no real funds are involved.
 
-> **Note:** `npx paralock` runs the [CLI](/docs/cli) from npm (0.3.0 is its first release), with no clone of the repository. In a checkout, run `pnpm install && pnpm build` and use `pnpm paralock` instead: the same commands, run from the workspace build. The web app and the examples need a checkout.
+> **Note:** `npx paralock` runs the [CLI](/docs/cli) from npm with no clone of the repository, and needs 0.3.0, the CLI's first npm release. Before that release is on npm, or to work on the code, use a checkout: run `pnpm install && pnpm build` and use `pnpm paralock` instead, the same commands run from the workspace build. The web app and the examples need a checkout.
 
 ## Prerequisites
 
@@ -254,6 +254,25 @@ await taker.refund(locked.id); // waits for the refund height, then returns the 
 
 On a real network you pass your own node, contracts, keys and maker URL to the same `createTaker` call; [Where Paralock works](/docs/networks) lists the supported networks and Zcash backends. Contract addresses and start blocks for the public testnets are in `contracts/deployments/<chainId>.json` and on the [contracts page](/docs/contracts).
 
+## From Rust
+
+The [Rust SDK](/docs/rust) and the [`paralock` binary](/docs/rust-cli) run against the same devnet, and trade with the TypeScript maker that `dev` started. With the binary (`cargo install paralock-cli`, or `curl -fsSL https://paralock.xyz/install | sh`):
+
+```sh
+paralock --devnet doctor                          # reads devnet.json from the state directory
+paralock --devnet swap --zec 0.1                  # htlc on Tempo, against the maker on :7420
+paralock --devnet swap --zec 0.1 --chain base --private
+```
+
+From code, `examples/rust/rust-quickstart` is the Rust "hello world": `create_taker`, one quote, one swap, in about 100 lines. From a checkout:
+
+```sh
+cargo run -p rust-quickstart                              # 0.1 ZEC to USDC on Base, htlc mode
+cargo run -p rust-quickstart -- --zec 0.25 --chain tempo  # to OUSD on Tempo
+```
+
+In another project, `cargo add paralock --features evm,price-feed` and `cargo add tokio --features macros,rt-multi-thread`; the [Rust SDK page](/docs/rust#a-taker) has a complete taker. The other Rust examples cover an axum maker, payments, a recovery daemon, the protocol core alone and public testnets.
+
 ## Next steps
 
 - [Swap on public testnets](/docs/testnet): the same flow between Zcash testnet and Tempo Moderato, through a public lightwalletd server.
@@ -261,3 +280,4 @@ On a real network you pass your own node, contracts, keys and maker URL to the s
 - [How it works](/docs/how-it-works): what happens at each step and why it is safe.
 - [`@paralock/sdk` reference](/docs/sdk): every option and default.
 - [CLI reference](/docs/cli): every command and flag.
+- [Rust SDK](/docs/rust): the same protocol from Rust, and the [`paralock` binary](/docs/rust-cli).

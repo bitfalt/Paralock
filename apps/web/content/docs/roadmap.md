@@ -32,7 +32,7 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 
   Why: anyone can check the code that holds the funds.
 
-- **The first public testnet swaps.** On 2026-10-12, Zcash testnet to Tempo Moderato: run 1 failed safely and refunded, and exposed a quote-expiry bug that the devnet's 3-second blocks hid; run 2, with the fix, swapped 0.015 TAZ for 19.39 OUSD in 3 min 39 s. Every transaction is in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md).
+- **The first public testnet swaps.** On 2026-10-12, Zcash testnet to Tempo Moderato: run 1 failed safely and refunded, and exposed a quote-expiry bug that the devnet's 3-second blocks hid; run 2, with the fix, swapped 0.015 TAZ for 19.39 OUSD in 3 min 39 s; run 3, driven by the Rust SDK, swapped 0.003 TAZ for 3.72 OUSD. Every transaction is in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md).
 
   Why: real block times and public infrastructure find bugs a local devnet can't.
 
@@ -56,9 +56,13 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 
   Why: coding agents integrate from the source of truth instead of guessing.
 
-- **The Rust protocol core and EVM layer.** [`paralock-core`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-core) and [`paralock-evm`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-evm), in the repository and checked against the same vectors.
+- **The Rust SDK, on crates.io.** [`paralock`](https://crates.io/crates/paralock) 0.1.0 (taker and maker engines, Zcash RPC and lightwalletd backends, durable stores, the maker HTTP server and client, a price feed), on [`paralock-core`](https://crates.io/crates/paralock-core) (the protocol core, checked against the same vectors) and [`paralock-evm`](https://crates.io/crates/paralock-evm) (alloy clients), with API docs on docs.rs. Wire-compatible with `@paralock/sdk`. The three library crates went through internal security reviews before release, with every finding fixed and covered by a regression test; the failure-handling fixes were ported to the TypeScript SDK for 0.3.0. See [Rust SDK](/docs/rust).
 
-  Why: one core, checked once against the vectors, can serve every language instead of a port per platform.
+  Why: makers and services written in Rust embed Paralock directly, and one core checked once against the vectors can serve every language.
+
+- **The `paralock` binary.** [`paralock-cli`](https://crates.io/crates/paralock-cli) 0.1.0: quote, swap, pay, recovery and a maker from one executable configured by `paralock.toml`, prebuilt for macOS and Linux (`curl -fsSL https://paralock.xyz/install | sh`). See [Rust CLI](/docs/rust-cli).
+
+  Why: a maker runs as a single executable, without a Node.js runtime.
 
 :::
 
@@ -66,13 +70,9 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 
 ::: milestones in-progress
 
-- **The Rust SDK crate, `paralock`.** Maker and taker engines, durable stores, the maker HTTP API (server and client), Zcash JSON-RPC and lightwalletd backends and a price feed, wire-compatible with `@paralock/sdk`.
+- **Publish 0.3.0 to npm.** The hardened protocol, the TypeScript fixes from the Rust reviews and the `paralock` CLI's first npm release are in the repository; npm still serves 0.2.0, so `npx paralock` needs this release.
 
-  Why: makers and services written in Rust can embed Paralock directly, and the bindings below build on it.
-
-- **A Rust `paralock` binary.** A native command line built on the Rust SDK.
-
-  Why: a maker can run as a single executable, without a Node.js runtime.
+  Why: everything this site describes for TypeScript reaches people who install from npm.
 
 :::
 
@@ -80,11 +80,7 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 
 ::: milestones next
 
-- **Publish the crates.** `paralock-core`, `paralock-evm` and `paralock` on crates.io and docs.rs.
-
-  Why: until then, Rust users depend on the Git repository.
-
-- **Bindings from the Rust core.** napi for Node.js, wasm for browsers, uniffi for Swift and Kotlin, PyO3 for Python, and Go.
+- **Bindings from the Rust core.** napi for Node.js, wasm for browsers, uniffi for Swift and Kotlin, PyO3 for Python, and Go, all on `paralock-core`.
 
   Why: wallets and apps on every platform get the same tested code instead of reimplementing the protocol.
 

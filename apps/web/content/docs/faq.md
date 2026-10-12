@@ -93,7 +93,7 @@ It's on the [roadmap](/docs/roadmap): a Solana program with the same sha256 hash
 
 ## Is there a Rust SDK?
 
-It is being built. The protocol core ([`paralock-core`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-core)) and the EVM layer ([`paralock-evm`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-evm)) are in the repository, byte-for-byte compatible with the TypeScript packages on the shared test vectors, but not yet on crates.io. The `paralock` SDK crate, with the maker and taker engines, is in progress, and bindings for Node.js, browsers, Swift, Kotlin, Python and Go are planned on top of it. See the [roadmap](/docs/roadmap).
+Yes. Four crates are on crates.io: [`paralock`](/docs/rust), the SDK with the taker and maker engines (the maker served with axum); [`paralock-core`](https://docs.rs/paralock-core), the protocol core, byte-for-byte compatible with the TypeScript packages on the shared test vectors and buildable for wasm32; [`paralock-evm`](https://docs.rs/paralock-evm), alloy clients for both escrows; and [`paralock-cli`](/docs/rust-cli), the standalone `paralock` binary. A Rust taker trades with a TypeScript maker and the other way round. Bindings for Node.js, browsers, Swift, Kotlin, Python and Go are planned on top of the core; see the [roadmap](/docs/roadmap).
 
 ## What's planned next?
 

@@ -23,8 +23,9 @@ The first public testnet swaps are recorded, with every transaction, in [`docs/T
 |---|---|---|
 | 1 | htlc | 0.1 TAZ. Failed safely: the taker broadcast its funding first, the 60-second quote expired while it confirmed, and the maker refused. The taker refunded at the refund height; nothing was lost. The fix has the maker accept and reserve before any ZEC moves (in 0.3.0) |
 | 2 | htlc | 0.015 TAZ for 19.39 OUSD, completed in 3 min 39 s with a relayed claim |
+| 3 | htlc | 0.003 TAZ for 3.72 OUSD with the Rust SDK, completed in about 4 minutes with a relayed claim |
 
-Both ran this example against the NU7 testnet chain through `testnet.zec.rocks:443`.
+All three ran on the NU7 testnet chain through `testnet.zec.rocks:443`: runs 1 and 2 with this example, run 3 with its Rust counterpart, [`examples/rust/rust-testnet`](#with-the-rust-sdk).
 
 ## What you need
 
@@ -151,6 +152,22 @@ zcash.close();
 ```
 
 In htlc mode the refund is signed with `ZEC_TAKER_KEY`; in private mode it uses the refund the maker pre-signed, which is in the store. See [Persistence and recovery](/docs/recovery).
+
+## With the Rust SDK
+
+[`examples/rust/rust-testnet`](https://github.com/bitfalt/Paralock/tree/main/examples/rust/rust-testnet) runs the same swap with the [Rust SDK](/docs/rust): a Rust taker and an in-process Rust maker, the `Lightwalletd` backend on `testnet.zec.rocks:443`, and the Moderato escrows from `paralock-evm`'s registry (`testnet_deployment(42431)`). It reads the same variables and `.paralock/testnet-*.json` files as the TypeScript example, with its own swap stores (`.paralock/testnet-swaps/rust-maker` and `rust-taker`), since the two SDKs' record formats differ.
+
+```sh
+cargo run -p rust-testnet -- --quote-only           # keys, balance and a live quote; nothing moves
+cargo run -p rust-testnet                           # swap 0.003 TAZ (htlc mode)
+cargo run -p rust-testnet -- --zec 0.005 --private  # private mode
+cargo run -p rust-testnet -- --resume <swap id>     # finish a swap after an interruption
+cargo run -p rust-testnet -- --refund <swap id>     # TAZ back after the refund height
+```
+
+> **Note:** Small amounts pay a large share in fees. The maker prices its own Zcash claim fee (10,000 zat) into every quote, which is 3.3% of 0.003 TAZ. The Rust taker's rate check allows that fixed fee on top of its slippage limit (`TakerLimits::maker_fee_zat`), while the TypeScript taker's `maxSlippageBps` has to cover it. The Rust example also allows 5% slippage as headroom for a price that moves between the two parties' reads; keep the defaults for real amounts.
+
+For a terminal instead of code, the [`paralock` binary](/docs/rust-cli) reaches the same deployments from a `paralock.toml` with `network = "testnet"`.
 
 ## Other testnets
 

@@ -99,13 +99,15 @@ The SDK is a public good under the MIT license. The business model is running th
 | [`@paralock/evm`](/docs/evm) | viem clients for both escrows and a verified network registry | 0.3.0 | Shipped |
 | [`@paralock/lightwalletd`](/docs/lightwalletd) | A Zcash backend over a lightwalletd or Zaino server, so you don't run a full node | 0.1.1 | Shipped |
 | [`paralock` CLI](/docs/cli) | `npx paralock`: `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund`. A one-command local devnet with Zcash regtest and up to six EVM chains | 0.3.0 | Shipped |
+| [Rust SDK](/docs/rust) | `paralock` on crates.io: taker and maker engines, Zcash RPC and lightwalletd backends, durable stores, the maker HTTP server and client. Built on `paralock-core` (the protocol core, also for wasm32) and `paralock-evm` (alloy clients). Wire-compatible with `@paralock/sdk` | 0.1.0 | Shipped |
+| [Rust CLI](/docs/rust-cli) | `paralock-cli`: a standalone `paralock` binary for swaps, payments, recovery and a maker on any network, configured by `paralock.toml`. Prebuilt for macOS and Linux | 0.1.0 | Shipped |
 | [Contracts](/docs/contracts) | `ParalockHTLC` and `ParalockAdaptorEscrow`, deployed and source-verified on Tempo Moderato, Base Sepolia, Sepolia, Arbitrum Sepolia, Robinhood Chain Testnet and HyperEVM Testnet | | Testnets only |
 | [Protocol spec](https://github.com/bitfalt/Paralock/blob/main/spec/PROTOCOL.md) | The wire protocol, both flows and the safety rules, with cross-language test vectors in `spec/vectors` | v1.1 | Draft |
-| Examples | `quickstart`, `payroll`, `sell-a-secret` on the devnet, and `testnet` on public testnets | | Shipped |
+| Examples | TypeScript: `quickstart`, `payroll`, `sell-a-secret` on the devnet, and `testnet` on public testnets. Rust: six in `examples/rust` | | Shipped |
 | Web app | Pay with payment links, and Swap, at `/app` | | Shipped |
 | Agent docs | A skill, `llms.txt`, Markdown pages and an MCP server | | Shipped |
 
-The versions are the repository's: 0.3.0 is the release that follows 0.2.0 on npm, and features this site marks "in 0.3.0" need it. The packages are ESM-only and need Node.js 20 or newer. `@paralock/zcash`, `@paralock/adaptor` and `@paralock/evm` also run in browsers.
+The TypeScript versions are the repository's: this site describes 0.3.0, the release that follows 0.2.0 on npm, and features it marks "in 0.3.0" need it. `npx paralock` arrives with 0.3.0, the CLI's first npm release. The npm packages are ESM-only and need Node.js 20 or newer; `@paralock/zcash`, `@paralock/adaptor` and `@paralock/evm` also run in browsers. The Rust crates are published on crates.io at 0.1.0.
 
 ```sh
 npm install @paralock/sdk     # also installs @paralock/zcash, /evm and /adaptor
@@ -115,25 +117,19 @@ npx paralock swap --zec 1     # your first swap on it
 
 ### Rust
 
-A Rust port of the same protocol is under way. Two crates are in the repository, not yet on crates.io:
+The same protocol is published in Rust, as four crates on [crates.io](https://crates.io/crates/paralock):
 
-- [`paralock-core`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-core): the protocol core. Zcash scripts, v5 transactions and ZIP 244 signing, adaptor signatures, escrow ids and digests, and the wire messages with both parties' checks. Pure and synchronous (no I/O), and byte-for-byte equal to the TypeScript packages on the shared vectors in `spec/vectors`.
-- [`paralock-evm`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-evm): alloy clients for both escrows, with Tempo fee-token transactions and the network registry.
+- [`paralock`](https://docs.rs/paralock): the Rust SDK. Embed a taker or a maker (served with axum) in a Rust service, with no Node.js process. It interoperates with the TypeScript SDK on the wire.
+- [`paralock-core`](https://docs.rs/paralock-core): the protocol core. Pure and synchronous (no I/O), byte-for-byte equal to the TypeScript packages on the shared vectors in `spec/vectors`, and it builds for wasm32.
+- [`paralock-evm`](https://docs.rs/paralock-evm): alloy clients for both escrows, Tempo fee tokens and the verified network registry.
+- [`paralock-cli`](https://docs.rs/paralock-cli): the standalone `paralock` binary.
 
-The `paralock` SDK crate (maker and taker engines, stores, the maker HTTP API) and a Rust `paralock` binary are in progress; see the [roadmap](/docs/roadmap). Until the crates are published, depend on the repository:
-
-```toml
-[dependencies]
-paralock-core = { git = "https://github.com/bitfalt/Paralock" }
+```sh
+cargo add paralock --features evm,price-feed        # the SDK, with the builders that connect to RPC URLs
+curl -fsSL https://paralock.xyz/install | sh        # or the binary: cargo install paralock-cli
 ```
 
-```rust
-use paralock_core::keys::Secret;
-
-let secret = Secret::random(&mut paralock_core::OsRng);
-// sha256(secret): in htlc mode, both chains lock on this hash.
-let hashlock = secret.hashlock();
-```
+See [Rust SDK](/docs/rust) and [Rust CLI](/docs/rust-cli).
 
 ## Status
 
@@ -144,6 +140,7 @@ let hashlock = secret.hashlock();
 | Privacy hygiene: shield before and after, fresh recipient, relayed claim, standard amounts, jitter | Shipped |
 | Fully shielded Zcash leg (FROST) | In research |
 | Testnet deployments on six EVM testnets | Shipped |
+| Rust SDK, protocol core and `paralock` binary on crates.io | Shipped |
 | Mainnet | Not supported; only after an audit |
 
 Swaps currently run in one direction: the taker sells ZEC for stablecoins. Refunds pay a transparent Zcash address. The [roadmap](/docs/roadmap) lists what is shipped, in progress, next and in research, with the reason for each.
@@ -154,6 +151,7 @@ Swaps currently run in one direction: the taker sells ZEC for stablecoins. Refun
 - [Where Paralock works](/docs/networks): the networks, Zcash nodes, wallets and runtimes it supports today.
 - [How it works](/docs/how-it-works): the protocol, the timelines and why nothing can be stolen.
 - [Payments and payment links](/docs/pay): pay an exact dollar amount to anyone.
+- [Rust SDK](/docs/rust): embed a taker or a maker in a Rust service, or use the `paralock` binary.
 - [Swap on public testnets](/docs/testnet): a real swap between Zcash testnet and Tempo Moderato.
 - [Security model](/docs/security): what you trust, and what is still missing.
 - [Roadmap](/docs/roadmap): what ships next, and why.
