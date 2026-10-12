@@ -17,6 +17,12 @@ export {
   paralockHtlcBytecode,
 } from "./abi.js";
 export {
+  MOCK_USD_ARTIFACT,
+  PARALOCK_ADAPTOR_ESCROW_ARTIFACT,
+  PARALOCK_HTLC_ARTIFACT,
+  type ParalockContractArtifact,
+} from "./artifacts.js";
+export {
   ADAPTOR_CLAIM_TYPEHASH,
   type AdaptorEscrow,
   type AdaptorState,
@@ -39,6 +45,7 @@ export {
   isTempoChainId,
   plainEvmChain,
   TEMPO_CHAIN_IDS,
+  TEMPO_TOKENS,
   type TempoChain,
   tempoChain,
 } from "./chain.js";
@@ -60,6 +67,12 @@ export {
   type TempoHtlc,
 } from "./client.js";
 export {
+  type DeployParalockContractsOptions,
+  type DeployParalockContractsResult,
+  deployParalockContracts,
+  type ParalockDeployment,
+} from "./deploy.js";
+export {
   HtlcTimeoutError,
   SwapRefundedError,
   TransactionRevertedError,
@@ -79,13 +92,3 @@ export {
   SETTLED_STATE,
   statusOf,
 } from "./swap.js";
-
-/** Well-known TIP-20 stablecoins. The dev tokens are pre-funded on local chains and from the Moderato faucet. */
-export const TEMPO_TOKENS = {
-  PathUSD: "0x20C0000000000000000000000000000000000000",
-  AlphaUSD: "0x20C0000000000000000000000000000000000001",
-  BetaUSD: "0x20C0000000000000000000000000000000000002",
-  ThetaUSD: "0x20C0000000000000000000000000000000000003",
-  /** Open USD on Tempo mainnet and Moderato. Local chains use a stand-in (see contracts/deployments/31337.json). */
-  OUSD: "0x20c0000000000000000000006a37DA5C996874BE",
-} as const;

@@ -2,6 +2,16 @@ import { type Address, type Chain, defineChain } from "viem";
 import { tempo, tempoDevnet, tempoLocalnet, tempoModerato } from "viem/chains";
 import { knownNetwork } from "./networks.js";
 
+/** Well-known TIP-20 stablecoins. The dev tokens are pre-funded on local chains and from the Moderato faucet. */
+export const TEMPO_TOKENS = {
+  PathUSD: "0x20C0000000000000000000000000000000000000",
+  AlphaUSD: "0x20C0000000000000000000000000000000000001",
+  BetaUSD: "0x20C0000000000000000000000000000000000002",
+  ThetaUSD: "0x20C0000000000000000000000000000000000003",
+  /** Open USD on Tempo mainnet and Moderato. Local chains use a stand-in (see contracts/deployments/31337.json). */
+  OUSD: "0x20c0000000000000000000006a37DA5C996874BE",
+} as const;
+
 /** Chain id of `anvil --network tempo` (viem's `tempoLocalnet` uses 1337 for `tempo node --dev`). */
 export const ANVIL_TEMPO_CHAIN_ID = 31337;
 
