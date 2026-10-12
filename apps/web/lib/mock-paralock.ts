@@ -99,6 +99,36 @@ const CHAINS: Record<EvmChain, MockChain> = {
     adaptorEscrow: "0x2f8a6c1d94e07b35a8c2f1d06e9b47a3c5d18e72",
     spreadBps: 80,
   },
+  arbitrum: {
+    name: "Arbitrum",
+    chainId: 31340,
+    blockMs: 250,
+    genesisBlock: 288_410_552,
+    token: { symbol: "USDC", address: "0x5b0e9d27c4a1f38e6d2c07b9a4f1e8d3c6a25b10" },
+    htlc: "0x8c27e1f04d9b36a5e2c1d07f4b9a83e6c5d20f19",
+    adaptorEscrow: "0x41d9c0e6b27f85a3d1e4c9b07a2f6e3d58c1b7a2",
+    spreadBps: 55,
+  },
+  robinhood: {
+    name: "Robinhood Chain",
+    chainId: 31341,
+    blockMs: 250,
+    genesisBlock: 4_120_906,
+    token: { symbol: "USDC", address: "0xa71f0c3e9d2b58e4c6a1d07b3f9e2c5d48a6b1e3" },
+    htlc: "0x2d6e9b13a0c4f75e8d1b2c6a09f3e4d7b5c81a06",
+    adaptorEscrow: "0xe93b5c1d0a7f26e4b8c3d19a5f0e2b7c6d4a8f31",
+    spreadBps: 60,
+  },
+  hyperevm: {
+    name: "HyperEVM",
+    chainId: 31342,
+    blockMs: 1_000,
+    genesisBlock: 9_874_215,
+    token: { symbol: "USDC", address: "0x3f8c2e1d6b9a04e7c5d2f1a8b3e6c90d7a4b5e28" },
+    htlc: "0xb60d4a2e8c1f93d7e5a0b4c2f6d1e8a3c9b07d54",
+    adaptorEscrow: "0x0c7e3a9f5b2d18e6c4a1f0d3b9e7c2a5d86f4e19",
+    spreadBps: 50,
+  },
 };
 
 const EVM_CHAINS = Object.keys(CHAINS) as EvmChain[];
@@ -210,6 +240,9 @@ export interface MockStartOptions {
   shield: boolean;
   scenario?: MockScenario;
   privacy?: PrivacyOptions;
+  /** Pay flow: the stablecoins go to this address instead of the taker (freshRecipient is ignored). */
+  recipient?: Hex;
+  label?: string;
 }
 
 export class MockParalockClient {
@@ -257,24 +290,52 @@ export class MockParalockClient {
 
   /** Same positional signature as the SDK maker's `quote(zat, chain, mode)`. */
   async getQuote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<QuoteView> {
+    const { c, microRate, midRate } = this.pricing(chain, mode);
+    this.checkZat(zecAmountZat);
+    return this.makeQuote(chain, mode, zecAmountZat, (zecAmountZat * microRate) / 100_000_000n, microRate, midRate, c);
+  }
+
+  /** Pay flow: the ZEC needed so the recipient gets exactly `usdAmount` (6-decimal base units). ZEC rounds up. */
+  async getQuoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<QuoteView> {
+    const { c, microRate, midRate } = this.pricing(chain, mode);
+    if (usdAmount <= 0n) throw new ParalockError(422, "amount_too_small", "Enter more than $0.");
+    const zat = (usdAmount * 100_000_000n + microRate - 1n) / microRate;
+    this.checkZat(zat);
+    return { ...this.makeQuote(chain, mode, zat, usdAmount, microRate, midRate, c), exactOut: true };
+  }
+
+  private pricing(chain: EvmChain, mode: SwapMode) {
     const c = CHAINS[chain];
-    if (!c) throw new ParalockError(422, "unsupported_chain", `Paralock doesn't settle on "${String(chain)}". Pick Tempo, Base or Ethereum.`);
+    if (!c) throw new ParalockError(422, "unsupported_chain", `Paralock doesn't know the chain "${String(chain)}".`);
     if (mode !== "htlc" && mode !== "adaptor") throw new ParalockError(422, "unsupported_mode", 'Mode must be "htlc" or "adaptor".');
-    if (zecAmountZat < MIN_ZAT) throw new ParalockError(422, "amount_too_small", `Minimum swap is ${fmtZec(MIN_ZAT)} ZEC.`);
-    if (zecAmountZat > MAX_ZAT) {
-      throw new ParalockError(422, "amount_too_large", `The maker can fill up to ${fmtZec(MAX_ZAT)} ZEC per swap right now.`);
-    }
-    const now = Date.now();
-    const midRate = this.midRate(now);
+    const midRate = this.midRate(Date.now());
     const rate = midRate * (1 - c.spreadBps / 10_000);
-    const microRate = BigInt(Math.round(rate * 1e6)); // stablecoin base units (6 dp) per ZEC
+    return { c, midRate, microRate: BigInt(Math.round(rate * 1e6)) }; // stablecoin base units (6 dp) per ZEC
+  }
+
+  private checkZat(zat: bigint) {
+    if (zat < MIN_ZAT) throw new ParalockError(422, "amount_too_small", `Minimum swap is ${fmtZec(MIN_ZAT)} ZEC.`);
+    if (zat > MAX_ZAT) throw new ParalockError(422, "amount_too_large", `The maker can fill up to ${fmtZec(MAX_ZAT)} ZEC per swap right now.`);
+  }
+
+  private makeQuote(
+    chain: EvmChain,
+    mode: SwapMode,
+    zecAmountZat: bigint,
+    usdAmount: bigint,
+    microRate: bigint,
+    midRate: number,
+    c: MockChain,
+  ): QuoteView {
+    const now = Date.now();
     const quote: QuoteView = {
       id: id("q"),
       direction: "ZEC_TO_USD",
       mode,
-      chain,
+      // Cast: an SDK dist built before the extra chains types `chain` narrower than the UI does.
+      chain: chain as QuoteView["chain"],
       zecAmountZat,
-      usdAmount: (zecAmountZat * microRate) / 100_000_000n,
+      usdAmount,
       token: c.token.address,
       tokenSymbol: c.token.symbol,
       rate: Number(microRate) / 1e6,
@@ -322,7 +383,9 @@ export class MockParalockClient {
 
     const zec = fmtZec(quote.zecAmountZat);
     const usd = `${fmtUsd(quote.usdAmount)} ${quote.tokenSymbol}`;
-    const recipient = privacy.freshRecipient ? evmAddress() : TAKER_EVM_ADDRESS;
+    const payment = opts.recipient ? { recipient: opts.recipient, label: opts.label?.slice(0, 80) || undefined } : undefined;
+    const recipient = payment?.recipient ?? (privacy.freshRecipient ? evmAddress() : TAKER_EVM_ADDRESS);
+    const payee = payment ? (payment.label ? `${payment.label} (${short(recipient)})` : short(recipient)) : undefined;
 
     const base: SwapView = {
       id: id("swp"),
@@ -333,7 +396,7 @@ export class MockParalockClient {
       status: "quoted",
       zcash: { htlcAddress: p2shAddress(redeemScript), redeemScript: hex0x(redeemScript), refundHeight, amountZat: quote.zecAmountZat },
       evm: {
-        chain,
+        chain: chain as SwapView["evm"]["chain"],
         chainId: c.chainId,
         contract: adaptor ? c.adaptorEscrow : c.htlc,
         token: quote.token,
@@ -343,7 +406,8 @@ export class MockParalockClient {
       adaptor: adaptor ? { escrowId: hex0x(randomBytes(32)), signer: evmAddress(), signerPubkey: hex0x(randomPubkey()) } : undefined,
       events: [],
       shield: opts.shield,
-      privacy,
+      privacy: payment ? { ...privacy, freshRecipient: false } : privacy,
+      payment,
     };
 
     const plan: PlannedStep[] = [];
@@ -378,8 +442,8 @@ export class MockParalockClient {
         s.evm.expiry = Math.floor(evmLockedAt / 1000) + quote.evmLockSeconds;
       });
       plan.at(-1)!.event.detail = adaptor
-        ? `Maker saw 2 Zcash confirmations, locked ${usd} in the escrow and sent you its encrypted release signature. Block ${fmtInt(this.evmBlockAt(chain, evmLockedAt))}.`
-        : `Maker saw 2 Zcash confirmations and locked ${usd} under the same hashlock. Block ${fmtInt(this.evmBlockAt(chain, evmLockedAt))}.`;
+        ? `Maker saw 2 Zcash confirmations, locked ${usd}${payee ? ` for ${payee}` : ""} in the escrow and sent you its encrypted release signature. Block ${fmtInt(this.evmBlockAt(chain, evmLockedAt))}.`
+        : `Maker saw 2 Zcash confirmations and locked ${usd}${payee ? ` for ${payee}` : ""} under the same hashlock. Block ${fmtInt(this.evmBlockAt(chain, evmLockedAt))}.`;
 
       if (scenario === "cooperative") {
         const claimTx = evmTx();
@@ -391,9 +455,10 @@ export class MockParalockClient {
         });
         const via = privacy.relayClaim ? " A relayer submitted it and paid the gas." : "";
         const to = privacy.freshRecipient ? `fresh address ${short(recipient)}` : short(recipient);
+        const got = payee ? `${payee} received exactly ${usd}.` : `You received ${usd} at ${to}.`;
         plan.at(-1)!.event.detail = adaptor
-          ? `You completed the release signature and received ${usd} at ${to}.${via} Only a signature is public; the secret isn't. Block ${fmtInt(this.evmBlockAt(chain, claimedAt))}.`
-          : `You received ${usd} at ${to}.${via} The secret is now public. Block ${fmtInt(this.evmBlockAt(chain, claimedAt))}.`;
+          ? `You completed the release signature. ${got}${via} Only a signature is public; the secret isn't. Block ${fmtInt(this.evmBlockAt(chain, claimedAt))}.`
+          : `${got}${via} The secret is now public. Block ${fmtInt(this.evmBlockAt(chain, claimedAt))}.`;
 
         const claimTxid = zcashTxid();
         const doneAt = add(5_000, { status: "completed", chain: "zcash", txid: claimTxid }, (s) => {

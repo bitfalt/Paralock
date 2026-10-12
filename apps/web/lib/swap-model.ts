@@ -1,12 +1,36 @@
 /** Pure helpers that turn a `Swap` into what the UI shows. No React here. */
-import type { Chain, EvmChain, QuoteView, SwapEvent, SwapMode, SwapStatus, SwapView } from "./types";
+import type { Chain, EvmChain, Payment, QuoteView, SwapEvent, SwapMode, SwapStatus, SwapView } from "./types";
 import type { MockScenario } from "./mock-paralock";
 
 export const TERMINAL: readonly SwapStatus[] = ["completed", "refunded_zcash", "failed"];
 export const isTerminal = (s: SwapStatus) => TERMINAL.includes(s);
 
-export const CHAIN_NAME: Record<Chain, string> = { zcash: "Zcash", tempo: "Tempo", base: "Base", ethereum: "Ethereum" };
-export const DEFAULT_TOKEN: Record<EvmChain, string> = { tempo: "OUSD", base: "USDC", ethereum: "USDC" };
+export const CHAIN_NAME: Record<Chain, string> = {
+  zcash: "Zcash",
+  tempo: "Tempo",
+  base: "Base",
+  ethereum: "Ethereum",
+  arbitrum: "Arbitrum",
+  robinhood: "Robinhood Chain",
+  hyperevm: "HyperEVM",
+};
+/** Names that fit a compact chain button. */
+export const CHAIN_SHORT: Record<EvmChain, string> = { ...CHAIN_NAME, robinhood: "Robinhood" };
+export const DEFAULT_TOKEN: Record<EvmChain, string> = {
+  tempo: "OUSD",
+  base: "USDC",
+  ethereum: "USDC",
+  arbitrum: "USDC",
+  robinhood: "USDC",
+  hyperevm: "USDC",
+};
+export const ALL_CHAINS = Object.keys(DEFAULT_TOKEN) as EvmChain[];
+
+const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+/** How to name the person being paid: "Acme Coffee", "0x12ab…9f3c", or "the recipient" before an address is entered. */
+export const payeeName = (p: Payment) => p.label || (/^0x[0-9a-fA-F]{40}$/.test(p.recipient) ? shortAddr(p.recipient) : "the recipient");
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Amounts that many swaps share, so a swap of exactly this size says little about who made it. */
 export const STANDARD_AMOUNTS = ["0.1", "0.5", "1", "5"] as const;
@@ -65,6 +89,31 @@ export function swapHeadline(swap: SwapView, nowMs: number): { title: string; su
   const chain = CHAIN_NAME[swap.evm.chain];
   const w = refundWindows(swap, nowMs);
   const makerNoShow = swap.status === "zcash_locked" && w.zcash.open;
+  if (swap.payment) {
+    const who = payeeName(swap.payment);
+    const amount = `${(Number(swap.evm.amount) / 1e6).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${sym}`;
+    switch (swap.status) {
+      case "evm_locked":
+        if (!w.evm.expired) {
+          return { title: `Paying ${who}`, sub: `The maker's ${amount} is locked on ${chain}. Claiming it for ${who} now.`, tone: "progress" };
+        }
+        break;
+      case "evm_claimed":
+        return {
+          title: "Paid",
+          sub: `${who} received exactly ${amount} on ${chain}. The maker is claiming the ZEC.`,
+          tone: "success",
+        };
+      case "completed":
+        return { title: "Payment complete", sub: `${who} received exactly ${amount} on ${chain}; the maker has the ZEC.`, tone: "success" };
+      case "refunded_zcash":
+        return {
+          title: "Refunded",
+          sub: `${who} wasn't paid, and your ZEC is back${swap.shield ? " in your shielded balance" : ""}. No one lost funds.`,
+          tone: "refund",
+        };
+    }
+  }
   switch (swap.status) {
     case "quoted":
       return {
@@ -132,6 +181,8 @@ interface PlanInput {
   tokenSymbol: string;
   shield: boolean;
   relayClaim: boolean;
+  /** Pay flow: who receives the stablecoins. */
+  payment?: Payment;
 }
 
 /** The steps a swap will take, before it starts (route preview). */
@@ -146,6 +197,7 @@ export function timelineRows(swap: SwapView, nowMs: number, scenario?: MockScena
     tokenSymbol: swap.quote.tokenSymbol,
     shield: !!swap.shield,
     relayClaim: !!swap.privacy?.relayClaim,
+    payment: swap.payment,
   };
   const rows = mainRows(swap, p, nowMs, scenario);
   const ev = (s: SwapStatus) => eventFor(swap, s);
@@ -201,6 +253,7 @@ function mainRows(swap: SwapView | null, p: PlanInput, nowMs: number, scenario?:
   const sym = p.tokenSymbol;
   const chainName = CHAIN_NAME[p.chain];
   const adaptor = p.mode === "adaptor";
+  const payTo = p.payment ? payeeName(p.payment) : "you";
 
   const stateFor = (key: SwapStatus, activeWhen: SwapStatus): RowState => {
     if (!swap) return "pending";
@@ -244,8 +297,8 @@ function mainRows(swap: SwapView | null, p: PlanInput, nowMs: number, scenario?:
     chain: p.chain,
     title: `Maker locks ${sym}`,
     desc: adaptor
-      ? `In an escrow on ${chainName} that pays you against the maker's signature. Expires before your ZEC refund opens.`
-      : `In an HTLC on ${chainName} under the same hashlock. Expires before your ZEC refund opens.`,
+      ? `In an escrow on ${chainName} that pays ${payTo} against the maker's signature. Expires before your ZEC refund opens.`
+      : `In an HTLC on ${chainName} that pays ${payTo}, under the same hashlock. Expires before your ZEC refund opens.`,
     state: stateFor("evm_locked", "zcash_locked"),
     event: ev("evm_locked"),
     hint: "Waiting for the maker to see 2 Zcash confirmations",
@@ -265,10 +318,13 @@ function mainRows(swap: SwapView | null, p: PlanInput, nowMs: number, scenario?:
   const row3: TimelineRow = {
     key: "evm_claimed",
     chain: p.chain,
-    title: `You claim ${sym}`,
-    desc: adaptor
-      ? `You complete the release signature with your secret. Only the maker can read the secret back out of it.${p.relayClaim ? " A relayer submits the claim." : ""}`
-      : `Claiming publishes the secret on ${chainName}, the only way the maker can open the ZEC.${p.relayClaim ? " A relayer submits the claim." : ""}`,
+    title: p.payment ? `${capitalize(payeeName(p.payment))} receives ${sym}` : `You claim ${sym}`,
+    desc:
+      (p.payment ? `You claim on their behalf and the ${sym} goes straight to their address. ` : "") +
+      (adaptor
+        ? `You complete the release signature with your secret. Only the maker can read the secret back out of it.`
+        : `Claiming publishes the secret on ${chainName}, the only way the maker can open the ZEC.`) +
+      (p.relayClaim ? " A relayer submits the claim." : ""),
     state: stateFor("evm_claimed", "evm_locked"),
     event: ev("evm_claimed"),
     hint:

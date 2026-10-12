@@ -9,7 +9,7 @@
  *
  * All bigint values travel as decimal strings over JSON (lib/wire.ts).
  */
-import type { ApiError, ChainInfo, ChainsView, EvmChain, PrivacyOptions, QuoteView, SwapMode, SwapView } from "./types";
+import type { ApiError, ChainInfo, ChainsView, EvmChain, Hex, PrivacyOptions, QuoteView, SwapMode, SwapView } from "./types";
 import { fromJson, toJson } from "./wire";
 import type { MockParalockClient, MockScenario } from "./mock-paralock";
 
@@ -20,21 +20,30 @@ export interface StartSwapOptions {
   shield: boolean;
   scenario?: MockScenario;
   privacy?: PrivacyOptions;
+  /** Pay flow: who receives the stablecoins, and an optional name to show. */
+  recipient?: Hex;
+  label?: string;
 }
+
+/** Quote by what you send (Swap) or by the exact dollars the recipient gets (Pay, 6-decimal base units). */
+export type QuoteRequest = { zecAmountZat: bigint } | { usdAmount: bigint };
 
 export interface ParalockClient {
   getChains(): Promise<ChainsView>;
-  getQuote(zecAmountZat: bigint, chain: EvmChain, mode: SwapMode): Promise<QuoteView>;
+  getQuote(req: QuoteRequest, chain: EvmChain, mode: SwapMode): Promise<QuoteView>;
   startSwap(quoteId: string, opts: StartSwapOptions): Promise<SwapView>;
   getSwap(id: string): Promise<SwapView>;
   refund(id: string): Promise<SwapView>;
 }
 
-/** Used when `GET /api/chains` isn't there yet: every chain listed, availability unknown (assumed on). */
+/** Used until `GET /api/chains` answers (or if it can't): the default devnet's three chains are on. */
 export const DEFAULT_CHAINS: ChainInfo[] = [
   { chain: "tempo", name: "Tempo", token: "OUSD", available: true },
   { chain: "base", name: "Base", token: "USDC", available: true },
   { chain: "ethereum", name: "Ethereum", token: "USDC", available: true },
+  { chain: "arbitrum", name: "Arbitrum", token: "USDC", available: false },
+  { chain: "robinhood", name: "Robinhood Chain", token: "USDC", available: false },
+  { chain: "hyperevm", name: "HyperEVM", token: "USDC", available: false },
 ];
 
 export class ParalockApiError extends Error {
@@ -61,8 +70,8 @@ export class HttpParalockClient implements ParalockClient {
     return { chains: DEFAULT_CHAINS, backend: "mock" };
   }
 
-  getQuote(zecAmountZat: bigint, chain: EvmChain, mode: SwapMode): Promise<QuoteView> {
-    return this.call<QuoteView>("/api/quote", { method: "POST", body: toJson({ zecAmountZat, chain, mode }) });
+  getQuote(req: QuoteRequest, chain: EvmChain, mode: SwapMode): Promise<QuoteView> {
+    return this.call<QuoteView>("/api/quote", { method: "POST", body: toJson({ ...req, chain, mode }) });
   }
 
   startSwap(quoteId: string, opts: StartSwapOptions): Promise<SwapView> {
@@ -126,8 +135,10 @@ export class BrowserParalockClient implements ParalockClient {
   getChains() {
     return this.run(async (m): Promise<ChainsView> => ({ chains: m.chains(), backend: "mock" }));
   }
-  getQuote(zecAmountZat: bigint, chain: EvmChain, mode: SwapMode) {
-    return this.run((m) => m.getQuote(zecAmountZat, chain, mode));
+  getQuote(req: QuoteRequest, chain: EvmChain, mode: SwapMode) {
+    return this.run((m) =>
+      "usdAmount" in req ? m.getQuoteExactOut(req.usdAmount, chain, mode) : m.getQuote(req.zecAmountZat, chain, mode),
+    );
   }
   startSwap(quoteId: string, opts: StartSwapOptions) {
     return this.run((m) => m.startSwap(quoteId, opts));

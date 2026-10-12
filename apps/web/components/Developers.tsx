@@ -1,5 +1,6 @@
 import { CopyHash } from "./CopyHash";
 import { Icon } from "./Glyphs";
+import { PaymentLinkBuilder } from "./PaymentLinkBuilder";
 
 const PACKAGES = [
   {
@@ -8,18 +9,19 @@ const PACKAGES = [
   },
   {
     name: "@paralock/evm",
-    text: "Clients for the ParalockHTLC and adaptor escrow contracts on Tempo, Base and Ethereum.",
+    text: "Clients for the ParalockHTLC and adaptor escrow contracts on Tempo, Base, Ethereum, Arbitrum, Robinhood Chain and HyperEVM.",
   },
   {
     name: "@paralock/sdk",
-    text: "Taker and maker flows end to end: quotes, timeouts, claims, refunds, in either mode.",
+    text: "Taker and maker flows end to end: quotes (including exact-amount payments), timeouts, claims, refunds, in either mode.",
   },
 ];
 
 const CLI = [
-  { cmd: "pnpm paralock devnet up", text: "Start Zcash regtest and the EVM devnets, deploy the contracts." },
+  { cmd: "pnpm paralock devnet up", text: "Start Zcash regtest and the EVM devnets, deploy the contracts. Add --evm all for all six chains." },
   { cmd: "pnpm paralock maker", text: "Run a maker that quotes and fills swaps." },
   { cmd: "pnpm paralock swap --zec 1 --chain base --private", text: "Swap 1 ZEC for USDC on Base in private mode." },
+  { cmd: "pnpm paralock pay --usd 25 --to 0x… --chain base --private", text: "Pay someone exactly $25 in USDC on Base." },
 ];
 
 export function Developers() {
@@ -30,12 +32,13 @@ export function Developers() {
         <p>
           The SDK is a public good: MIT-licensed TypeScript you can drop into a wallet, an exchange or an agent. Makers
           quote prices and earn the spread, the way swap providers like Boltz do, and anyone can run one or post a
-          peer-to-peer offer.
+          peer-to-peer offer. Shops can start with a payment link.
         </p>
       </div>
 
       <div className="dev">
         <div className="dev__packages">
+          <PaymentLinkBuilder />
           {PACKAGES.map((p) => (
             <article key={p.name} className="pkg">
               <h3>

@@ -1,8 +1,8 @@
 "use client";
 
 import { formatClock, formatCountdown, formatInt, formatSpan, formatZec } from "@/lib/format";
-import { CHAIN_NAME, DEFAULT_TOKEN, canRefund, estimatedSeconds, isTerminal, type RowState, type TimelineRow } from "@/lib/swap-model";
-import type { EvmChain, QuoteView, SwapMode, SwapView } from "@/lib/types";
+import { CHAIN_NAME, DEFAULT_TOKEN, canRefund, estimatedSeconds, isTerminal, payeeName, type RowState, type TimelineRow } from "@/lib/swap-model";
+import type { EvmChain, Payment, QuoteView, SwapMode, SwapView } from "@/lib/types";
 import { CopyHash } from "./CopyHash";
 import { ChainGlyph, Icon, TokenAvatar } from "./Glyphs";
 import { UnderTheHood } from "./UnderTheHood";
@@ -17,6 +17,7 @@ const STATE_LABEL: Record<RowState, string> = {
 
 export function RouteCard({
   quote,
+  payment,
   swap,
   rows,
   mode,
@@ -28,6 +29,8 @@ export function RouteCard({
   onRefund,
 }: {
   quote: QuoteView | null;
+  /** Pay flow: who gets the dollars. */
+  payment?: Payment;
   swap: SwapView | null;
   rows: TimelineRow[];
   mode: SwapMode;
@@ -53,7 +56,7 @@ export function RouteCard({
       <header className="route__head">
         <h2 id="route-title">{swap ? "Live route" : "Route"}</h2>
         <div className="route__tags">
-          <span className="tag tag--quiet">Atomic</span>
+          {payment ? <span className="tag tag--quiet">Exact amount</span> : <span className="tag tag--quiet">Atomic</span>}
           <span className="tag" data-mode={mode}>
             {adaptor ? "Adaptor signatures" : "HTLC"}
           </span>
@@ -80,7 +83,7 @@ export function RouteCard({
             <strong>
               {q ? (Number(q.usdAmount) / 1e6).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "–"} {symbol}
             </strong>
-            <small>{CHAIN_NAME[chain]}</small>
+            <small>{payment ? `to ${payeeName(payment)}` : CHAIN_NAME[chain]}</small>
           </span>
           <TokenAvatar token={symbol} chain={chain} size={36} />
         </div>

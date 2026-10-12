@@ -1,8 +1,6 @@
 /** Protocol types come straight from the SDK so the UI and the SDK never drift. */
 export type {
   AdaptorSwapData,
-  Chain,
-  EvmChain,
   EvmLeg,
   Hex,
   Quote,
@@ -15,6 +13,16 @@ export type {
 } from "@paralock/sdk";
 
 import type { EvmChain, Hex, Quote, Swap } from "@paralock/sdk";
+
+export type { EvmChain };
+export type Chain = "zcash" | EvmChain;
+
+/** Who the stablecoins pay in the Pay flow (absent when you swap for yourself). */
+export interface Payment {
+  recipient: Hex;
+  /** Shown to the payer, e.g. "Acme Coffee" from a payment link. */
+  label?: string;
+}
 
 /**
  * Optional pricing breakdown a quote may carry (the SDK's `Quote` only has the final `rate`).
@@ -64,7 +72,12 @@ export interface PrivacyOptions {
 }
 
 /** A quote as returned over the wire: the SDK `Quote`, plus optional extras. */
-export type QuoteView = Quote & { pricing?: QuotePricing; network?: NetworkInfo };
+export type QuoteView = Quote & {
+  pricing?: QuotePricing;
+  network?: NetworkInfo;
+  /** Quoted for an exact dollar amount (Pay): `usdAmount` is fixed and `zecAmountZat` is rounded up. */
+  exactOut?: boolean;
+};
 
 /** A swap as returned over the wire: the SDK `Swap`, plus optional extras. */
 export type SwapView = Swap & {
@@ -79,6 +92,8 @@ export type SwapView = Swap & {
   privacy?: PrivacyOptions;
   /** Human-readable note from the engine, e.g. why a swap failed. */
   note?: string;
+  /** Pay flow: the stablecoins go to this recipient (`evm.recipient` is the same address). */
+  payment?: Payment;
 };
 
 /** One row of `GET /api/chains`. */

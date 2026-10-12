@@ -65,11 +65,53 @@ export function EthereumGlyph(p: GlyphProps) {
   );
 }
 
+/** A peak: a rollup on Ethereum. */
+export function ArbitrumGlyph(p: GlyphProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="16" cy="16" r="16" fill="#1C2B4B" />
+      <path d="M9.5 22.5L16 8.8l6.5 13.7" fill="none" stroke="#5DB8F7" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12.6 17.6h6.8" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** A feather. */
+export function RobinhoodGlyph(p: GlyphProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="16" cy="16" r="16" fill="#C4EE3A" />
+      <path d="M10.5 22.5c1.4-6.6 5.6-11.4 12.6-13.4-.9 7-5.2 11.8-12.6 13.4z" fill="#17200A" />
+      <path d="M10.5 22.5l6.8-7.4" stroke="#C4EE3A" strokeWidth="1.4" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** An H with a wave for a crossbar. */
+export function HyperEvmGlyph(p: GlyphProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="16" cy="16" r="16" fill="#0E3D37" />
+      <path
+        d="M10.5 9.5v13M21.5 9.5v13M10.5 16.2c1.8-2.4 3.7-2.4 5.5 0s3.7 2.4 5.5 0"
+        fill="none"
+        stroke="#7EF0D6"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 const CHAIN_GLYPH: Record<Chain, (p: GlyphProps) => React.ReactElement> = {
   zcash: ZcashGlyph,
   tempo: TempoGlyph,
   base: BaseGlyph,
   ethereum: EthereumGlyph,
+  arbitrum: ArbitrumGlyph,
+  robinhood: RobinhoodGlyph,
+  hyperevm: HyperEvmGlyph,
 };
 
 export function ChainGlyph({ chain, ...p }: GlyphProps & { chain: Chain }) {
@@ -142,7 +184,9 @@ type IconName =
   | "copy"
   | "lock"
   | "unlock"
-  | "x";
+  | "x"
+  | "link"
+  | "store";
 
 const ICONS: Record<IconName, React.ReactNode> = {
   shield: <path d="M8 1.8l5 1.9v3.9c0 3.2-2.1 5.6-5 6.6-2.9-1-5-3.4-5-6.6V3.7z M5.7 8l1.6 1.6L10.5 6.4" />,
@@ -212,6 +256,18 @@ const ICONS: Record<IconName, React.ReactNode> = {
     </>
   ),
   x: <path d="M4 4l8 8M12 4l-8 8" />,
+  link: (
+    <>
+      <path d="M6.8 9.2a2.8 2.8 0 0 0 4 0l2.2-2.2a2.8 2.8 0 0 0-4-4l-.9.9" />
+      <path d="M9.2 6.8a2.8 2.8 0 0 0-4 0L3 9a2.8 2.8 0 0 0 4 4l.9-.9" />
+    </>
+  ),
+  store: (
+    <>
+      <path d="M2.5 6.2L3.6 2.8h8.8l1.1 3.4c0 1.1-.9 1.8-1.9 1.8S9.8 7.3 9.8 6.2c0 1.1-.8 1.8-1.8 1.8s-1.8-.7-1.8-1.8c0 1.1-.8 1.8-1.8 1.8s-1.9-.7-1.9-1.8z" />
+      <path d="M3.5 8.2v5h9v-5M6.5 13.2v-3h3v3" />
+    </>
+  ),
 };
 
 export function Icon({ name, size = 16, className }: { name: IconName; size?: number; className?: string }) {

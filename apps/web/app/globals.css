@@ -856,26 +856,26 @@ pre {
 .chains {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .chaincard {
   position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 2px;
-  padding: 12px 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px 8px 8px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--surface);
-  text-align: center;
   cursor: pointer;
   transition: border-color 200ms, background-color 200ms, transform 200ms var(--ease-out), box-shadow 200ms;
 }
 
-.chaincard svg {
-  margin-bottom: 4px;
+.chaincard > svg {
+  flex: none;
   transition: transform 300ms var(--ease-out);
 }
 
@@ -890,50 +890,404 @@ pre {
   box-shadow: 0 8px 24px -14px var(--usd);
 }
 
-.chaincard[data-checked="true"] svg:first-of-type {
+.chaincard[data-checked="true"] > svg {
   transform: scale(1.06);
 }
 
 .chaincard[data-disabled="true"] {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
 
+.chaincard[data-disabled="true"] > svg {
+  filter: grayscale(1);
+}
+
+.chaincard__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
 .chaincard__name {
-  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
   font-weight: 650;
 }
 
 .chaincard__token {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-3);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 600;
 }
 
 .chaincard__check {
   position: absolute;
-  top: 7px;
-  right: 7px;
+  top: -5px;
+  right: -5px;
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--usd);
   color: var(--on-accent);
+  box-shadow: 0 0 0 2px var(--well);
   opacity: 0;
   transform: scale(0.4);
   transition: opacity 200ms, transform 300ms var(--ease-out);
 }
 
 .chaincard__check .icon {
-  stroke-width: 2.4;
+  stroke-width: 2.6;
 }
 
 .chaincard[data-checked="true"] .chaincard__check {
   opacity: 1;
   transform: scale(1);
+}
+
+/* Swap | Pay */
+
+.widget__top {
+  flex-wrap: wrap;
+}
+
+.flows {
+  display: flex;
+  gap: 4px;
+}
+
+.flows__opt {
+  position: relative;
+  padding: 4px 10px 6px;
+  border-radius: 10px;
+  color: var(--text-3);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  transition: color 200ms;
+}
+
+.flows__opt:hover {
+  color: var(--text);
+}
+
+.flows__opt::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg in oklch, var(--zec), var(--usd));
+  transform: scaleX(0);
+  transition: transform 300ms var(--ease-out);
+}
+
+.flows__opt[data-checked="true"] {
+  color: var(--text);
+}
+
+.flows__opt[data-checked="true"]::after {
+  transform: scaleX(1);
+}
+
+.flows__opt input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.flows__opt:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Pay */
+
+.payee {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--usd) 35%, transparent);
+  border-radius: 18px;
+  background: linear-gradient(100deg, var(--usd-wash), transparent 80%), var(--well);
+  animation: fade 360ms var(--ease-out);
+}
+
+.payee__avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--usd);
+  color: var(--on-accent);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.payee__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.payee__text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.payee__text small {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.panel--payto {
+  margin-bottom: 8px;
+}
+
+.panel--payto:focus-within,
+.panel--amount:focus-within {
+  border-color: color-mix(in srgb, var(--usd) 55%, transparent);
+  box-shadow: 0 0 0 4px var(--usd-wash);
+}
+
+.panel--payto[data-invalid="true"] {
+  border-color: color-mix(in srgb, var(--danger) 60%, transparent);
+}
+
+.address {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+}
+
+.address::placeholder {
+  color: var(--text-3);
+}
+
+.address:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
+
+.amount-wrap {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 2px;
+}
+
+.amount-wrap__unit {
+  color: var(--text-3);
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 500;
+}
+
+/* Sized to its text so the "$" sits right next to the number. */
+.amount-wrap .amount {
+  flex: none;
+  width: auto;
+  max-width: 100%;
+  min-width: 2ch;
+  field-sizing: content;
+}
+
+@supports not (field-sizing: content) {
+  .amount-wrap .amount {
+    width: 5ch;
+  }
+}
+
+.panel__sublabel {
+  margin-top: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.paysum {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--well);
+  border: 1px solid var(--line);
+}
+
+.paysum div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+.paysum dt {
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paysum dd {
+  color: var(--text-2);
+  font-size: 13.5px;
+}
+
+.paysum strong {
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.paylink {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.paylink__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
+.paylink__btn:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+/* Payment link builder */
+
+.linkmaker {
+  border-color: color-mix(in srgb, var(--usd) 30%, transparent);
+  background: linear-gradient(160deg, var(--usd-wash), transparent 55%), var(--surface);
+}
+
+.linkmaker__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.linkmaker__title .icon {
+  color: var(--usd-ink);
+}
+
+.linkmaker__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.field--wide {
+  grid-column: 1 / -1;
+}
+
+.field > span {
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.field__input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: var(--well);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.field__input--mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.field__input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field__input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--usd) 60%, transparent);
+  box-shadow: 0 0 0 3px var(--usd-wash);
+}
+
+.linkmaker__out {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.linkmaker__link {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 11px;
+  background: var(--code-bg);
+  color: #d8dcff;
+  font-size: 12px;
+}
+
+.linkmaker .btn {
+  flex: none;
+  text-decoration: none;
 }
 
 .receive {
@@ -3441,7 +3795,11 @@ pre {
   }
 
   .chaincard {
-    padding: 10px 4px 8px;
+    padding: 8px 8px 8px 7px;
+  }
+
+  .widget__top {
+    row-gap: 8px;
   }
 
   .route {
@@ -3531,6 +3889,49 @@ pre {
 
   .footer__nav {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 440px) {
+  .panel--payto .panel__aside,
+  .panel--amount .panel__aside,
+  .payee .tag {
+    display: none;
+  }
+
+  .pair__amount {
+    font-size: 20px;
+  }
+
+  .path {
+    grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .path__end {
+    gap: 8px;
+  }
+
+  .path__end strong {
+    font-size: 13px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .chains {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .linkmaker__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .linkmaker__out {
+    flex-wrap: wrap;
+  }
+
+  .linkmaker__link {
+    flex-basis: 100%;
   }
 }
 

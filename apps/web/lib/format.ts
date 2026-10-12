@@ -9,13 +9,25 @@ export function parseZec(input: string): bigint | null {
   return BigInt(whole || "0") * ZAT_PER_ZEC + BigInt((frac + "00000000").slice(0, 8));
 }
 
+/** Parses a dollar amount ("25", "19.99", "$1,200.5") into 6-decimal token base units. Null if invalid. */
+export function parseUsd(input: string): bigint | null {
+  const s = input.trim().replace(/^\$/, "").replace(/,/g, "");
+  if (!/^\d*\.?\d*$/.test(s) || s === "" || s === ".") return null;
+  const [whole = "", frac = ""] = s.split(".");
+  if (frac.length > 6) return null;
+  return BigInt(whole || "0") * 1_000_000n + BigInt((frac + "000000").slice(0, 6));
+}
+
+/** A 20-byte EVM address: 0x followed by 40 hex characters. */
+export const isEvmAddress = (s: string): s is `0x${string}` => /^0x[0-9a-fA-F]{40}$/.test(s.trim());
+
 export function formatZec(zat: bigint): string {
   const whole = zat / ZAT_PER_ZEC;
   const frac = (zat % ZAT_PER_ZEC).toString().padStart(8, "0").replace(/0+$/, "");
   return `${whole.toLocaleString("en-US")}${frac ? `.${frac}` : ""}`;
 }
 
-/** TIP-20 stablecoins use 6 decimals. */
+/** The stablecoins here (OUSD, USDC) use 6 decimals. */
 export function formatUsd(units: bigint, digits = 2): string {
   const n = Number(units) / 1e6;
   return n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });

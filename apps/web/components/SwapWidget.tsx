@@ -1,12 +1,29 @@
 "use client";
 
 import { useId, useState } from "react";
-import { formatCountdown, formatInt, formatRate, formatSpan, formatUsd, formatZec, parseZec } from "@/lib/format";
-import { CHAIN_NAME, STANDARD_AMOUNTS, canRefund, isTerminal, refundWindows, swapHeadline, timelineRows, progressOf } from "@/lib/swap-model";
+import { formatCountdown, formatInt, formatRate, formatSpan, formatUsd, formatZec, isEvmAddress, parseZec } from "@/lib/format";
+import {
+  CHAIN_NAME,
+  CHAIN_SHORT,
+  DEFAULT_TOKEN,
+  STANDARD_AMOUNTS,
+  canRefund,
+  isTerminal,
+  payeeName,
+  progressOf,
+  refundWindows,
+  swapHeadline,
+  timelineRows,
+} from "@/lib/swap-model";
 import type { ChainInfo, EvmChain, QuoteView, SwapMode, SwapView } from "@/lib/types";
 import { CopyHash } from "./CopyHash";
 import { ChainGlyph, Icon, TokenAvatar } from "./Glyphs";
 import type { SwapSettings } from "./ParalockApp";
+
+const FLOWS: { value: "swap" | "pay"; label: string }[] = [
+  { value: "swap", label: "Swap" },
+  { value: "pay", label: "Pay" },
+];
 
 const MODES: { value: SwapMode; label: string; line: string; icon: "hash" | "mask" }[] = [
   { value: "htlc", label: "Standard", line: "One sha256 hashlock on both chains. Simple and widely used.", icon: "hash" },
@@ -49,38 +66,40 @@ export function SwapWidget(props: Props) {
 
 function SwapForm(props: Props) {
   const { settings: s, onChange, quote, amountError } = props;
-  const ids = { amount: useId(), modeLine: useId(), privacy: useId() };
-  const live = quote && !amountError ? quote : null;
+  const ids = { modeLine: useId(), privacy: useId() };
+  const pay = s.flow === "pay";
+  const live = quote && !amountError && !!quote.exactOut === pay ? quote : null;
   const chainInfo = props.chains.find((c) => c.chain === s.chain);
-  const symbol = live?.tokenSymbol ?? chainInfo?.token ?? "USDC";
-  const zat = parseZec(s.amountText);
-  const standard = zat !== null && STANDARD_AMOUNTS.some((a) => parseZec(a) === zat);
-  const usdHint = live?.pricing ? (Number(live.zecAmountZat) / 1e8) * live.pricing.midRate : live ? (Number(live.zecAmountZat) / 1e8) * live.rate : null;
+  const symbol = live?.tokenSymbol ?? chainInfo?.token ?? DEFAULT_TOKEN[s.chain];
   const modeInfo = MODES.find((m) => m.value === s.mode)!;
+  const recipientOk = isEvmAddress(s.recipient);
+  const canSubmit = !!live && !props.quoteLoading && props.busy !== "start" && (!pay || recipientOk);
 
   return (
     <form
       className="widget__form"
       onSubmit={(e) => {
         e.preventDefault();
-        props.onSwap();
+        if (canSubmit) props.onSwap();
       }}
     >
       <div className="widget__top">
-        <h2 id="widget-title" className="widget__title">
-          Swap
+        <h2 id="widget-title" className="sr-only">
+          {pay ? "Pay with shielded ZEC" : "Swap shielded ZEC for dollars"}
         </h2>
+        <div className="flows" role="radiogroup" aria-label="What to do">
+          {FLOWS.map((f) => (
+            <label key={f.value} className="flows__opt" data-checked={s.flow === f.value}>
+              <input type="radio" name="flow" value={f.value} checked={s.flow === f.value} onChange={() => onChange({ flow: f.value })} />
+              {f.label}
+            </label>
+          ))}
+        </div>
         <div className="modes" role="radiogroup" aria-label="Swap mode" aria-describedby={ids.modeLine} data-mode={s.mode}>
           <span className="modes__thumb" aria-hidden="true" />
           {MODES.map((m) => (
             <label key={m.value} className="modes__opt" data-checked={s.mode === m.value}>
-              <input
-                type="radio"
-                name="mode"
-                value={m.value}
-                checked={s.mode === m.value}
-                onChange={() => onChange({ mode: m.value })}
-              />
+              <input type="radio" name="mode" value={m.value} checked={s.mode === m.value} onChange={() => onChange({ mode: m.value })} />
               <Icon name={m.icon} />
               {m.label}
               {m.value === "adaptor" && <span className="tag tag--exp">Beta</span>}
@@ -92,10 +111,106 @@ function SwapForm(props: Props) {
         {modeInfo.line}
       </p>
 
-      {/* From */}
+      {pay ? <PayFields {...props} live={live} symbol={symbol} /> : <SwapFields {...props} live={live} symbol={symbol} />}
+
+      {/* Privacy */}
+      <fieldset className="privacy-opts" aria-describedby={ids.privacy}>
+        <legend className="privacy-opts__legend">Privacy</legend>
+        <div className="toggles">
+          <Toggle icon="shield" label="Shield before & after" on={s.shield} onChange={(v) => onChange({ shield: v })} />
+          {!pay && <Toggle icon="fresh" label="Fresh address" on={s.freshRecipient} onChange={(v) => onChange({ freshRecipient: v })} />}
+          <Toggle icon="relay" label="Relayed claim" on={s.relayClaim} onChange={(v) => onChange({ relayClaim: v })} />
+        </div>
+        <p id={ids.privacy} className="privacy-opts__note">
+          {privacySummary(s, live ? formatZec(live.zecAmountZat) : pay ? "the payment amount" : s.amountText || "the swap amount", symbol)}
+        </p>
+      </fieldset>
+
+      {pay && live && (
+        <dl className="paysum" aria-live="polite">
+          <div>
+            <dt>You pay</dt>
+            <dd>
+              <strong>≈ {formatZec(live.zecAmountZat)} ZEC</strong> from your shielded balance
+            </dd>
+          </div>
+          <div>
+            <dt>They receive</dt>
+            <dd>
+              <strong>
+                exactly ${formatUsd(live.usdAmount)} {live.tokenSymbol}
+              </strong>{" "}
+              on {CHAIN_NAME[live.chain]}
+            </dd>
+          </div>
+        </dl>
+      )}
+
+      <QuoteLine {...props} live={live} />
+
+      <button type="submit" className="cta" disabled={!canSubmit} data-busy={props.busy === "start"}>
+        <span className="cta__label">{ctaLabel(props, live, recipientOk)}</span>
+      </button>
+      {props.actionError && (
+        <p className="alert" role="alert">
+          {props.actionError}
+        </p>
+      )}
+      {pay && <CopyPayLink settings={s} enabled={recipientOk && !amountError} />}
+    </form>
+  );
+}
+
+function ctaLabel(props: Props, live: QuoteView | null, recipientOk: boolean) {
+  const pay = props.settings.flow === "pay";
+  if (props.busy === "start") return pay ? "Starting payment…" : "Starting swap…";
+  if (props.amountError) return pay ? "Enter an amount to pay" : "Enter an amount";
+  if (pay && !recipientOk) return "Enter who to pay";
+  if (props.quoteLoading && !live) return "Getting a quote…";
+  if (!live) return pay ? "Pay" : "Swap";
+  return pay
+    ? `Pay $${formatUsd(live.usdAmount)}`
+    : `Swap ${formatZec(live.zecAmountZat)} ZEC for ${formatUsd(live.usdAmount)} ${live.tokenSymbol}`;
+}
+
+function ChainPicker({ chains, value, onChange, labelledBy }: { chains: ChainInfo[]; value: EvmChain; onChange: (c: EvmChain) => void; labelledBy: string }) {
+  return (
+    <div className="chains" role="radiogroup" aria-labelledby={labelledBy}>
+      {chains.map((c) => (
+        <label key={c.chain} className="chaincard" data-checked={value === c.chain} data-disabled={!c.available}>
+          <input
+            type="radio"
+            name="chain"
+            value={c.chain}
+            checked={value === c.chain}
+            disabled={!c.available}
+            onChange={() => onChange(c.chain)}
+          />
+          <ChainGlyph chain={c.chain} size={26} />
+          <span className="chaincard__text">
+            <span className="chaincard__name">{CHAIN_SHORT[c.chain] ?? c.name}</span>
+            <span className="chaincard__token">{c.available ? c.token : "Not running"}</span>
+          </span>
+          <span className="chaincard__check" aria-hidden="true">
+            <Icon name="check" size={10} />
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function SwapFields(props: Props & { live: QuoteView | null; symbol: string }) {
+  const { settings: s, onChange, amountError, live, symbol } = props;
+  const id = useId();
+  const zat = parseZec(s.amountText);
+  const standard = zat !== null && STANDARD_AMOUNTS.some((a) => parseZec(a) === zat);
+  const usdHint = live?.pricing ? (Number(live.zecAmountZat) / 1e8) * live.pricing.midRate : live ? (Number(live.zecAmountZat) / 1e8) * live.rate : null;
+  return (
+    <>
       <div className="panel panel--from">
         <div className="panel__row">
-          <label className="panel__label" htmlFor={ids.amount}>
+          <label className="panel__label" htmlFor={id}>
             You send
           </label>
           <span className="panel__aside">
@@ -111,7 +226,7 @@ function SwapForm(props: Props) {
             </span>
           </div>
           <input
-            id={ids.amount}
+            id={id}
             className="amount"
             inputMode="decimal"
             autoComplete="off"
@@ -120,19 +235,13 @@ function SwapForm(props: Props) {
             value={s.amountText}
             onChange={(e) => onChange({ amountText: e.target.value })}
             aria-invalid={!!amountError}
-            aria-describedby={`${ids.amount}-hint`}
+            aria-describedby={`${id}-hint`}
           />
         </div>
         <div className="panel__row panel__row--foot">
           <div className="chips" role="group" aria-label="Standard amounts">
             {STANDARD_AMOUNTS.map((a) => (
-              <button
-                key={a}
-                type="button"
-                className="chip"
-                aria-pressed={zat !== null && parseZec(a) === zat}
-                onClick={() => onChange({ amountText: a })}
-              >
+              <button key={a} type="button" className="chip" aria-pressed={zat !== null && parseZec(a) === zat} onClick={() => onChange({ amountText: a })}>
                 {a}
               </button>
             ))}
@@ -141,11 +250,9 @@ function SwapForm(props: Props) {
             {usdHint !== null ? `≈ $${usdHint.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}` : ""}
           </span>
         </div>
-        <p id={`${ids.amount}-hint`} className={amountError ? "panel__error" : "panel__hint"} role={amountError ? "alert" : undefined}>
+        <p id={`${id}-hint`} className={amountError ? "panel__error" : "panel__hint"} role={amountError ? "alert" : undefined}>
           {amountError ??
-            (standard
-              ? "Standard amount: it looks like many other swaps."
-              : "Tip: standard amounts (0.1, 0.5, 1, 5 ZEC) are harder to trace.")}
+            (standard ? "Standard amount: it looks like many other swaps." : "Tip: standard amounts (0.1, 0.5, 1, 5 ZEC) are harder to trace.")}
         </p>
       </div>
 
@@ -155,33 +262,13 @@ function SwapForm(props: Props) {
         </span>
       </div>
 
-      {/* To */}
       <div className="panel panel--to">
         <div className="panel__row">
-          <span className="panel__label" id="to-label">
+          <span className="panel__label" id={`${id}-to`}>
             You receive on
           </span>
         </div>
-        <div className="chains" role="radiogroup" aria-labelledby="to-label">
-          {props.chains.map((c) => (
-            <label key={c.chain} className="chaincard" data-checked={s.chain === c.chain} data-disabled={!c.available}>
-              <input
-                type="radio"
-                name="chain"
-                value={c.chain}
-                checked={s.chain === c.chain}
-                disabled={!c.available}
-                onChange={() => onChange({ chain: c.chain as EvmChain })}
-              />
-              <ChainGlyph chain={c.chain} size={30} />
-              <span className="chaincard__name">{c.name}</span>
-              <span className="chaincard__token">{c.available ? c.token : "Offline"}</span>
-              <span className="chaincard__check" aria-hidden="true">
-                <Icon name="check" size={12} />
-              </span>
-            </label>
-          ))}
-        </div>
+        <ChainPicker chains={props.chains} value={s.chain} onChange={(c) => onChange({ chain: c })} labelledBy={`${id}-to`} />
         <div className="receive" aria-live="polite">
           <TokenAvatar token={symbol} chain={s.chain} size={40} />
           <div className="receive__text">
@@ -195,46 +282,135 @@ function SwapForm(props: Props) {
           </div>
         </div>
       </div>
+    </>
+  );
+}
 
-      {/* Privacy */}
-      <fieldset className="privacy-opts" aria-describedby={ids.privacy}>
-        <legend className="privacy-opts__legend">Privacy</legend>
-        <div className="toggles">
-          <Toggle icon="shield" label="Shield before & after" on={s.shield} onChange={(v) => onChange({ shield: v })} />
-          <Toggle icon="fresh" label="Fresh address" on={s.freshRecipient} onChange={(v) => onChange({ freshRecipient: v })} />
-          <Toggle icon="relay" label="Relayed claim" on={s.relayClaim} onChange={(v) => onChange({ relayClaim: v })} />
+function PayFields(props: Props & { live: QuoteView | null; symbol: string }) {
+  const { settings: s, onChange, amountError, symbol } = props;
+  const id = useId();
+  const typed = s.recipient.trim() !== "";
+  const recipientOk = isEvmAddress(s.recipient);
+  return (
+    <>
+      {s.label && (
+        <div className="payee">
+          <span className="payee__avatar" aria-hidden="true">
+            {s.label.trim().charAt(0).toUpperCase() || <Icon name="store" />}
+          </span>
+          <span className="payee__text">
+            <strong>Paying {s.label}</strong>
+            <small>
+              {recipientOk ? `${s.recipient.slice(0, 6)}…${s.recipient.slice(-4)}` : "Address missing"} on {CHAIN_NAME[s.chain]}
+            </small>
+          </span>
+          <span className="tag tag--quiet">Payment link</span>
         </div>
-        <p id={ids.privacy} className="privacy-opts__note">
-          {privacySummary(s, live ? formatZec(live.zecAmountZat) : s.amountText || "the swap amount", symbol)}
-        </p>
-      </fieldset>
-
-      <QuoteLine {...props} live={live} />
-
-      <button
-        type="submit"
-        className="cta"
-        disabled={!live || props.quoteLoading || props.busy === "start"}
-        data-busy={props.busy === "start"}
-      >
-        <span className="cta__label">
-          {props.busy === "start"
-            ? "Starting swap…"
-            : amountError
-              ? "Enter an amount"
-              : props.quoteLoading && !live
-                ? "Getting a quote…"
-                : live
-                  ? `Swap ${formatZec(live.zecAmountZat)} ZEC for ${formatUsd(live.usdAmount)} ${live.tokenSymbol}`
-                  : "Swap"}
-        </span>
-      </button>
-      {props.actionError && (
-        <p className="alert" role="alert">
-          {props.actionError}
-        </p>
       )}
-    </form>
+
+      <div className="panel panel--payto" data-invalid={typed && !recipientOk}>
+        <div className="panel__row">
+          <label className="panel__label" htmlFor={`${id}-to`}>
+            Pay to
+          </label>
+          <span className="panel__aside">They get the dollars, not you</span>
+        </div>
+        <input
+          id={`${id}-to`}
+          className="address"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="0x… recipient address"
+          value={s.recipient}
+          // A link's label names the link's address; editing the address drops it.
+          onChange={(e) => onChange({ recipient: e.target.value.trim(), label: undefined })}
+          aria-invalid={typed && !recipientOk}
+          aria-describedby={`${id}-to-hint`}
+        />
+        <p id={`${id}-to-hint`} className={typed && !recipientOk ? "panel__error" : "panel__hint"} role={typed && !recipientOk ? "alert" : undefined}>
+          {typed && !recipientOk
+            ? "That isn't an EVM address. It should be 0x followed by 40 hex characters."
+            : `Their ${symbol} address on ${CHAIN_NAME[s.chain]}. Paralock pays it directly; there is no account in between.`}
+        </p>
+      </div>
+
+      <div className="panel panel--amount">
+        <div className="panel__row">
+          <label className="panel__label" htmlFor={`${id}-usd`}>
+            They receive exactly
+          </label>
+          <span className="panel__aside">ZEC rounds up, never the dollars</span>
+        </div>
+        <div className="panel__main">
+          <div className="asset">
+            <TokenAvatar token={symbol} chain={s.chain} size={40} />
+            <span className="asset__text">
+              <strong>{symbol}</strong>
+              <span>{CHAIN_SHORT[s.chain]}</span>
+            </span>
+          </div>
+          <span className="amount-wrap">
+            <span className="amount-wrap__unit" aria-hidden="true">
+              $
+            </span>
+            <input
+              id={`${id}-usd`}
+              className="amount"
+              inputMode="decimal"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="0.00"
+              value={s.usdText}
+              onChange={(e) => onChange({ usdText: e.target.value })}
+              aria-invalid={!!amountError}
+              aria-describedby={amountError ? `${id}-usd-err` : undefined}
+            />
+          </span>
+        </div>
+        {amountError && (
+          <p id={`${id}-usd-err`} className="panel__error" role="alert">
+            {amountError}
+          </p>
+        )}
+        <p className="panel__sublabel" id={`${id}-on`}>
+          On
+        </p>
+        <ChainPicker chains={props.chains} value={s.chain} onChange={(c) => onChange({ chain: c })} labelledBy={`${id}-on`} />
+      </div>
+    </>
+  );
+}
+
+/** The link a merchant shares: opens this page in Pay mode with everything filled in. */
+export function paymentLink(base: string, p: { recipient: string; usdText: string; chain: EvmChain; label?: string; mode?: SwapMode }) {
+  const q = new URLSearchParams({ pay: p.recipient.trim(), usd: p.usdText.trim().replace(/^\$/, ""), chain: p.chain });
+  if (p.label?.trim()) q.set("label", p.label.trim());
+  if (p.mode === "adaptor") q.set("mode", "private");
+  return `${base}?${q.toString()}`;
+}
+
+function CopyPayLink({ settings: s, enabled }: { settings: SwapSettings; enabled: boolean }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    const url = paymentLink(`${window.location.origin}${window.location.pathname}`, s);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      window.prompt("Copy this payment link", url);
+    }
+  }
+  return (
+    <div className="paylink">
+      <button type="button" className="linkbtn paylink__btn" onClick={copy} disabled={!enabled}>
+        <Icon name={copied ? "check" : "link"} size={14} />
+        {copied ? "Payment link copied" : "Copy as a payment link"}
+      </button>
+      <span className="sr-only" aria-live="polite">
+        {copied ? "Payment link copied" : ""}
+      </span>
+    </div>
   );
 }
 
@@ -245,6 +421,14 @@ function privacySummary(s: SwapSettings, zec: string, symbol: string) {
       ? `Only ${zec} ZEC leaves the shielded pool, into a dedicated swap address. Change and refunds are shielded again.`
       : "The lock is funded from a transparent address, which links to its history.",
   );
+  if (s.flow === "pay") {
+    parts.push(
+      s.relayClaim
+        ? `The ${symbol} goes straight to the address you entered; a relayer submits the claim and can't redirect the funds.`
+        : `The ${symbol} goes straight to the address you entered; you pay the claim gas.`,
+    );
+    return parts.join(" ");
+  }
   if (s.freshRecipient && s.relayClaim) parts.push(`${symbol} lands at a new address whose key the app saves; a relayer submits the claim and can't redirect the funds.`);
   else if (s.freshRecipient) parts.push(`${symbol} lands at a new address whose key the app saves; you pay the claim gas.`);
   else if (s.relayClaim) parts.push(`${symbol} goes to your usual address; a relayer submits the claim and can't redirect the funds.`);
@@ -378,7 +562,7 @@ function ActiveSwap(props: Props & { swap: SwapView }) {
     <div className="active" data-tone={head.tone}>
       <div className="widget__top">
         <h2 id="widget-title" className="widget__title">
-          {terminal ? "Swap" : "Swapping"}
+          {swap.payment ? (terminal ? "Payment" : "Paying") : terminal ? "Swap" : "Swapping"}
         </h2>
         <span className="tag" data-mode={swap.mode}>
           <Icon name={swap.mode === "adaptor" ? "mask" : "hash"} size={13} />
@@ -399,7 +583,7 @@ function ActiveSwap(props: Props & { swap: SwapView }) {
           <TokenAvatar token={q.tokenSymbol} chain={swap.evm.chain} size={44} />
           <span className="pair__amount">{formatUsd(swap.evm.amount)}</span>
           <span className="pair__unit">
-            {q.tokenSymbol} on {CHAIN_NAME[swap.evm.chain]}
+            {swap.payment ? `${q.tokenSymbol} to ${payeeName(swap.payment)}` : `${q.tokenSymbol} on ${CHAIN_NAME[swap.evm.chain]}`}
           </span>
         </div>
       </div>
@@ -434,10 +618,11 @@ function ActiveSwap(props: Props & { swap: SwapView }) {
           <dd>{swap.mode === "adaptor" ? "Private (adaptor)" : "Standard (HTLC)"}</dd>
         </div>
         <div>
-          <dt>Recipient</dt>
+          <dt>{swap.payment ? "Paying" : "Recipient"}</dt>
           <dd>
+            {swap.payment?.label && `${swap.payment.label} `}
             <code title={swap.evm.recipient}>{`${swap.evm.recipient.slice(0, 6)}…${swap.evm.recipient.slice(-4)}`}</code>
-            {swap.privacy?.freshRecipient ? " (fresh)" : ""}
+            {!swap.payment && swap.privacy?.freshRecipient ? " (fresh)" : ""}
           </dd>
         </div>
         <div>

@@ -247,7 +247,10 @@ export function UnderTheHood({ swap, quote, mode }: { swap: SwapView | null; quo
             </Row>
           )}
           {swap && (
-            <Row label="Your recipient" note={swap.privacy?.freshRecipient ? "fresh for this swap" : undefined}>
+            <Row
+              label={swap.payment ? "Recipient" : "Your recipient"}
+              note={swap.payment ? (swap.payment.label ?? "the address you pay") : swap.privacy?.freshRecipient ? "fresh for this swap" : undefined}
+            >
               <CopyHash value={swap.evm.recipient} label="recipient address" />
             </Row>
           )}
