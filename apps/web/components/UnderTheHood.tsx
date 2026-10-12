@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { formatInt, formatUsd, truncateMiddle } from "@/lib/format";
-import type { QuoteView, SwapView } from "@/lib/types";
+import { CHAIN_NAME } from "@/lib/swap-model";
+import type { QuoteView, SwapMode, SwapView } from "@/lib/types";
 import { CopyHash } from "./CopyHash";
+import { Icon } from "./Glyphs";
 
 const OPCODES: Record<number, string> = {
   0x00: "OP_0",
@@ -17,6 +19,7 @@ const OPCODES: Record<number, string> = {
   0xa8: "OP_SHA256",
   0xa9: "OP_HASH160",
   0xac: "OP_CHECKSIG",
+  0xae: "OP_CHECKMULTISIG",
   0xb1: "OP_CHECKLOCKTIMEVERIFY",
 };
 
@@ -44,10 +47,9 @@ function decompile(hex: string): Token[] {
 }
 
 /** Little-endian script number. */
-const scriptNum = (hex: string) =>
-  (hex.match(/../g) ?? []).reduceRight((n, h) => n * 256 + parseInt(h, 16), 0);
+const scriptNum = (hex: string) => (hex.match(/../g) ?? []).reduceRight((n, h) => n * 256 + parseInt(h, 16), 0);
 
-function DecodedScript({ hex }: { hex: string }) {
+function DecodedScript({ hex, mode }: { hex: string; mode: SwapMode }) {
   const tokens = decompile(hex);
   let pubkeys = 0;
   const lines: { indent: number; parts: React.ReactNode[] }[] = [];
@@ -56,6 +58,7 @@ function DecodedScript({ hex }: { hex: string }) {
     if (current.length) lines.push({ indent, parts: current });
     current = [];
   };
+  const multisig = mode === "adaptor";
   tokens.forEach((t, i) => {
     if (t.kind === "op" && ["OP_IF", "OP_ELSE", "OP_ENDIF"].includes(t.name)) {
       flush(1);
@@ -63,13 +66,13 @@ function DecodedScript({ hex }: { hex: string }) {
       return;
     }
     if (t.kind === "op") {
-      current.push(<span key={i} className="op">{t.name}</span>);
-      // One clause per line: break after verifies and drops.
-      if (t.name === "OP_EQUALVERIFY" || t.name === "OP_DROP") flush(1);
+      current.push(<span key={i} className={/^\d+$/.test(t.name) ? "num" : "op"}>{t.name}</span>);
+      if (t.name === "OP_EQUALVERIFY" || t.name === "OP_DROP" || (multisig && i === 0)) flush(multisig ? 0 : 1);
     } else if (t.bytes <= 4) {
       current.push(<span key={i} className="num">{scriptNum(t.hex)}</span>);
     } else {
-      const role = t.bytes === 32 ? "hashlock" : pubkeys++ === 0 ? "maker pubkey" : "your refund pubkey";
+      const role =
+        t.bytes === 32 ? "hashlock" : pubkeys++ === 0 ? "maker pubkey" : multisig ? "your pubkey" : "your refund pubkey";
       current.push(
         <span key={i} className="push" title={t.hex}>
           &lt;{role} {truncateMiddle(t.hex, 4, 4)}&gt;
@@ -116,6 +119,7 @@ function PreimageCheck({ preimage, hashlock }: { preimage: string; hashlock: str
   if (ok === null) return null;
   return (
     <span className="check" data-ok={ok}>
+      <Icon name={ok ? "check" : "x"} size={13} />
       {ok ? "Checked in your browser: sha256(secret) equals the hashlock." : "Mismatch: sha256(secret) does not equal the hashlock."}
     </span>
   );
@@ -133,82 +137,133 @@ function Row({ label, note, children }: { label: string; note?: string; children
   );
 }
 
-export function UnderTheHood({ swap, quote }: { swap: SwapView | null; quote: QuoteView | null }) {
+export function UnderTheHood({ swap, quote, mode }: { swap: SwapView | null; quote: QuoteView | null; mode: SwapMode }) {
+  const [open, setOpen] = useState(false);
   const [decoded, setDecoded] = useState(false);
+  const regionId = useId();
   const q = swap?.quote ?? quote;
+  const adaptor = mode === "adaptor";
+  const chainName = CHAIN_NAME[swap?.evm.chain ?? q?.chain ?? "tempo"];
   const pending = <span className="hood__pending">Set when the swap starts</span>;
 
   return (
-    <section className="hood" aria-labelledby="hood-title">
-      <div className="section-head">
-        <h2 id="hood-title">Under the hood</h2>
-        <p>The raw values this swap is built from. The key in the diagram is cut from this hashlock.</p>
-      </div>
+    <div className="hood">
+      <button type="button" className="hood__toggle" aria-expanded={open} aria-controls={regionId} onClick={() => setOpen((o) => !o)}>
+        <span>
+          <strong>Under the hood</strong>
+          <small>{adaptor ? "Multisig, adaptor point, escrow" : "Hashlock, redeem script, contract"}</small>
+        </span>
+        <Icon name="chevron" className="hood__chev" />
+      </button>
 
-      <dl className="hood__list">
-        <Row label="Hashlock" note="sha256 of the secret">
-          {swap ? <CopyHash value={swap.hashlock} label="hashlock" head={10} tail={8} /> : pending}
-        </Row>
-        <Row label="Secret">
-          {swap?.preimage ? (
+      <div id={regionId} className="hood__region" hidden={!open}>
+        <dl className="hood__list">
+          {adaptor ? (
             <>
-              <CopyHash value={swap.preimage} label="secret" head={10} tail={8} />
-              <PreimageCheck preimage={swap.preimage} hashlock={swap.hashlock} />
+              <Row label="Hashlock">
+                <span className="hood__text">
+                  None on-chain. <span className="hood__muted">Nothing on either chain links the two legs.</span>
+                </span>
+              </Row>
+              <Row label="Adaptor point" note="off-chain only">
+                {swap?.adaptorPoint ? <CopyHash value={swap.adaptorPoint} label="adaptor point" head={10} tail={6} /> : pending}
+              </Row>
+              <Row label="Release signature" note="published by your claim">
+                {swap?.releaseSignature ? (
+                  <>
+                    <CopyHash value={swap.releaseSignature} label="release signature" head={10} tail={6} />
+                    <span className="hood__muted hood__block">
+                      The maker compares it with its pre-signature to recover your secret off-chain. The secret itself never
+                      appears on-chain.
+                    </span>
+                  </>
+                ) : (
+                  <span className="hood__pending">Appears when you claim on {chainName}</span>
+                )}
+              </Row>
             </>
           ) : (
-            <span className="hood__pending">Private until you claim on Tempo</span>
-          )}
-        </Row>
-        <Row label="Zcash HTLC address" note="P2SH">
-          {swap ? <CopyHash value={swap.zcash.htlcAddress} label="Zcash HTLC address" head={10} tail={6} /> : pending}
-        </Row>
-        <Row label="Redeem script" note={swap ? `${(swap.zcash.redeemScript.length - 2) / 2} bytes` : undefined}>
-          {swap ? (
             <>
-              <span className="hood__inline">
-                <CopyHash value={swap.zcash.redeemScript} label="redeem script" head={12} tail={8} />
-                <button type="button" className="linkbtn" aria-expanded={decoded} onClick={() => setDecoded((d) => !d)}>
-                  {decoded ? "Hide decoded" : "Decode"}
-                </button>
+              <Row label="Hashlock" note="sha256 of the secret">
+                {swap?.hashlock ? <CopyHash value={swap.hashlock} label="hashlock" head={10} tail={8} /> : pending}
+              </Row>
+              <Row label="Secret">
+                {swap?.preimage && swap.hashlock ? (
+                  <>
+                    <CopyHash value={swap.preimage} label="secret" head={10} tail={8} />
+                    <PreimageCheck preimage={swap.preimage} hashlock={swap.hashlock} />
+                  </>
+                ) : (
+                  <span className="hood__pending">Private until you claim on {chainName}</span>
+                )}
+              </Row>
+            </>
+          )}
+          <Row label={adaptor ? "Zcash 2-of-2 address" : "Zcash HTLC address"} note="P2SH">
+            {swap ? <CopyHash value={swap.zcash.htlcAddress} label="Zcash lock address" head={10} tail={6} /> : pending}
+          </Row>
+          <Row label="Redeem script" note={swap ? `${(swap.zcash.redeemScript.length - 2) / 2} bytes` : undefined}>
+            {swap ? (
+              <>
+                <span className="hood__inline">
+                  <CopyHash value={swap.zcash.redeemScript} label="redeem script" head={12} tail={8} />
+                  <button type="button" className="linkbtn" aria-expanded={decoded} onClick={() => setDecoded((d) => !d)}>
+                    {decoded ? "Hide decoded" : "Decode"}
+                  </button>
+                </span>
+                {decoded && <DecodedScript hex={swap.zcash.redeemScript} mode={swap.mode} />}
+              </>
+            ) : (
+              pending
+            )}
+          </Row>
+          <Row label="Refund" note={adaptor ? "signed by the maker before funding" : "timeout branch"}>
+            {swap ? (
+              <span className="hood__text">
+                From block {formatInt(swap.zcash.refundHeight)}
+                {swap.tips && <span className="hood__muted"> (chain at {formatInt(swap.tips.zcashHeight)})</span>}
               </span>
-              {decoded && <DecodedScript hex={swap.zcash.redeemScript} />}
-            </>
-          ) : (
-            pending
-          )}
-        </Row>
-        <Row label="Refund height">
-          {swap ? (
-            <span className="hood__text">
-              Block {formatInt(swap.zcash.refundHeight)}
-              {swap.tips && <span className="hood__muted"> (chain at {formatInt(swap.tips.zcashHeight)})</span>}
-            </span>
-          ) : (
-            pending
-          )}
-        </Row>
-        {swap?.zcash.fundingTxid && (
-          <Row label="Funding outpoint">
-            <CopyHash value={`${swap.zcash.fundingTxid}:${swap.zcash.fundingVout ?? 0}`} label="funding outpoint" head={10} tail={8} />
+            ) : (
+              pending
+            )}
           </Row>
-        )}
-        <Row label="Tempo HTLC contract">{swap ? <CopyHash value={swap.tempo.contract} label="Tempo contract address" /> : pending}</Row>
-        <Row label={`${q?.tokenSymbol ?? "OUSD"} token`} note="TIP-20, 6 decimals">
-          {q ? <CopyHash value={q.token} label="token address" /> : pending}
-        </Row>
-        {swap && (
-          <Row label="Amount on Tempo">
-            <span className="hood__text">
-              {formatUsd(swap.tempo.amount, 6)} {swap.quote.tokenSymbol}
-              <span className="hood__muted"> ({swap.tempo.amount.toString()} base units)</span>
-            </span>
+          {swap?.zcash.fundingTxid && (
+            <Row label="Funding outpoint">
+              <CopyHash value={`${swap.zcash.fundingTxid}:${swap.zcash.fundingVout ?? 0}`} label="funding outpoint" head={10} tail={8} />
+            </Row>
+          )}
+          <Row label={`${chainName} contract`} note={adaptor ? "ParalockAdaptorEscrow" : "ParalockHTLC"}>
+            {swap ? <CopyHash value={swap.evm.contract} label={`${chainName} contract address`} /> : pending}
           </Row>
-        )}
-        <Row label="Maker Zcash pubkey" note="claims the ZEC">
-          {q ? <CopyHash value={q.makerZcashPubkey} label="maker Zcash pubkey" head={10} tail={6} /> : pending}
-        </Row>
-        <Row label="Maker Tempo address">{q ? <CopyHash value={q.makerTempoAddress} label="maker Tempo address" /> : pending}</Row>
-      </dl>
-    </section>
+          <Row label={`${q?.tokenSymbol ?? "Stablecoin"} token`} note="6 decimals">
+            {q ? <CopyHash value={q.token} label="token address" /> : pending}
+          </Row>
+          {swap && (
+            <Row label="Amount locked">
+              <span className="hood__text">
+                {formatUsd(swap.evm.amount, 6)} {swap.quote.tokenSymbol}
+                <span className="hood__muted"> ({swap.evm.amount.toString()} base units)</span>
+              </span>
+            </Row>
+          )}
+          {swap && (
+            <Row label="Your recipient" note={swap.privacy?.freshRecipient ? "fresh for this swap" : undefined}>
+              <CopyHash value={swap.evm.recipient} label="recipient address" />
+            </Row>
+          )}
+          {adaptor && (
+            <Row label="Escrow signer" note="one-time key; its signature releases the escrow">
+              {swap?.adaptor?.signer ? <CopyHash value={swap.adaptor.signer} label="escrow signer address" /> : pending}
+            </Row>
+          )}
+          <Row label="Maker address" note="locks the dollars">
+            {q ? <CopyHash value={q.makerEvmAddress} label="maker EVM address" /> : pending}
+          </Row>
+          <Row label="Maker Zcash pubkey" note={adaptor ? "its half of the 2-of-2" : "claims the ZEC"}>
+            {q ? <CopyHash value={q.makerZcashPubkey} label="maker Zcash pubkey" head={10} tail={6} /> : pending}
+          </Row>
+        </dl>
+      </div>
+    </div>
   );
 }

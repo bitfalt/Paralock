@@ -1,10 +1,13 @@
 /**
- * Mock Paralock maker + chains. Simulates the full v0 protocol (see packages/sdk/src/types.ts) with
- * realistic shapes: a real HTLC redeem script and P2SH address (same template as @paralock/zcash),
- * sha256 hashlocks, Zcash txids, Tempo 0x… tx hashes, block heights and refund timeouts.
+ * Mock Paralock maker + chains. Simulates the protocol (see packages/sdk/src/types.ts) in both modes and on every
+ * EVM chain, with realistic shapes:
+ *  - htlc mode: a real HTLC redeem script and P2SH address (same template as @paralock/zcash), a sha256 hashlock
+ *    shared by both legs, and the secret revealed by the EVM claim.
+ *  - adaptor mode: a plain 2-of-2 multisig redeem script, a `0x02…` adaptor point kept off-chain, no hashlock, and an
+ *    EVM claim that publishes a completed signature instead of a secret.
  *
- * Time is compressed like a regtest devnet: Zcash mines a block every 2 s, so a 30-block refund
- * window opens about a minute after the swap starts.
+ * Time is compressed like a regtest devnet: Zcash mines a block every 2 s, so a 24-block refund window opens about
+ * 48 seconds after the swap starts.
  *
  * Used for hosted previews; local devnets use the real SDK (lib/server/devnet-backend.ts).
  */
@@ -12,7 +15,18 @@ import { ripemd160 } from "@noble/hashes/legacy.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes, randomBytes } from "@noble/hashes/utils.js";
 import { createBase58check } from "@scure/base";
-import type { ChainTips, Hex, QuoteView, SwapEvent, SwapStatus, SwapView } from "./types";
+import type {
+  ChainInfo,
+  ChainTips,
+  EvmChain,
+  Hex,
+  PrivacyOptions,
+  QuoteView,
+  SwapEvent,
+  SwapMode,
+  SwapStatus,
+  SwapView,
+} from "./types";
 
 /** How the simulated counterparty (or you) behaves. Demo-only; the real SDK ignores it. */
 export type MockScenario = "cooperative" | "maker_silent" | "taker_misses_claim";
@@ -34,24 +48,64 @@ export class ParalockError extends Error {
 const ZCASH_NETWORK = "regtest";
 const ZCASH_BLOCK_MS = 2_000;
 const ZCASH_GENESIS_HEIGHT = 1_284;
-const TEMPO_BLOCK_MS = 500;
-const TEMPO_GENESIS_BLOCK = 2_416_380;
 
-const ZCASH_LOCK_BLOCKS = 30;
-const TEMPO_LOCK_SECONDS = 30;
+const ZCASH_LOCK_BLOCKS = 24;
+const EVM_LOCK_SECONDS = 20;
 const QUOTE_TTL_SECONDS = 30;
-const SPREAD_BPS = 60;
 /** ZIP-317 conventional fee for a 1-in, 2-out transparent spend. */
 const ZCASH_FEE_ZAT = 10_000n;
 const MIN_ZAT = 100_000n; // 0.001 ZEC
 const MAX_ZAT = 10_000_000_000n; // 100 ZEC of maker inventory
 
-const TEMPO_HTLC: Hex = "0x5c9e3a41f0b2d78e6a13c4f5097bd2e8a1f63c07";
-const OUSD: Hex = "0x20c0000000000000000000000000000000000000";
-const MAKER_TEMPO_ADDRESS: Hex = "0x8f3b2c1e7d9a40f6b5e2c8d17a3f9e0b4c6d2a51";
+interface MockChain {
+  name: string;
+  chainId: number;
+  blockMs: number;
+  genesisBlock: number;
+  token: { symbol: string; address: Hex };
+  htlc: Hex;
+  adaptorEscrow: Hex;
+  spreadBps: number;
+}
+
+const CHAINS: Record<EvmChain, MockChain> = {
+  tempo: {
+    name: "Tempo",
+    chainId: 31337,
+    blockMs: 500,
+    genesisBlock: 2_416_380,
+    token: { symbol: "OUSD", address: "0x20c0000000000000000000000000000000000000" },
+    htlc: "0x5c9e3a41f0b2d78e6a13c4f5097bd2e8a1f63c07",
+    adaptorEscrow: "0x7a0d5f13c2e98b46d1a3f07c5e29b8d4a61f3e92",
+    spreadBps: 45,
+  },
+  base: {
+    name: "Base",
+    chainId: 31338,
+    blockMs: 2_000,
+    genesisBlock: 18_904_112,
+    token: { symbol: "USDC", address: "0x6e1f3a90c5d2b874e0a19c3f5d7b26e48a0c91d5" },
+    htlc: "0x3b1f0e6a9d24c7b58e01f6d3a2c94e7b5d08a1c6",
+    adaptorEscrow: "0x91c4e7a2b05d3f68e1a9c07b4d2e5f83a6b17d40",
+    spreadBps: 60,
+  },
+  ethereum: {
+    name: "Ethereum",
+    chainId: 31339,
+    blockMs: 12_000,
+    genesisBlock: 21_337_408,
+    token: { symbol: "USDC", address: "0xc81d4e7f02a95b36d8e1f4a7c0b3925e6d18f7a4" },
+    htlc: "0xe4d27b90a1c35f86b2d0e9a47c13f58b6a29d0e1",
+    adaptorEscrow: "0x2f8a6c1d94e07b35a8c2f1d06e9b47a3c5d18e72",
+    spreadBps: 80,
+  },
+};
+
+const EVM_CHAINS = Object.keys(CHAINS) as EvmChain[];
+const MAKER_EVM_ADDRESS: Hex = "0x8f3b2c1e7d9a40f6b5e2c8d17a3f9e0b4c6d2a51";
 const MAKER_ZCASH_PUBKEY: Hex = "0x02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5";
-/** The taker's Tempo address that receives OUSD. */
-const TAKER_TEMPO_ADDRESS: Hex = "0x3e7a91c4d2b85f06e1a9c3d7b4f28e5a0c6d19b3";
+/** The taker's long-lived EVM address, used when "fresh recipient" is off. */
+const TAKER_EVM_ADDRESS: Hex = "0x3e7a91c4d2b85f06e1a9c3d7b4f28e5a0c6d19b3";
 
 // ---- Script + address helpers (mirror packages/zcash/src/script.ts) ------------------------------
 
@@ -59,6 +113,7 @@ const OP = {
   OP_0: 0x00,
   OP_PUSHDATA1: 0x4c,
   OP_1: 0x51,
+  OP_2: 0x52,
   OP_IF: 0x63,
   OP_ELSE: 0x67,
   OP_ENDIF: 0x68,
@@ -67,6 +122,7 @@ const OP = {
   OP_EQUALVERIFY: 0x88,
   OP_SHA256: 0xa8,
   OP_CHECKSIG: 0xac,
+  OP_CHECKMULTISIG: 0xae,
   OP_CHECKLOCKTIMEVERIFY: 0xb1,
 } as const;
 
@@ -100,6 +156,16 @@ function htlcRedeemScript(hashlock: Uint8Array, claimPubkey: Uint8Array, refundP
   );
 }
 
+/** A plain 2-of-2: indistinguishable from any other multisig until it's spent. */
+function multisigRedeemScript(makerPubkey: Uint8Array, takerPubkey: Uint8Array) {
+  return concatBytes(
+    Uint8Array.of(OP.OP_2),
+    pushData(makerPubkey),
+    pushData(takerPubkey),
+    Uint8Array.of(OP.OP_2, OP.OP_CHECKMULTISIG),
+  );
+}
+
 const b58c = createBase58check(sha256);
 const hash160 = (data: Uint8Array) => ripemd160(sha256(data));
 /** Testnet/regtest prefixes: t2… for P2SH, tm… for P2PKH. */
@@ -109,7 +175,10 @@ const p2pkhAddress = (pubkey: Uint8Array) => b58c.encode(concatBytes(Uint8Array.
 const hex0x = (bytes: Uint8Array): Hex => `0x${bytesToHex(bytes)}`;
 const randomPubkey = () => concatBytes(Uint8Array.of(Math.random() < 0.5 ? 0x02 : 0x03), randomBytes(32));
 const zcashTxid = () => bytesToHex(randomBytes(32));
-const tempoTx = (): Hex => hex0x(randomBytes(32));
+const evmTx = (): Hex => hex0x(randomBytes(32));
+const evmAddress = (): Hex => hex0x(randomBytes(20));
+/** r ‖ s ‖ v, the shape an ECDSA signature takes in calldata. */
+const ecdsaSignature = (): Hex => hex0x(concatBytes(randomBytes(64), Uint8Array.of(Math.random() < 0.5 ? 27 : 28)));
 const id = (prefix: string) => `${prefix}_${bytesToHex(randomBytes(8))}`;
 
 const fmtZec = (zat: bigint) => {
@@ -119,6 +188,7 @@ const fmtZec = (zat: bigint) => {
 };
 const fmtUsd = (units: bigint) => (Number(units) / 1e6).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInt = (n: number) => n.toLocaleString("en-US");
+const short = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`;
 
 // ---- State ---------------------------------------------------------------------------------------
 
@@ -131,32 +201,44 @@ interface PlannedStep {
 interface SwapRecord {
   base: SwapView;
   scenario: MockScenario;
-  preimage: Hex;
   plan: PlannedStep[];
   /** Steps appended later (refunds). */
   extra: PlannedStep[];
+}
+
+export interface MockStartOptions {
+  shield: boolean;
+  scenario?: MockScenario;
+  privacy?: PrivacyOptions;
 }
 
 export class MockParalockClient {
   private readonly epoch = Date.now();
   private readonly quotes = new Map<string, QuoteView>();
   private readonly swaps = new Map<string, SwapRecord>();
+  /** The taker's dedicated transparent swap address: funds pass through it right before the lock. */
+  private readonly swapAddress = p2pkhAddress(randomPubkey());
 
   // ---- Chain clocks ----
 
   private zcashHeightAt(ms: number) {
     return ZCASH_GENESIS_HEIGHT + Math.floor((ms - this.epoch) / ZCASH_BLOCK_MS);
   }
-  private tempoBlockAt(ms: number) {
-    return TEMPO_GENESIS_BLOCK + Math.floor((ms - this.epoch) / TEMPO_BLOCK_MS);
+  private evmBlockAt(chain: EvmChain, ms: number) {
+    const c = CHAINS[chain];
+    return c.genesisBlock + Math.floor((ms - this.epoch) / c.blockMs);
   }
-  tips(now = Date.now()): ChainTips {
+  tips(chain: EvmChain = "tempo", now = Date.now()): ChainTips {
+    const evmBlock = this.evmBlockAt(chain, now);
+    const evmTime = Math.floor(now / 1000);
     return {
       zcashHeight: this.zcashHeightAt(now),
       zcashBlockSeconds: ZCASH_BLOCK_MS / 1000,
       zcashNetwork: ZCASH_NETWORK,
-      tempoBlock: this.tempoBlockAt(now),
-      tempoTime: Math.floor(now / 1000),
+      evmBlock,
+      evmTime,
+      tempoBlock: evmBlock,
+      tempoTime: evmTime,
     };
   }
 
@@ -168,36 +250,47 @@ export class MockParalockClient {
 
   // ---- ParalockClient ----
 
-  async getQuote(zecAmountZat: bigint): Promise<QuoteView> {
+  /** The `chains` list of `GET /api/chains` (the route adds `backend: "mock"`). */
+  chains(): ChainInfo[] {
+    return EVM_CHAINS.map((chain) => ({ chain, name: CHAINS[chain].name, token: CHAINS[chain].token.symbol, available: true }));
+  }
+
+  /** Same positional signature as the SDK maker's `quote(zat, chain, mode)`. */
+  async getQuote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<QuoteView> {
+    const c = CHAINS[chain];
+    if (!c) throw new ParalockError(422, "unsupported_chain", `Paralock doesn't settle on "${String(chain)}". Pick Tempo, Base or Ethereum.`);
+    if (mode !== "htlc" && mode !== "adaptor") throw new ParalockError(422, "unsupported_mode", 'Mode must be "htlc" or "adaptor".');
     if (zecAmountZat < MIN_ZAT) throw new ParalockError(422, "amount_too_small", `Minimum swap is ${fmtZec(MIN_ZAT)} ZEC.`);
     if (zecAmountZat > MAX_ZAT) {
       throw new ParalockError(422, "amount_too_large", `The maker can fill up to ${fmtZec(MAX_ZAT)} ZEC per swap right now.`);
     }
     const now = Date.now();
     const midRate = this.midRate(now);
-    const rate = midRate * (1 - SPREAD_BPS / 10_000);
-    const microRate = BigInt(Math.round(rate * 1e6)); // OUSD base units (6 dp) per ZEC
+    const rate = midRate * (1 - c.spreadBps / 10_000);
+    const microRate = BigInt(Math.round(rate * 1e6)); // stablecoin base units (6 dp) per ZEC
     const quote: QuoteView = {
       id: id("q"),
       direction: "ZEC_TO_USD",
+      mode,
+      chain,
       zecAmountZat,
       usdAmount: (zecAmountZat * microRate) / 100_000_000n,
-      token: OUSD,
-      tokenSymbol: "OUSD",
+      token: c.token.address,
+      tokenSymbol: c.token.symbol,
       rate: Number(microRate) / 1e6,
       makerZcashPubkey: MAKER_ZCASH_PUBKEY,
-      makerTempoAddress: MAKER_TEMPO_ADDRESS,
+      makerEvmAddress: MAKER_EVM_ADDRESS,
       zcashLockBlocks: ZCASH_LOCK_BLOCKS,
-      tempoLockSeconds: TEMPO_LOCK_SECONDS,
+      evmLockSeconds: EVM_LOCK_SECONDS,
       expiresAt: Math.floor(now / 1000) + QUOTE_TTL_SECONDS,
-      pricing: { midRate: Math.round(midRate * 1e6) / 1e6, spreadBps: SPREAD_BPS, zcashFeeZat: ZCASH_FEE_ZAT },
+      pricing: { midRate: Math.round(midRate * 1e6) / 1e6, spreadBps: c.spreadBps, zcashFeeZat: ZCASH_FEE_ZAT },
       network: { zcashNetwork: ZCASH_NETWORK, zcashBlockSeconds: ZCASH_BLOCK_MS / 1000 },
     };
     this.quotes.set(quote.id, quote);
     return quote;
   }
 
-  async startSwap(quoteId: string, opts: { shield: boolean; scenario?: MockScenario }): Promise<SwapView> {
+  async startSwap(quoteId: string, opts: MockStartOptions): Promise<SwapView> {
     const quote = this.quotes.get(quoteId);
     if (!quote) throw new ParalockError(404, "quote_not_found", "That quote doesn't exist. Request a new one.");
     const now = Date.now();
@@ -205,23 +298,52 @@ export class MockParalockClient {
     this.quotes.delete(quoteId); // one swap per quote
 
     const scenario = opts.scenario ?? "cooperative";
-    const preimage = randomBytes(32);
-    const hashlock = sha256(preimage);
-    const takerRefundPubkey = randomPubkey();
+    const privacy: PrivacyOptions = opts.privacy ?? { freshRecipient: false, relayClaim: false };
+    const chain = quote.chain;
+    const c = CHAINS[chain];
+    const adaptor = quote.mode === "adaptor";
+    const takerPubkey = randomPubkey();
     const refundHeight = this.zcashHeightAt(now) + quote.zcashLockBlocks;
-    const redeemScript = htlcRedeemScript(hashlock, hexToBytes(quote.makerZcashPubkey.slice(2)), takerRefundPubkey, refundHeight);
+    const makerPubkey = hexToBytes(quote.makerZcashPubkey.slice(2));
+
+    let hashlock: Hex | undefined;
+    let preimage: Hex | undefined;
+    let adaptorPoint: Hex | undefined;
+    let redeemScript: Uint8Array;
+    if (adaptor) {
+      adaptorPoint = hex0x(randomPubkey());
+      redeemScript = multisigRedeemScript(makerPubkey, takerPubkey);
+    } else {
+      const secret = randomBytes(32);
+      preimage = hex0x(secret);
+      hashlock = hex0x(sha256(secret));
+      redeemScript = htlcRedeemScript(sha256(secret), makerPubkey, takerPubkey, refundHeight);
+    }
+
     const zec = fmtZec(quote.zecAmountZat);
-    const usd = fmtUsd(quote.usdAmount);
+    const usd = `${fmtUsd(quote.usdAmount)} ${quote.tokenSymbol}`;
+    const recipient = privacy.freshRecipient ? evmAddress() : TAKER_EVM_ADDRESS;
 
     const base: SwapView = {
       id: id("swp"),
       quote,
-      hashlock: hex0x(hashlock),
+      mode: quote.mode,
+      hashlock,
+      adaptorPoint,
       status: "quoted",
       zcash: { htlcAddress: p2shAddress(redeemScript), redeemScript: hex0x(redeemScript), refundHeight, amountZat: quote.zecAmountZat },
-      tempo: { contract: TEMPO_HTLC, token: quote.token, amount: quote.usdAmount, recipient: TAKER_TEMPO_ADDRESS },
+      evm: {
+        chain,
+        chainId: c.chainId,
+        contract: adaptor ? c.adaptorEscrow : c.htlc,
+        token: quote.token,
+        amount: quote.usdAmount,
+        recipient,
+      },
+      adaptor: adaptor ? { escrowId: hex0x(randomBytes(32)), signer: evmAddress(), signerPubkey: hex0x(randomPubkey()) } : undefined,
       events: [],
       shield: opts.shield,
+      privacy,
     };
 
     const plan: PlannedStep[] = [];
@@ -232,12 +354,11 @@ export class MockParalockClient {
     };
 
     if (opts.shield) {
-      const oneTime = p2pkhAddress(randomPubkey());
       add(1_500, {
         status: "quoted",
         chain: "zcash",
         txid: zcashTxid(),
-        detail: `Unshielded ${zec} ZEC to ${oneTime} for the lock. Change is shielded again.`,
+        detail: `Unshielded exactly ${zec} ZEC into your swap address ${this.swapAddress}. The rest of your balance stays shielded.`,
       });
     }
 
@@ -246,41 +367,53 @@ export class MockParalockClient {
       s.zcash.fundingTxid = fundingTxid;
       s.zcash.fundingVout = 0;
     });
-    plan.at(-1)!.event.detail = `Funded ${zec} ZEC into the HTLC. Mined in block ${fmtInt(this.zcashHeightAt(lockedAt) + 1)}.`;
+    plan.at(-1)!.event.detail = adaptor
+      ? `Funded ${zec} ZEC into an ordinary 2-of-2 multisig. The refund the maker signed for you is valid from block ${fmtInt(refundHeight)}. Mined in block ${fmtInt(this.zcashHeightAt(lockedAt) + 1)}.`
+      : `Funded ${zec} ZEC into the HTLC. Mined in block ${fmtInt(this.zcashHeightAt(lockedAt) + 1)}.`;
 
     if (scenario !== "maker_silent") {
-      const lockTx = tempoTx();
-      const tempoLockedAt = add(6_000, { status: "tempo_locked", chain: "tempo", txid: lockTx }, (s) => {
-        s.tempo.lockTx = lockTx;
-        s.tempo.expiry = Math.floor(tempoLockedAt / 1000) + quote.tempoLockSeconds;
+      const lockTx = evmTx();
+      const evmLockedAt = add(6_000, { status: "evm_locked", chain, txid: lockTx }, (s) => {
+        s.evm.lockTx = lockTx;
+        s.evm.expiry = Math.floor(evmLockedAt / 1000) + quote.evmLockSeconds;
       });
-      plan.at(-1)!.event.detail = `Maker saw 2 Zcash confirmations and locked ${usd} OUSD. Included in block ${fmtInt(this.tempoBlockAt(tempoLockedAt))}.`;
+      plan.at(-1)!.event.detail = adaptor
+        ? `Maker saw 2 Zcash confirmations, locked ${usd} in the escrow and sent you its encrypted release signature. Block ${fmtInt(this.evmBlockAt(chain, evmLockedAt))}.`
+        : `Maker saw 2 Zcash confirmations and locked ${usd} under the same hashlock. Block ${fmtInt(this.evmBlockAt(chain, evmLockedAt))}.`;
 
       if (scenario === "cooperative") {
-        const claimTx = tempoTx();
-        const claimedAt = add(4_000, { status: "tempo_claimed", chain: "tempo", txid: claimTx }, (s) => {
-          s.tempo.claimTx = claimTx;
-          s.preimage = hex0x(preimage);
+        const claimTx = evmTx();
+        const signature = ecdsaSignature();
+        const claimedAt = add(4_000, { status: "evm_claimed", chain, txid: claimTx }, (s) => {
+          s.evm.claimTx = claimTx;
+          if (adaptor) s.releaseSignature = signature;
+          else s.preimage = preimage;
         });
-        plan.at(-1)!.event.detail = `You received ${usd} OUSD; the secret is now public. Included in block ${fmtInt(this.tempoBlockAt(claimedAt))}.`;
+        const via = privacy.relayClaim ? " A relayer submitted it and paid the gas." : "";
+        const to = privacy.freshRecipient ? `fresh address ${short(recipient)}` : short(recipient);
+        plan.at(-1)!.event.detail = adaptor
+          ? `You completed the release signature and received ${usd} at ${to}.${via} Only a signature is public; the secret isn't. Block ${fmtInt(this.evmBlockAt(chain, claimedAt))}.`
+          : `You received ${usd} at ${to}.${via} The secret is now public. Block ${fmtInt(this.evmBlockAt(chain, claimedAt))}.`;
 
         const claimTxid = zcashTxid();
         const doneAt = add(5_000, { status: "completed", chain: "zcash", txid: claimTxid }, (s) => {
           s.zcash.claimTxid = claimTxid;
         });
-        plan.at(-1)!.event.detail = `Maker claimed ${zec} ZEC with the published secret. Mined in block ${fmtInt(this.zcashHeightAt(doneAt) + 1)}.`;
+        plan.at(-1)!.event.detail = adaptor
+          ? `Maker recovered the secret from your signature off-chain and claimed ${zec} ZEC with an ordinary 2-of-2 spend. Block ${fmtInt(this.zcashHeightAt(doneAt) + 1)}.`
+          : `Maker claimed ${zec} ZEC with the published secret. Block ${fmtInt(this.zcashHeightAt(doneAt) + 1)}.`;
       } else {
-        // taker_misses_claim: the claim window lapses, the maker takes the OUSD back after expiry.
-        const refundTx = tempoTx();
-        const expiryMs = (Math.floor(tempoLockedAt / 1000) + quote.tempoLockSeconds) * 1000;
-        const refundedAt = add(expiryMs - tempoLockedAt + 2_000, { status: "refunded_tempo", chain: "tempo", txid: refundTx }, (s) => {
-          s.tempo.refundTx = refundTx;
+        // taker_misses_claim: the claim window lapses, the maker takes the dollars back after expiry.
+        const refundTx = evmTx();
+        const expiryMs = (Math.floor(evmLockedAt / 1000) + quote.evmLockSeconds) * 1000;
+        const refundedAt = add(expiryMs - evmLockedAt + 2_000, { status: "refunded_evm", chain, txid: refundTx }, (s) => {
+          s.evm.refundTx = refundTx;
         });
-        plan.at(-1)!.event.detail = `Claim window closed, so the maker took back ${usd} OUSD. Included in block ${fmtInt(this.tempoBlockAt(refundedAt))}.`;
+        plan.at(-1)!.event.detail = `Claim window closed, so the maker took back ${usd}. Your ZEC is still locked to you. Block ${fmtInt(this.evmBlockAt(chain, refundedAt))}.`;
       }
     }
 
-    const record: SwapRecord = { base, scenario, preimage: hex0x(preimage), plan, extra: [] };
+    const record: SwapRecord = { base, scenario, plan, extra: [] };
     this.swaps.set(base.id, record);
     return this.view(record, now);
   }
@@ -294,12 +427,13 @@ export class MockParalockClient {
     const now = Date.now();
     const current = this.view(record, now);
     const tip = this.zcashHeightAt(now);
+    const symbol = current.quote.tokenSymbol;
     switch (current.status) {
       case "quoted":
-        throw new ParalockError(409, "not_funded", "Nothing to refund yet: the Zcash HTLC isn't funded.");
-      case "tempo_claimed":
+        throw new ParalockError(409, "not_funded", "Nothing to refund yet: the Zcash lock isn't funded.");
+      case "evm_claimed":
       case "completed":
-        throw new ParalockError(409, "already_claimed", "You already claimed the OUSD, so the ZEC belongs to the maker.");
+        throw new ParalockError(409, "already_claimed", `You already claimed the ${symbol}, so the ZEC belongs to the maker.`);
       case "refunded_zcash":
         throw new ParalockError(409, "already_refunded", "This swap was already refunded.");
       case "failed":
@@ -313,7 +447,8 @@ export class MockParalockClient {
       );
     }
     const refundTxid = zcashTxid();
-    const where = current.shield ? "Sent straight back to your shielded balance" : "Sent back to your transparent address";
+    const where = current.shield ? "Returned to your wallet and shielded again" : "Sent back to your transparent address";
+    const how = current.mode === "adaptor" ? "Broadcast the refund the maker signed before funding" : "Spent the HTLC's timeout branch";
     record.extra.push({
       at: now,
       event: {
@@ -321,7 +456,7 @@ export class MockParalockClient {
         chain: "zcash",
         at: now,
         txid: refundTxid,
-        detail: `Reclaimed ${fmtZec(current.zcash.amountZat)} ZEC after block ${fmtInt(current.zcash.refundHeight)}. ${where}. Mined in block ${fmtInt(tip + 1)}.`,
+        detail: `${how} and reclaimed ${fmtZec(current.zcash.amountZat)} ZEC. ${where}. Block ${fmtInt(tip + 1)}.`,
       },
       apply: (s) => {
         s.zcash.refundTxid = refundTxid;
@@ -349,7 +484,7 @@ export class MockParalockClient {
       status = step.event.status;
     }
     s.status = status;
-    s.tips = this.tips(now);
+    s.tips = this.tips(s.evm.chain, now);
     return s;
   }
 }
