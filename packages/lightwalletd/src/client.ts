@@ -60,7 +60,8 @@ interface RawTransaction { data: Buffer; height: string }
 /** A `RawTransaction` with its bytes copied out of the gRPC `Buffer` (whose `slice()` shares memory). */
 interface Raw { data: Uint8Array; height: string }
 interface SendResponse { errorCode: number; errorMessage: string }
-interface LightdInfo {
+/** `GetLightdInfo`: server and chain information (the fields Paralock reads). */
+export interface LightdInfo {
   chainName: string;
   consensusBranchId: string;
   blockHeight: string;
