@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isEvmAddress, parseUsd, parseZec } from "@/lib/format";
 import {
@@ -10,13 +11,15 @@ import {
   type ParalockClient,
   type QuoteRequest,
 } from "@/lib/paralock-client";
-import { ALL_CHAINS, DEFAULT_TOKEN, isTerminal, plannedRows, timelineRows } from "@/lib/swap-model";
+import { parsePaymentLink } from "@/lib/payment-link";
+import { DEFAULT_TOKEN, isTerminal, plannedRows, timelineRows } from "@/lib/swap-model";
 import type { ChainInfo, EvmChain, Hex, Payment, QuoteView, SwapMode, SwapView } from "@/lib/types";
-import { HowItWorks } from "./HowItWorks";
-import { RouteCard } from "./RouteCard";
+import { AppHeader } from "./AppHeader";
+import { LinkBuilder } from "./LinkBuilder";
+import { RoutePanel } from "./RoutePanel";
 import { Scenarios } from "./Scenarios";
-import { SiteHeader } from "./SiteHeader";
-import { SwapWidget } from "./SwapWidget";
+import { SwapForm } from "./SwapForm";
+import { SwapStatus } from "./SwapStatus";
 
 const POLL_MS = 1000;
 
@@ -34,9 +37,8 @@ function useNow() {
   return now;
 }
 
-function prefersReducedMotion() {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export type Flow = "swap" | "pay";
 
@@ -57,10 +59,12 @@ export interface SwapSettings {
   relayClaim: boolean;
 }
 
+export type Busy = "start" | "refund" | null;
+
 /** The request that produced a quote, to fetch a fresh one like it. */
 const requestFor = (q: QuoteView): QuoteRequest => (q.exactOut ? { usdAmount: q.usdAmount } : { zecAmountZat: q.zecAmountZat });
 
-export function ParalockApp({ children }: { children?: React.ReactNode }) {
+export function ParalockApp() {
   const client = useRef<ParalockClient | null>(null);
   const api = useCallback(() => (client.current ??= createClient()), []);
 
@@ -82,35 +86,31 @@ export function ParalockApp({ children }: { children?: React.ReactNode }) {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [swap, setSwap] = useState<SwapView | null>(null);
   const [swapScenario, setSwapScenario] = useState<MockScenario>();
-  const [busy, setBusy] = useState<"start" | "refund" | null>(null);
+  const [busy, setBusy] = useState<Busy>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const now = useNow();
   const quoteSeq = useRef(0);
-  const routeRef = useRef<HTMLDivElement>(null);
-  const swapRef = useRef<HTMLElement>(null);
+  const deskRef = useRef<HTMLDivElement>(null);
 
   const update = useCallback((patch: Partial<SwapSettings>) => setSettings((s) => ({ ...s, ...patch })), []);
   const { flow, amountText, usdText, recipient, label, chain, mode, shield, freshRecipient, relayClaim } = settings;
   /** Set when the page opened from a payment link: the merchant picked the chain, so don't switch it silently. */
   const [fromLink, setFromLink] = useState(false);
 
-  // Payment links: ?pay=<0xaddress>&usd=<amount>&chain=<chain>&label=<text>[&mode=private]
+  // Payment links: /app?pay=<0xaddress>&usd=<amount>&chain=<chain>&label=<text>[&mode=private]. Also /app?flow=pay.
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    const to = p.get("pay");
-    if (to === null) return;
-    const patch: Partial<SwapSettings> = { flow: "pay", recipient: to.trim() };
-    const usd = p.get("usd");
-    if (usd && parseUsd(usd) !== null) patch.usdText = usd.replace(/^\$/, "");
-    const c = p.get("chain") as EvmChain | null;
-    if (c && ALL_CHAINS.includes(c)) patch.chain = c;
-    const m = p.get("mode");
-    if (m === "private" || m === "adaptor") patch.mode = "adaptor";
-    else if (m === "standard" || m === "htlc") patch.mode = "htlc";
-    const l = p.get("label")?.trim();
-    if (l) patch.label = l.slice(0, 60);
-    update(patch);
-    setFromLink(true);
+    const link = parsePaymentLink(window.location.search);
+    if (link) {
+      const patch: Partial<SwapSettings> = { flow: "pay", recipient: link.recipient };
+      if (link.usdText) patch.usdText = link.usdText;
+      if (link.chain) patch.chain = link.chain;
+      if (link.mode) patch.mode = link.mode;
+      if (link.label) patch.label = link.label;
+      update(patch);
+      setFromLink(true);
+    } else if (new URLSearchParams(window.location.search).get("flow") === "pay") {
+      update({ flow: "pay" });
+    }
   }, [update]);
 
   // Which chains the backend can settle on.
@@ -228,6 +228,10 @@ export function ParalockApp({ children }: { children?: React.ReactNode }) {
     };
   }, [swapId, settled, api]);
 
+  const scrollToDesk = useCallback(() => {
+    requestAnimationFrame(() => deskRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" }));
+  }, []);
+
   const begin = useCallback(
     async (q: QuoteView, scenario: MockScenario, payTo?: Payment) => {
       setBusy("start");
@@ -260,18 +264,16 @@ export function ParalockApp({ children }: { children?: React.ReactNode }) {
   async function startSwap() {
     if (!quote || (pay && !payment)) return;
     const ok = await begin(quote, "cooperative", payment);
-    if (ok && window.matchMedia("(max-width: 979px)").matches) {
-      requestAnimationFrame(() => routeRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" }));
-    }
+    if (ok && window.matchMedia("(max-width: 979px)").matches) scrollToDesk();
   }
 
-  /** Scenario cards: start a fresh swap that plays out the chosen way, with the widget's current settings. */
+  /** Demo scenarios: start a fresh swap that plays out the chosen way, with the form's current settings. */
   async function runScenario(scenario: MockScenario) {
     if (swap && !isTerminal(swap.status)) return;
     setSwap(null);
     setSwapScenario(undefined);
     setActionError(null);
-    swapRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+    scrollToDesk();
     // Pay flow with a valid recipient: run it as a payment. Otherwise run it as a swap.
     let req: QuoteRequest;
     if (payment && request) {
@@ -322,69 +324,60 @@ export function ParalockApp({ children }: { children?: React.ReactNode }) {
     [swap, nowMs, swapScenario, mode, chain, quote, chains, shield, relayClaim, pay, payment, label],
   );
 
-  const activeMode = swap?.mode ?? mode;
   const running = !!swap && !isTerminal(swap.status);
+  const liveQuote = quote && !amountError && !!quote.exactOut === pay ? quote : null;
 
   return (
-    <div className="app" data-mode={activeMode}>
-      <SiteHeader backend={backend} />
-      <main id="main">
-        <section className="hero" id="swap" ref={swapRef} aria-labelledby="hero-title">
-          <div className="hero__glow" aria-hidden="true">
-            <span className="glow glow--zec" />
-            <span className="glow glow--usd" />
-            <span className="glow glow--private" />
-          </div>
-          <div className="hero__head">
-            <h1 id="hero-title" className="hero__title">
-              <span>Shielded ZEC in.</span> <span>Dollars out.</span>
-            </h1>
-            <p className="hero__lede">
-              Pay anyone an exact dollar amount from your shielded ZEC, or swap for yourself. Both sides settle or both
-              refund, with no bridge, no custodian and no wrapped token.
-            </p>
-          </div>
-
-          <div className="desk">
-            <SwapWidget
-              settings={settings}
-              onChange={update}
-              chains={chains}
-              amountError={amountError}
-              quote={quote}
-              quoteLoading={quoteLoading}
-              quoteError={quoteError}
-              swap={swap}
-              busy={busy}
-              actionError={actionError}
-              now={now}
-              onSwap={startSwap}
-              onRefreshQuote={() => request && fetchQuote(request, chain, mode)}
-              onRefund={refund}
-              onReset={reset}
-            />
-            <div className="desk__route" ref={routeRef}>
-              <RouteCard
-                quote={quote && !amountError && !!quote.exactOut === pay ? quote : null}
-                payment={swap ? swap.payment : payment}
-                swap={swap}
-                rows={rows}
-                mode={activeMode}
-                chain={swap?.evm.chain ?? chain}
-                shield={swap ? !!swap.shield : shield}
-                relayClaim={swap ? !!swap.privacy?.relayClaim : relayClaim}
-                now={now}
+    <div className="appshell">
+      <AppHeader backend={backend} />
+      <main id="main" className="appmain">
+        <div className="desk" ref={deskRef}>
+          <div className="desk__primary">
+            {swap ? (
+              <SwapStatus swap={swap} scenario={swapScenario} now={now} busy={busy} actionError={actionError} onRefund={refund} onReset={reset} />
+            ) : (
+              <SwapForm
+                settings={settings}
+                onChange={update}
+                chains={chains}
+                amountError={amountError}
+                quote={liveQuote}
+                quoteLoading={quoteLoading}
+                quoteError={quoteError}
                 busy={busy}
-                onRefund={refund}
+                actionError={actionError}
+                now={now}
+                onSubmit={startSwap}
+                onRefreshQuote={() => request && fetchQuote(request, chain, mode)}
               />
-            </div>
+            )}
           </div>
-        </section>
+          <RoutePanel
+            quote={liveQuote}
+            payment={swap ? swap.payment : payment}
+            swap={swap}
+            rows={rows}
+            mode={swap?.mode ?? mode}
+            chain={swap?.evm.chain ?? chain}
+            shield={swap ? !!swap.shield : shield}
+            relayClaim={swap ? !!swap.privacy?.relayClaim : relayClaim}
+            now={now}
+          />
+        </div>
 
-        <Scenarios onRun={runScenario} running={running} busy={busy === "start"} activeScenario={swap ? swapScenario : undefined} />
-        <HowItWorks mode={mode} chain={chain} />
-        {children}
+        <Scenarios backend={backend} onRun={runScenario} running={running} busy={busy === "start"} activeScenario={swap ? swapScenario : undefined} />
+        <LinkBuilder chains={chains} />
       </main>
+      <footer className="appfoot">
+        <p>Experimental software, not audited. Don&apos;t use it with funds you can&apos;t afford to lose.</p>
+        <nav aria-label="Footer">
+          <Link href="/">Home</Link>
+          <Link href="/#how">How it works</Link>
+          <a href="https://github.com/bitfalt/Paralock" target="_blank" rel="noreferrer">
+            GitHub
+          </a>
+        </nav>
+      </footer>
     </div>
   );
 }

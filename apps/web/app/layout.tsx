@@ -1,30 +1,37 @@
 import type { Metadata, Viewport } from "next";
-import { Figtree, JetBrains_Mono, Sora } from "next/font/google";
+import { Fragment_Mono, Instrument_Sans } from "next/font/google";
 import "./globals.css";
 
-const sora = Sora({ subsets: ["latin"], variable: "--font-sora", display: "swap" });
-const figtree = Figtree({ subsets: ["latin"], variable: "--font-figtree", display: "swap" });
-const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jbmono", display: "swap" });
+const sans = Instrument_Sans({ subsets: ["latin"], variable: "--font-instrument", display: "swap" });
+const mono = Fragment_Mono({ subsets: ["latin"], weight: "400", variable: "--font-fragment", display: "swap" });
+
+const TITLE = "Paralock: pay in dollars from shielded ZEC";
+const DESCRIPTION =
+  "Pay anyone an exact dollar amount from shielded ZEC, with no bridge or custodian. Two on-chain locks share one secret, so both sides settle or both refund. Open source and experimental.";
 
 export const metadata: Metadata = {
-  title: "Paralock: shielded ZEC to dollars",
-  description:
-    "Trustless swaps from shielded ZEC to dollars on Tempo, Base and Ethereum. Two locks, one key: both sides settle or both refund. No bridge, no custodian.",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://paralock.xyz"),
+  title: { default: TITLE, template: "%s | Paralock" },
+  description: DESCRIPTION,
+  applicationName: "Paralock",
+  keywords: ["Zcash", "ZEC", "atomic swap", "stablecoin payments", "adaptor signatures", "HTLC", "Tempo", "Base"],
+  openGraph: {
+    type: "website",
+    siteName: "Paralock",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
+  twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0F1330",
+  themeColor: "#08090a",
+  colorScheme: "dark",
 };
-
-/** Applies a saved theme before first paint, so light-theme users don't see a dark flash. */
-const THEME_SCRIPT = `try{var t=localStorage.getItem("paralock-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sora.variable} ${figtree.variable} ${mono.variable}`} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
-      </head>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>{children}</body>
     </html>
   );

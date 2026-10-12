@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { CopyHash } from "@/components/ui/CopyHash";
+import { Icon } from "@/components/ui/Icon";
 import { formatInt, formatUsd, truncateMiddle } from "@/lib/format";
 import { CHAIN_NAME } from "@/lib/swap-model";
 import type { QuoteView, SwapMode, SwapView } from "@/lib/types";
-import { CopyHash } from "./CopyHash";
-import { Icon } from "./Glyphs";
 
 const OPCODES: Record<number, string> = {
   0x00: "OP_0",
@@ -62,19 +62,18 @@ function DecodedScript({ hex, mode }: { hex: string; mode: SwapMode }) {
   tokens.forEach((t, i) => {
     if (t.kind === "op" && ["OP_IF", "OP_ELSE", "OP_ENDIF"].includes(t.name)) {
       flush(1);
-      lines.push({ indent: 0, parts: [<span key={i} className="op">{t.name}</span>] });
+      lines.push({ indent: 0, parts: [<span key={i} className="sc-op">{t.name}</span>] });
       return;
     }
     if (t.kind === "op") {
-      current.push(<span key={i} className={/^\d+$/.test(t.name) ? "num" : "op"}>{t.name}</span>);
+      current.push(<span key={i} className={/^\d+$/.test(t.name) ? "sc-num" : "sc-op"}>{t.name}</span>);
       if (t.name === "OP_EQUALVERIFY" || t.name === "OP_DROP" || (multisig && i === 0)) flush(multisig ? 0 : 1);
     } else if (t.bytes <= 4) {
-      current.push(<span key={i} className="num">{scriptNum(t.hex)}</span>);
+      current.push(<span key={i} className="sc-num">{scriptNum(t.hex)}</span>);
     } else {
-      const role =
-        t.bytes === 32 ? "hashlock" : pubkeys++ === 0 ? "maker pubkey" : multisig ? "your pubkey" : "your refund pubkey";
+      const role = t.bytes === 32 ? "hashlock" : pubkeys++ === 0 ? "maker pubkey" : multisig ? "your pubkey" : "your refund pubkey";
       current.push(
-        <span key={i} className="push" title={t.hex}>
+        <span key={i} className="sc-push" title={t.hex}>
           &lt;{role} {truncateMiddle(t.hex, 4, 4)}&gt;
         </span>,
       );
@@ -118,7 +117,7 @@ function PreimageCheck({ preimage, hashlock }: { preimage: string; hashlock: str
   }, [preimage, hashlock]);
   if (ok === null) return null;
   return (
-    <span className="check" data-ok={ok}>
+    <span className="verify" data-ok={ok}>
       <Icon name={ok ? "check" : "x"} size={13} />
       {ok ? "Checked in your browser: sha256(secret) equals the hashlock." : "Mismatch: sha256(secret) does not equal the hashlock."}
     </span>
@@ -130,7 +129,7 @@ function Row({ label, note, children }: { label: string; note?: string; children
     <div className="hood__row">
       <dt>
         {label}
-        {note && <span className="hood__note">{note}</span>}
+        {note && <small>{note}</small>}
       </dt>
       <dd>{children}</dd>
     </div>
@@ -147,21 +146,19 @@ export function UnderTheHood({ swap, quote, mode }: { swap: SwapView | null; quo
   const pending = <span className="hood__pending">Set when the swap starts</span>;
 
   return (
-    <div className="hood">
-      <button type="button" className="hood__toggle" aria-expanded={open} aria-controls={regionId} onClick={() => setOpen((o) => !o)}>
-        <span>
-          <strong>Under the hood</strong>
-          <small>{adaptor ? "Multisig, adaptor point, escrow" : "Hashlock, redeem script, contract"}</small>
-        </span>
-        <Icon name="chevron" className="hood__chev" />
+    <div className="disclosure hood" data-open={open}>
+      <button type="button" className="disclosure__toggle" aria-expanded={open} aria-controls={regionId} onClick={() => setOpen((o) => !o)}>
+        <span className="disclosure__title">Under the hood</span>
+        <span className="disclosure__summary">{adaptor ? "Multisig, adaptor point, escrow" : "Hashlock, redeem script, contract"}</span>
+        <Icon name="chevron" size={14} className="disclosure__chev" />
       </button>
 
-      <div id={regionId} className="hood__region" hidden={!open}>
+      <div id={regionId} className="disclosure__body" hidden={!open}>
         <dl className="hood__list">
           {adaptor ? (
             <>
               <Row label="Hashlock">
-                <span className="hood__text">
+                <span>
                   None on-chain. <span className="hood__muted">Nothing on either chain links the two legs.</span>
                 </span>
               </Row>
@@ -207,8 +204,8 @@ export function UnderTheHood({ swap, quote, mode }: { swap: SwapView | null; quo
               <>
                 <span className="hood__inline">
                   <CopyHash value={swap.zcash.redeemScript} label="redeem script" head={12} tail={8} />
-                  <button type="button" className="linkbtn" aria-expanded={decoded} onClick={() => setDecoded((d) => !d)}>
-                    {decoded ? "Hide decoded" : "Decode"}
+                  <button type="button" className="hood__btn" aria-expanded={decoded} onClick={() => setDecoded((d) => !d)}>
+                    {decoded ? "Hide" : "Decode"}
                   </button>
                 </span>
                 {decoded && <DecodedScript hex={swap.zcash.redeemScript} mode={swap.mode} />}
@@ -219,9 +216,14 @@ export function UnderTheHood({ swap, quote, mode }: { swap: SwapView | null; quo
           </Row>
           <Row label="Refund" note={adaptor ? "signed by the maker before funding" : "timeout branch"}>
             {swap ? (
-              <span className="hood__text">
-                From block {formatInt(swap.zcash.refundHeight)}
-                {swap.tips && <span className="hood__muted"> (chain at {formatInt(swap.tips.zcashHeight)})</span>}
+              <span>
+                From block <span className="num">{formatInt(swap.zcash.refundHeight)}</span>
+                {swap.tips && (
+                  <span className="hood__muted">
+                    {" "}
+                    (chain at <span className="num">{formatInt(swap.tips.zcashHeight)}</span>)
+                  </span>
+                )}
               </span>
             ) : (
               pending
@@ -240,8 +242,10 @@ export function UnderTheHood({ swap, quote, mode }: { swap: SwapView | null; quo
           </Row>
           {swap && (
             <Row label="Amount locked">
-              <span className="hood__text">
-                {formatUsd(swap.evm.amount, 6)} {swap.quote.tokenSymbol}
+              <span>
+                <span className="num">
+                  {formatUsd(swap.evm.amount, 6)} {swap.quote.tokenSymbol}
+                </span>
                 <span className="hood__muted"> ({swap.evm.amount.toString()} base units)</span>
               </span>
             </Row>

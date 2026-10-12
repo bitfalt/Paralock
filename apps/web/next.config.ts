@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   turbopack: { root },
   outputFileTracingRoot: root,
+  async redirects() {
+    return [
+      // Payment links used to open on `/` (`/?pay=0x…&usd=…`). The app lives at /app now; the query string carries over.
+      { source: "/", has: [{ type: "query", key: "pay" }], destination: "/app", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;
