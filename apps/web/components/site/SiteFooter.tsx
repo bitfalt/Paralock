@@ -53,8 +53,8 @@ export function SiteFooter() {
       </div>
       <div className="container footer__fine">
         <p>
-          Experimental software, not audited. Paralock runs on a local devnet today; the hosted app uses a simulated maker
-          and moves no real funds.
+          Experimental software, not audited. The escrows run on public testnets only; the hosted app uses a simulated
+          maker and moves no real funds.
         </p>
       </div>
     </footer>

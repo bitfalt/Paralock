@@ -8,15 +8,15 @@ import { Icon } from "@/components/ui/Icon";
 import "./landing.css";
 
 const STEPS = [
-  { where: "Your device", title: "You pick a secret", text: "It stays with you until you're paid." },
-  { where: "Zcash", title: "You lock ZEC", text: "The maker can take it only with the secret. If nobody does by block N, it's yours again." },
+  { where: "Your device", title: "You pick a secret", text: "It stays on your device until you claim your dollars." },
+  { where: "Zcash", title: "You lock ZEC", text: "Only the secret lets the maker take it. If the maker never does, it's yours again at block N." },
   {
     where: "EVM chain",
     title: "The maker locks dollars",
-    text: "After checking your lock, the maker locks stablecoins that the secret opens until time T, which ends long before N.",
+    text: "Once your ZEC is confirmed, the maker locks stablecoins under the same secret. The maker can refund them only after time T, long before N.",
   },
-  { where: "EVM chain", title: "You claim the dollars", text: "Claiming makes the secret public. In a payment, the dollars go straight to the recipient." },
-  { where: "Zcash", title: "The maker claims the ZEC", text: "It uses the secret your claim revealed. Both sides are paid." },
+  { where: "EVM chain", title: "You claim the dollars", text: "Claiming reveals the secret. In a payment, the dollars go straight to the person you're paying." },
+  { where: "Zcash", title: "The maker claims the ZEC", text: "It uses the secret your claim revealed. Both sides are paid, and nobody held anyone else's money." },
 ];
 
 const WHAT_IF: [string, string][] = [
@@ -60,30 +60,32 @@ const LEVELS = [
 ];
 
 const PACKAGES = [
-  { name: "@paralock/sdk", text: "Maker and taker engines for both modes, exact-amount payments, privacy options, HTTP transport." },
+  { name: "@paralock/sdk", text: "createTaker and createMaker: both modes, exact-amount payments, privacy options, crash-safe recovery." },
   { name: "@paralock/zcash", text: "HTLC and 2-of-2 locks, v5 transactions and ZIP 244 signing, in TypeScript. Runs in browsers." },
   { name: "@paralock/adaptor", text: "ECDSA adaptor signatures on secp256k1 with DLEQ proofs. Runs in browsers." },
   { name: "@paralock/evm", text: "viem clients for the hashlock and signature escrows on any EVM chain." },
+  { name: "@paralock/lightwalletd", text: "Use a public lightwalletd server as the Zcash backend. No full node to run." },
 ];
 
 const SNIPPET = `
-import { HttpMakerApi, SwapFailedError, Taker } from "@paralock/sdk";
+import { SwapFailedError, createTaker } from "@paralock/sdk";
+import { LightwalletdClient } from "@paralock/lightwalletd";
 
-const maker = new HttpMakerApi("https://maker.example");
-const taker = new Taker({ network, zcash, zcashKey, chains, maker });
+const taker = createTaker({
+  zcash: { network, key, node: new LightwalletdClient("zec.rocks:443") },
+  evm: { base: { rpcUrl, chainId, htlc, adaptorEscrow, account } },
+  maker: "https://maker.example",
+  store: "./swaps", // secrets are saved before anything is broadcast
+});
 
 // Pay Acme Coffee exactly 25 USDC on Base, in private mode.
-const quote = await maker.quoteExactOut(25_000_000n, "base", "adaptor");
+const quote = await taker.quoteExactOut(25_000_000n, "base", "adaptor");
 
 try {
-  await taker.swap(quote, {
-    recipient: "0x5aE1…c9F2",
-    label: "Acme Coffee",
-    privacy: { relayClaim: true },
-  });
+  await taker.swap(quote, { recipient: "0x5aE1…c9F2", label: "Acme Coffee" });
 } catch (err) {
   // The maker stalled: take the ZEC back after the refund height.
-  if (err instanceof SwapFailedError) await taker.refund(err.swap);
+  if (err instanceof SwapFailedError) await taker.refund(err.swap.id);
 }
 `;
 
@@ -99,12 +101,12 @@ const USES = [
     href: `${GITHUB_URL}/tree/main/examples/sell-a-secret`,
   },
   {
-    title: "Pay in dollars from a Zcash wallet",
-    text: "A wallet embeds the SDK and spends shielded savings anywhere stablecoins work, without an exchange account.",
+    title: "Wallets and agents",
+    text: "A Zcash wallet or an AI agent embeds the SDK and pays anywhere stablecoins work: exact amounts, no exchange account.",
   },
   {
     title: "OTC trades",
-    text: "Settle large ZEC trades through on-chain escrow instead of mutual trust, with the price agreed before anything locks.",
+    text: "Settle large ZEC trades through two on-chain locks instead of trusting the other desk. The price is fixed before anything locks.",
   },
 ];
 
@@ -179,8 +181,9 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
     q: "Can I use it with real money?",
     a: (
       <p>
-        Not yet. Paralock runs on a local devnet (a Zcash regtest and local EVM chains), and the hosted app uses a
-        simulated maker. Public testnets come next. The code is experimental and has not been audited.
+        Not yet. The escrows are deployed on six public testnets, and the Zcash side runs on testnet through public
+        lightwalletd servers, with no node to run. The hosted app uses a simulated maker. The code is experimental and
+        has not been audited, so mainnet isn&apos;t supported.
       </p>
     ),
   },
@@ -198,8 +201,9 @@ export default function Landing() {
               Keep it shielded. Spend it in dollars.
             </h1>
             <p className="hero__lede">
-              Paralock pays an exact dollar amount from shielded ZEC. A lock on Zcash and a lock on the dollar chain share
-              one secret, so either both sides settle or both refund. No bridge, no custodian, no wrapped token.
+              Pay anyone an exact dollar amount straight from shielded ZEC. A lock on Zcash and a lock on the dollar chain
+              open with the same key, so either both sides settle or both get their money back. No bridge, no custodian,
+              no wrapped token.
             </p>
             <div className="hero__actions">
               <Link className="btn btn--primary btn--lg" href="/app">
@@ -213,7 +217,7 @@ export default function Landing() {
                 GitHub
               </a>
             </div>
-            <p className="hero__note">Open source and experimental. Runs on a local devnet today; not audited.</p>
+            <p className="hero__note">Open source (MIT). Escrows live on six public testnets. Experimental and not audited.</p>
           </div>
           <div className="hero__visual">
             <HeroSettlement />
@@ -226,8 +230,8 @@ export default function Landing() {
             <header className="sec-head">
               <h2 id="pay-title">Pay with a link.</h2>
               <p>
-                A shop shares an address and a price. You pay from shielded savings, and they receive exactly the dollars
-                they asked for. The quote is exact-out: the ZEC rounds up, never the dollars.
+                A shop shares a link with an address and a price. You pay from your shielded balance, and they receive
+                exactly what they asked for, on the chain they chose. The ZEC rounds up, never the dollars.
               </p>
             </header>
             <div className="paydemo">
@@ -319,8 +323,8 @@ export default function Landing() {
             <header className="sec-head">
               <h2 id="how-title">Two locks, one key.</h2>
               <p>
-                Each chain holds one side of the trade, and taking your side hands the other party the key to theirs. You
-                trade with a maker, who holds the stablecoins and earns the spread. Anyone can run one.
+                Each chain holds one side of the trade, and taking your side hands the other party the key to theirs. The
+                other party is a maker: it quotes a price, locks the stablecoins and earns the spread. Anyone can run one.
               </p>
             </header>
             <ol className="steps">
@@ -344,9 +348,9 @@ export default function Landing() {
               <div className="cheat__intro">
                 <h3>Why nobody can cheat</h3>
                 <p>
-                  The Zcash script and the EVM contract enforce every outcome, not a person. The code requires the Zcash
-                  window to outlast the dollar window by at least 2×, and each side checks the other&apos;s lock before
-                  committing anything further.
+                  Every outcome is enforced by the Zcash script and the EVM contract, not by a person. The ZEC refund
+                  window always outlasts the dollar lock by at least 2×, so whoever learns the secret has time to use it,
+                  and each side verifies the other&apos;s lock on-chain before committing anything more.
                 </p>
               </div>
               <table className="table cheat__table">
@@ -375,8 +379,8 @@ export default function Landing() {
             <header className="sec-head">
               <h2 id="privacy-title">Privacy in three levels.</h2>
               <p>
-                Removing the middleman is the start. The rest is about what the two chains reveal, and each level hides more
-                of it.
+                Removing the middleman is step one. The rest is about what the two chains can reveal about you, and each
+                level reveals less.
               </p>
             </header>
             <table className="table levels">
@@ -421,8 +425,8 @@ export default function Landing() {
             <header className="sec-head">
               <h2 id="dev-title">Build on it.</h2>
               <p>
-                The SDK is a public good: MIT-licensed TypeScript for wallets, solvers, agents and makers. Run a maker to
-                fill swaps and earn the spread, or embed the taker in your own product.
+                The SDK is a public good: MIT-licensed TypeScript for wallets, agents, solvers and makers. Embed the taker
+                to give your users dollar payments from ZEC, or run a maker and earn the spread on every swap it fills.
               </p>
             </header>
             <div className="dev">
@@ -483,8 +487,8 @@ export default function Landing() {
             <header className="sec-head">
               <h2 id="chains-title">Zcash to six dollar chains.</h2>
               <p>
-                The same two escrow contracts on every chain. Tempo settles in OUSD, the others in USDC. All six run on the
-                local devnet today; public testnets come next.
+                The same two escrow contracts on every chain: Tempo settles in OUSD, the rest in USDC. Both are deployed on
+                all six public testnets, and the whole set runs locally with one command.
               </p>
             </header>
             <div className="fan">
@@ -531,7 +535,10 @@ export default function Landing() {
         <section className="closing" aria-labelledby="closing-title">
           <div className="container closing__inner">
             <h2 id="closing-title">Try a payment.</h2>
-            <p>The app runs against a simulated maker, so nothing real moves. Run the three endings and watch both locks.</p>
+            <p>
+              The hosted app runs against a simulated maker, so nothing real moves. Try all three endings (settled, the
+              maker vanishes, you never claim) and watch both locks.
+            </p>
             <Link className="btn btn--primary btn--lg" href="/app">
               Launch app
             </Link>
