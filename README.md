@@ -469,9 +469,9 @@ are checked too.
   and `cargo audit`.
 - **Contracts:** `forge fmt --check`, `forge build --sizes`, `forge test`.
 
-**Releases.** [`release.yml`](.github/workflows/release.yml), run by hand, publishes every npm package and crate whose
-version isn't on its registry yet, in dependency order, with trusted publishing (GitHub OIDC, no stored tokens; npm
-provenance). [`release-binaries.yml`](.github/workflows/release-binaries.yml) builds the `paralock` binary for macOS
+**Releases.** [`release.yml`](.github/workflows/release.yml), run by hand, releases every npm package and crate whose
+version isn't on its registry yet, in dependency order, with trusted publishing (GitHub OIDC, no stored tokens). npm
+versions are staged with provenance and go live only once a maintainer approves them with 2FA. [`release-binaries.yml`](.github/workflows/release-binaries.yml) builds the `paralock` binary for macOS
 and Linux on `cli-v*` tags and attaches it to a GitHub release with `SHA256SUMS`.
 
 ## Roadmap
