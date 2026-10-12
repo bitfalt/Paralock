@@ -197,13 +197,21 @@ export async function devnetTaker(cfg: DevnetFile, opts: Pick<TakerConfig, "onUp
     return txid;
   }
 
-  /** Shields change and refunds that came back to the wallet's transparent address. */
+  /**
+   * Shields change and refunds that came back to the wallet's transparent address. The ths wallet only spends
+   * transparent funds after a few confirmations, so this mines them first; it returns false when nothing is spendable.
+   */
   async function reshield(): Promise<boolean> {
-    await ths.mine(1);
+    await ths.mine(3);
     const transparent = BigInt((await ths.account(wallet)).transparent_zatoshi);
     if (transparent <= 50_000n) return false;
-    await ths.shield(wallet, transparent - 30_000n);
-    return true;
+    try {
+      await ths.shield(wallet, transparent - 30_000n);
+      return true;
+    } catch (err) {
+      if (/insufficient spendable funds/.test(String(err))) return false;
+      throw err;
+    }
   }
 
   return { taker, maker, ths, zcash, prepareFunds, reshield, address };
