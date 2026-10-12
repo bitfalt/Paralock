@@ -16,8 +16,9 @@ const g = globalThis as typeof globalThis & { __paralockBackend?: Backend };
 
 function devnetAvailable(): boolean {
   let dir = process.cwd();
-  for (let i = 0; i < 4; i++, dir = join(dir, "..")) {
-    if (existsSync(join(dir, ".paralock", "devnet.json"))) return true;
+  // Runtime lookups only: the ignore comments keep Turbopack from tracing the whole repository into the build.
+  for (let i = 0; i < 4; i++, dir = join(/*turbopackIgnore: true*/ dir, "..")) {
+    if (existsSync(join(/*turbopackIgnore: true*/ dir, ".paralock", "devnet.json"))) return true;
   }
   return false;
 }
