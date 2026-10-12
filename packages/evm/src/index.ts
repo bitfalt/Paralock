@@ -60,6 +60,7 @@ export {
   type TempoHtlc,
 } from "./client.js";
 export { HtlcTimeoutError, SwapRefundedError, type TxResult, type WaitOptions } from "./internal.js";
+export { type EvmChainName, KNOWN_NETWORKS, type KnownNetwork, knownNetwork, knownNetworks } from "./networks.js";
 export {
   assertBytes32,
   commitmentOf,

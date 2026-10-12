@@ -1,5 +1,6 @@
 import { type Address, type Chain, defineChain } from "viem";
 import { tempo, tempoDevnet, tempoLocalnet, tempoModerato } from "viem/chains";
+import { knownNetwork } from "./networks.js";
 
 /** Chain id of `anvil --network tempo` (viem's `tempoLocalnet` uses 1337 for `tempo node --dev`). */
 export const ANVIL_TEMPO_CHAIN_ID = 31337;
@@ -42,13 +43,19 @@ export function tempoChain(chainId: number, rpcUrl: string, feeToken?: Address) 
 
 export type TempoChain = ReturnType<typeof tempoChain>;
 
-/** A plain EVM chain (Base, Ethereum, a local anvil, …) for `chainId`, served by `rpcUrl`. */
-export function plainEvmChain(chainId: number, rpcUrl: string, name = `EVM chain ${chainId}`): Chain {
+/**
+ * A plain EVM chain (Base, Ethereum, Arbitrum, HyperEVM, a local anvil, …) for `chainId`, served by `rpcUrl`. Known
+ * public networks (`KNOWN_NETWORKS`) get their name, gas token and explorer; anything else is an ETH chain.
+ */
+export function plainEvmChain(chainId: number, rpcUrl: string, name?: string): Chain {
+  const known = knownNetwork(chainId);
   return defineChain({
     id: chainId,
-    name,
-    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    name: name ?? known?.name ?? `EVM chain ${chainId}`,
+    nativeCurrency: known?.nativeCurrency ?? { name: "Ether", symbol: "ETH", decimals: 18 },
     rpcUrls: { default: { http: [rpcUrl] } },
+    ...(known?.explorerUrl ? { blockExplorers: { default: { name: "Explorer", url: known.explorerUrl } } } : {}),
+    testnet: known?.testnet,
   });
 }
 
