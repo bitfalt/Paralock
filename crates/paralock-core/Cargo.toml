@@ -1,0 +1,52 @@
+[package]
+name = "paralock-core"
+description = "Protocol core of Paralock: Zcash HTLC and 2-of-2 transactions (v5, ZIP 244, ZIP 317), ECDSA adaptor signatures with DLEQ proofs, EVM escrow ids and digests, and the swap wire messages. Pure, synchronous, no I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/paralock-core"
+authors.workspace = true
+readme = "README.md"
+keywords = ["zcash", "atomic-swap", "htlc", "adaptor-signature", "ecdsa"]
+categories = ["cryptography::cryptocurrencies", "cryptography", "encoding"]
+include = ["src/**/*.rs", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["std"]
+## Standard-library conveniences: the OS random number generator (`OsRng`) and k256's precomputed base-point tables.
+std = ["getrandom", "k256/std", "k256/precomputed-tables"]
+## `rand_core::OsRng` (re-exported as `paralock_core::OsRng`). Disable for targets without an OS RNG and pass your own
+## `CryptoRngCore` instead (e.g. `wasm32-unknown-unknown` without the `js` backend).
+getrandom = ["rand_core/getrandom"]
+
+[dependencies]
+k256 = { workspace = true }
+sha2 = { workspace = true }
+sha3 = { workspace = true }
+ripemd = { workspace = true }
+blake2b_simd = { workspace = true }
+bs58 = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+subtle = { workspace = true }
+rand_core = { workspace = true }
+ryu = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[[example]]
+name = "interop_export"
+required-features = ["getrandom"]
+
+[lints]
+workspace = true
