@@ -1,9 +1,11 @@
+import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, toBytes } from "./bytes.js";
 import { type Network, p2shAddress, scriptPubKeyForAddress } from "./address.js";
 import { zip317Fee } from "./fee.js";
 import { type KeyPair, assertValidPublicKey, keyScriptPubKey, signDigest } from "./keys.js";
 import {
   type HtlcParams,
+  PREIMAGE_SIZE,
   claimScriptSig,
   hash160,
   htlcRedeemScript,
@@ -14,7 +16,6 @@ import {
 } from "./script.js";
 import { SIGHASH_ALL, transparentSighash } from "./sighash.js";
 import {
-  BRANCH_ID_NU6_3,
   type PrevOut,
   SEQUENCE_ENABLE_LOCKTIME,
   SEQUENCE_FINAL,
@@ -55,8 +56,12 @@ export interface SignedTx {
 
 /** Options shared by the transaction builders. */
 export interface TxOptions {
-  /** Consensus branch id of the next block; read it from the node (`getblockchaininfo.consensus.nextblock`). */
-  branchId?: number;
+  /**
+   * Consensus branch id of the next block, required: read it from the node (`getblockchaininfo.consensus.nextblock`).
+   * Signatures commit to it, so a wrong one silently produces invalid signatures. There is no default:
+   * `BRANCH_ID_NU6_3` is only NU6.3's value (a chain running another upgrade, e.g. NU7, uses another one).
+   */
+  branchId: number;
   /**
    * Last block height the transaction may be mined in; 0 (the default) means it never expires. Paralock sets an
    * expiry only on funding transactions (tip + `FUNDING_EXPIRY_DELTA`), so a stuck funding can't confirm hours later.
@@ -65,10 +70,10 @@ export interface TxOptions {
    * 3 blocks of the tip.
    */
   expiryHeight?: number;
-  /** Override the ZIP 317 fee. */
+  /** Override the ZIP 317 fee, in zatoshi: at least 0 and less than the value spent. */
   fee?: bigint;
-  /** When set, every address is checked against this network. */
-  network?: Network;
+  /** The network the transaction is for, required: every address is checked against it. */
+  network: Network;
 }
 
 /** Outputs below this are refused (and change below it is dropped into the fee). Above every node's dust limit. */
@@ -92,6 +97,28 @@ export function assertExpiryHeight(expiryHeight: number): void {
   if (!Number.isSafeInteger(expiryHeight) || expiryHeight < 0 || expiryHeight >= 500_000_000) {
     throw new Error(`invalid expiry height ${expiryHeight}`);
   }
+}
+
+/**
+ * Throws unless the options every builder shares are well-formed: a 32-bit, non-zero `branchId`, a known `network`, an
+ * expiry height (or 0) and, if given, a non-negative `fee` (each builder also checks it is below the value spent).
+ * Both `branchId` and `network` are required: a missing branch id would sign for the wrong upgrade, and a missing
+ * network would skip the address checks.
+ */
+export function assertTxOptions(options: TxOptions): void {
+  const { branchId, network, fee } = options;
+  if (!Number.isSafeInteger(branchId) || branchId < 1 || branchId > 0xffffffff) {
+    throw new Error(`branchId must be the next block's consensus branch id (a non-zero 32-bit integer from the node), got ${branchId}`);
+  }
+  if (network !== "mainnet" && network !== "testnet" && network !== "regtest") throw new Error(`network must be mainnet, testnet or regtest, got ${String(network)}`);
+  assertExpiryHeight(options.expiryHeight ?? 0);
+  if (fee !== undefined && (typeof fee !== "bigint" || fee < 0n)) throw new Error(`fee must be a non-negative bigint, got ${String(fee)}`);
+}
+
+/** Throws unless `utxo.value` is a valid amount for an output being spent: a bigint in `(0, MAX_MONEY]`. */
+export function assertUtxoValue(utxo: Pick<Utxo, "txid" | "vout" | "value">): void {
+  if (typeof utxo.value !== "bigint") throw new TypeError(`UTXO ${utxo.txid}:${utxo.vout} value must be a bigint`);
+  if (utxo.value <= 0n || utxo.value > MAX_MONEY) throw new Error(`UTXO ${utxo.txid}:${utxo.vout} has an invalid value`);
 }
 
 // A DER signature is at most 72 bytes, plus the sighash type byte.
@@ -145,14 +172,14 @@ export function buildP2pkhSpend(args: {
   outputs: { address?: string; scriptPubKey?: Uint8Array; value: bigint }[];
   changeScriptPubKey?: Uint8Array;
 } & TxOptions): SignedTx {
+  assertTxOptions(args);
   if (args.utxos.length === 0) throw new Error("no UTXOs to spend");
   if (args.outputs.length === 0) throw new Error("no outputs");
-  assertExpiryHeight(args.expiryHeight ?? 0);
   const ownScript = keyScriptPubKey(args.key);
   const seen = new Set<string>();
   for (const u of args.utxos) {
     if (bytesToHex(toBytes(u.scriptPubKey)) !== bytesToHex(ownScript)) throw new Error(`UTXO ${u.txid}:${u.vout} is not owned by this key`);
-    if (u.value <= 0n || u.value > MAX_MONEY) throw new Error(`UTXO ${u.txid}:${u.vout} has an invalid value`);
+    assertUtxoValue(u);
     const outpoint = `${u.txid}:${u.vout}`;
     if (seen.has(outpoint)) throw new Error(`UTXO ${outpoint} is listed twice`);
     seen.add(outpoint);
@@ -164,13 +191,14 @@ export function buildP2pkhSpend(args: {
   });
   const placeholderScriptSig = concatBytes(pushData(PLACEHOLDER_SIG), pushData(args.key.publicKey));
   const base: TransparentTx = {
-    branchId: args.branchId ?? BRANCH_ID_NU6_3,
+    branchId: args.branchId,
     lockTime: 0,
     expiryHeight: args.expiryHeight ?? 0,
     inputs: args.utxos.map((u) => ({ prevTxid: u.txid, vout: u.vout, scriptSig: placeholderScriptSig, sequence: SEQUENCE_FINAL })),
     outputs,
   };
   const total = args.utxos.reduce((n, u) => n + u.value, 0n);
+  if (args.fee !== undefined && args.fee >= total) throw new Error(`fee of ${args.fee} zat is not below the ${total} zat spent`);
   const spend = outputs.reduce((n, o) => n + o.value, 0n);
   const changeScript = args.changeScriptPubKey ?? ownScript;
   const withChange = { ...base, outputs: [...outputs, { value: 0n, scriptPubKey: changeScript }] };
@@ -199,29 +227,36 @@ function htlcSpend(
   args: { htlc: Htlc; utxo: Utxo; key: KeyPair; to: string } & TxOptions,
   mode: { lockTime: number; sequence: number; scriptSig: (sig: Uint8Array) => Uint8Array },
 ): SignedTx {
+  assertTxOptions(args);
   const utxoScript = toBytes(args.utxo.scriptPubKey);
   if (bytesToHex(utxoScript) !== bytesToHex(args.htlc.scriptPubKey)) throw new Error("UTXO does not belong to this HTLC");
-  assertExpiryHeight(args.expiryHeight ?? 0);
+  assertUtxoValue(args.utxo);
   const unsigned: TransparentTx = {
-    branchId: args.branchId ?? BRANCH_ID_NU6_3,
+    branchId: args.branchId,
     lockTime: mode.lockTime,
     expiryHeight: args.expiryHeight ?? 0,
     inputs: [{ prevTxid: args.utxo.txid, vout: args.utxo.vout, scriptSig: mode.scriptSig(PLACEHOLDER_SIG), sequence: mode.sequence }],
     outputs: [{ value: 0n, scriptPubKey: scriptPubKeyForAddress(args.to, args.network) }],
   };
   const fee = args.fee ?? zip317Fee(unsigned);
+  if (fee >= args.utxo.value) throw new Error(`fee of ${fee} zat is not below the ${args.utxo.value} zat spent`);
   const value = args.utxo.value - fee;
   if (value < DUST_LIMIT) throw new Error("HTLC amount does not cover the fee");
   const tx: TransparentTx = { ...unsigned, outputs: [{ ...unsigned.outputs[0]!, value }] };
   return finalize(tx, [{ value: args.utxo.value, scriptPubKey: utxoScript }], (_, sig) => mode.scriptSig(sig), [args.key], fee);
 }
 
-/** Claims an HTLC with the secret. `key` must match the HTLC's claim pubkey. */
+/**
+ * Claims an HTLC with the secret. `key` must match the HTLC's claim pubkey and `preimage` must be the 32-byte secret
+ * whose sha256 is the HTLC's hashlock (checked here, so a wrong secret fails before anything is signed or broadcast).
+ */
 export function buildHtlcClaim(
   args: { htlc: Htlc; utxo: Utxo; key: KeyPair; preimage: Uint8Array | string; to: string } & TxOptions,
 ): SignedTx {
   if (bytesToHex(args.key.publicKey) !== args.htlc.params.claimPubkey) throw new Error("key is not the HTLC claimer");
   const preimage = toBytes(args.preimage);
+  if (preimage.length !== PREIMAGE_SIZE) throw new Error("preimage must be 32 bytes");
+  if (bytesToHex(sha256(preimage)) !== args.htlc.params.hashlock) throw new Error("preimage does not match the HTLC hashlock");
   return htlcSpend(args, {
     lockTime: 0,
     sequence: SEQUENCE_FINAL,

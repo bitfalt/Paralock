@@ -3,6 +3,7 @@ import { adapt, adaptorKeyPair, der, preSign, preVerify } from "@paralock/adapto
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   type KeyPair,
+  type MultisigSpend,
   ZcashRpc,
   buildMultisigSpend,
   buildP2pkhSpend,
@@ -12,7 +13,9 @@ import {
   finalizeMultisigSpend,
   keyAddress,
   multisigFromRedeemScript,
+  pushData,
   randomKeyPair,
+  serializeTx,
   signMultisigSpend,
 } from "../src/index.js";
 
@@ -32,9 +35,19 @@ async function faucet(address: string, zat: bigint) {
     const res = await fetch(`${THS_URL}/api/v1/faucet/address`, { method: "POST", headers: { "content-type": "application/json" }, body });
     if (res.ok) return;
     const text = await res.text();
-    if (attempt >= 5 || !/checkpoint changed|synchronization failed/.test(text)) throw new Error(`faucet failed: ${res.status} ${text}`);
+    if (attempt >= 5 || !/checkpoint changed|synchronization failed|getblock failed/.test(text)) throw new Error(`faucet failed: ${res.status} ${text}`);
     await new Promise((r) => setTimeout(r, 1_000 * attempt));
   }
+}
+
+/**
+ * The scriptSig assembly of `finalizeMultisigSpend` without its signature checks, which can't be turned off: a spend
+ * that only consensus can reject.
+ */
+function assembleUnchecked(spend: MultisigSpend, signatures: Record<string, Uint8Array>): string {
+  const [k1, k2] = spend.multisig.pubkeys;
+  const scriptSig = concatBytes(Uint8Array.of(0), pushData(signatures[k1]!), pushData(signatures[k2]!), pushData(spend.multisig.redeemScript));
+  return bytesToHex(serializeTx({ ...spend.tx, inputs: [{ ...spend.tx.inputs[0]!, scriptSig }] }));
 }
 
 describe.skipIf(!reachable)("2-of-2 multisig with adaptor signatures on regtest", () => {
@@ -56,11 +69,12 @@ describe.skipIf(!reachable)("2-of-2 multisig with adaptor signatures on regtest"
       key: taker,
       outputs: [{ scriptPubKey: multisig.scriptPubKey, value: amount }],
       branchId,
+      network: "regtest",
     });
     const utxo = { txid: funding.txid, vout: 0, value: amount, scriptPubKey: multisig.scriptPubKey };
     // Before funding, the maker signs the taker's refund. v5 txids don't commit to signatures, so the funding txid
     // is final before broadcast and the refund can't be invalidated by malleating the funding transaction.
-    const refund = buildMultisigSpend({ multisig, utxo, to: keyAddress(taker, "regtest"), lockTime: refundHeight, branchId });
+    const refund = buildMultisigSpend({ multisig, utxo, to: keyAddress(taker, "regtest"), lockTime: refundHeight, branchId, network: "regtest" });
     const makerRefundSig = signMultisigSpend(refund, maker);
     await rpc.sendRawTransaction(funding.hex);
     await rpc.generate(1);
@@ -71,7 +85,7 @@ describe.skipIf(!reachable)("2-of-2 multisig with adaptor signatures on regtest"
     const { multisig, utxo } = await lock(100_000_000n, (await rpc.getBlockCount()) + 20);
     expect(multisigFromRedeemScript(multisig.redeemScript, "regtest").address).toBe(multisig.address);
 
-    const claim = buildMultisigSpend({ multisig, utxo, to: keyAddress(maker, "regtest"), branchId });
+    const claim = buildMultisigSpend({ multisig, utxo, to: keyAddress(maker, "regtest"), branchId, network: "regtest" });
     const adaptor = adaptorKeyPair();
     const takerPre = preSign(taker.privateKey, claim.sighash, adaptor.point);
     expect(preVerify(taker.publicKey, claim.sighash, adaptor.point, takerPre)).toBe(true);
@@ -104,7 +118,7 @@ describe.skipIf(!reachable)("2-of-2 multisig with adaptor signatures on regtest"
 
   it("rejects a claim without the adaptor secret", async () => {
     const { multisig, utxo } = await lock(20_000_000n, (await rpc.getBlockCount()) + 20);
-    const claim = buildMultisigSpend({ multisig, utxo, to: keyAddress(maker, "regtest"), branchId });
+    const claim = buildMultisigSpend({ multisig, utxo, to: keyAddress(maker, "regtest"), branchId, network: "regtest" });
     const pre = preSign(taker.privateKey, claim.sighash, adaptorKeyPair().point);
     const wrong = concatBytes(der(adapt(pre, adaptorKeyPair().secret)), Uint8Array.of(1));
     const signatures = {
@@ -112,7 +126,6 @@ describe.skipIf(!reachable)("2-of-2 multisig with adaptor signatures on regtest"
       [bytesToHex(maker.publicKey)]: signMultisigSpend(claim, maker),
     };
     expect(() => finalizeMultisigSpend(claim, signatures)).toThrow(/invalid signature/);
-    const signed = finalizeMultisigSpend(claim, signatures, { verify: false });
-    await expect(rpc.sendRawTransaction(signed.hex)).rejects.toThrow();
+    await expect(rpc.sendRawTransaction(assembleUnchecked(claim, signatures))).rejects.toThrow();
   });
 });

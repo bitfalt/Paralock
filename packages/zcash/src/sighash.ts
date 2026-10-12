@@ -23,12 +23,17 @@ export const SIGHASH_SINGLE = 0x03;
 /** Modifier: sign only this input. */
 export const SIGHASH_ANYONECANPAY = 0x80;
 
+/** The only hash types v5 transactions allow: ALL, NONE, SINGLE, each alone or with ANYONECANPAY. */
+const VALID_HASH_TYPES: readonly number[] = [0x01, 0x02, 0x03, 0x81, 0x82, 0x83];
+
 const empty = new Uint8Array();
 
 /**
  * ZIP 244 signature digest for transparent input `index` of a v5 transaction.
  * `prevouts` lists the value and scriptPubKey of every output being spent, in input order.
  * For a P2SH input, the scriptPubKey is the P2SH script (not the redeem script).
+ * `hashType` must be one of the six types v5 consensus accepts (`SIGHASH_ALL`, `SIGHASH_NONE`, `SIGHASH_SINGLE`, each
+ * optionally `| SIGHASH_ANYONECANPAY`); anything else throws. Paralock itself only signs `SIGHASH_ALL`.
  */
 export function transparentSighash(
   tx: TransparentTx,
@@ -37,13 +42,16 @@ export function transparentSighash(
   hashType: number = SIGHASH_ALL,
   shielded: ShieldedDigests = { sapling: emptySaplingDigest(), orchard: emptyOrchardDigest() },
 ): Uint8Array {
+  if (!VALID_HASH_TYPES.includes(hashType)) {
+    throw new Error(`invalid sighash type ${hashType}: v5 allows only 0x01, 0x02, 0x03, 0x81, 0x82 and 0x83`);
+  }
   if (prevouts.length !== tx.inputs.length) throw new Error("need one prevout per input");
   const input = tx.inputs[index];
   const prevout = prevouts[index];
   if (!input || !prevout) throw new Error(`no input ${index}`);
 
   const anyoneCanPay = (hashType & SIGHASH_ANYONECANPAY) !== 0;
-  const baseType = hashType & 0x1f;
+  const baseType = hashType & ~SIGHASH_ANYONECANPAY;
 
   const prevoutsSig = anyoneCanPay ? blake2b256("ZTxIdPrevoutHash", empty) : prevoutsDigest(tx);
   const amountsSig = blake2b256("ZTxTrAmountsHash", anyoneCanPay ? empty : concatBytes(...prevouts.map((p) => i64le(p.value))));

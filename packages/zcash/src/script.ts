@@ -1,3 +1,4 @@
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { ripemd160 } from "@noble/hashes/legacy.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, toBytes } from "./bytes.js";
@@ -172,7 +173,20 @@ function readScriptNum(item: number | Uint8Array): number {
   return n;
 }
 
-/** Parses and validates a Paralock HTLC redeem script. Throws if the script does not match the template exactly. */
+/** True if a 33-byte compressed key decodes to a point on secp256k1. (`keys.ts` imports this module, hence no import back.) */
+function isCurvePoint(pubkey: Uint8Array): boolean {
+  try {
+    secp256k1.Point.fromBytes(pubkey).assertValidity();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parses and validates a Paralock HTLC redeem script. Throws unless the script matches the template exactly (rebuilt
+ * from the parsed parameters and compared byte for byte) and both public keys are valid compressed secp256k1 points.
+ */
 export function parseHtlcRedeemScript(script: Uint8Array | string): {
   hashlock: string;
   claimPubkey: string;
@@ -194,6 +208,7 @@ export function parseHtlcRedeemScript(script: Uint8Array | string): {
   };
   const rebuilt = htlcRedeemScript(parsed);
   if (bytesToHex(rebuilt) !== bytesToHex(s)) throw new Error("not a Paralock HTLC script");
+  if (!isCurvePoint(bytesAt(7, 33)) || !isCurvePoint(bytesAt(12, 33))) throw new Error("not a Paralock HTLC script: a key is not a curve point");
   return parsed;
 }
 

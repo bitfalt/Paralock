@@ -70,7 +70,7 @@ OP_CHECKSIG
 |---|---|
 | HTLC | `createHtlc`, `htlcFromRedeemScript` (byte-for-byte template check), `buildHtlcFunding`, `buildHtlcClaim`, `buildHtlcRefund`, `extractPreimage`, `htlcRedeemScript`, `parseHtlcRedeemScript` |
 | 2-of-2 | `createMultisig2of2`, `multisigFromRedeemScript`, `buildMultisigSpend` (with optional `lockTime` for refunds), `signMultisigSpend`, `verifyMultisigSignature`, `finalizeMultisigSpend` (verifies both signatures first), `multisigSignaturesFromScriptSig` |
-| Spending | `buildP2pkhSpend` (spends every given UTXO, change ≥ `DUST_LIMIT` or dropped into the fee), `SignedTx`, `TxOptions` (`branchId`, `expiryHeight`, `fee`, `network`) |
+| Spending | `buildP2pkhSpend` (spends every given UTXO, change ≥ `DUST_LIMIT` or dropped into the fee), `SignedTx`, `TxOptions` (`branchId` and `network` required; `expiryHeight`, `fee`) |
 | Transactions | `serializeTx`, `parseTx`, `txid`, `transparentTxid(hex)`, `transparentSighash` (all six sighash types), `SIGHASH_*`, `BRANCH_ID_NU6_3` |
 | Fees and limits | `zip317Fee`, `MARGINAL_FEE`, `DUST_LIMIT` (1,000 zat), `MIN_CHANGE`, `MAX_MONEY`, `FUNDING_EXPIRY_DELTA` (40), `MAX_SCRIPT_ELEMENT_SIZE` (520), `MAX_STANDARD_SCRIPTSIG_SIZE` (1,650), `assertOutputValue`, `assertExpiryHeight`, `assertP2shSizes` |
 | Keys and addresses | `randomKeyPair`, `keyPairFromPrivate`, `isValidPublicKey`, `assertValidPublicKey`, `keyAddress`, `signDigest` (low-S, RFC 6979), `p2pkhAddress`, `p2shAddress`, `decodeTransparentAddress`, `isTransparentAddress(address, network?)`, `scriptPubKeyForAddress(address, network?)` |
@@ -103,9 +103,11 @@ Nodes reject transactions that expire within 3 blocks of the tip.
 ## Security notes
 
 - Public keys are checked to be valid compressed points; HTLC claim and refund keys must differ.
-- Signatures are low-S, strict DER, with RFC 6979 nonces. `finalizeMultisigSpend` verifies both signatures
-  (`{ verify: false }` exists only for tests that need consensus to reject a bad spend).
-- Pass `network` to the builders so a mainnet address can't slip into a testnet transaction (and vice versa).
+- Signatures are low-S, strict DER, with RFC 6979 nonces. `finalizeMultisigSpend` always verifies both signatures,
+  and `verifyMultisigSignature` only accepts the 2-of-2's own keys.
+- The builders require `network`, so a mainnet address can't slip into a testnet transaction (and vice versa), and
+  `branchId` (no default: read it from the node). A fee override must be at least 0 and below the value spent, and
+  `buildHtlcClaim` checks the preimage against the hashlock before signing.
 - A pre-signed spend commits to the consensus branch id; it becomes invalid if a network upgrade activates first.
   Check with `upgradeBefore`.
 - Redeem scripts and scriptSigs are checked against consensus and relay size limits.

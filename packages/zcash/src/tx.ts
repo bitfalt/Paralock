@@ -8,7 +8,10 @@ export const V5_VERSION_GROUP_ID = 0x26a7270a;
 /** The fOverwintered bit of the header. */
 export const OVERWINTERED_FLAG = 0x80000000;
 
-/** Consensus branch id for NU6.3 ("Ironwood"). Prefer reading the live value from the node. */
+/**
+ * Consensus branch id for NU6.3 ("Ironwood"), for reference only: no builder defaults to it. Pass the node's value
+ * (`getblockchaininfo.consensus.nextblock`) as `branchId`; another upgrade (e.g. NU7) has another id.
+ */
 export const BRANCH_ID_NU6_3 = 0x37a5165b;
 
 /** Final sequence: `lock_time` is ignored for this input. */
@@ -89,8 +92,26 @@ export function serializeTx(tx: TransparentTx): Uint8Array {
 }
 
 /**
- * Parses the header and transparent bundle of a v5 transaction. Shielded bundles are not decoded;
- * their raw bytes are returned in `shieldedRaw` (empty for transparent-only transactions).
+ * Parses the header and transparent bundle of a v5 transaction (ZIP 225). Shielded bundles are NOT decoded.
+ *
+ * Validated (anything else throws):
+ * - the header is exactly version 5 with `fOverwintered` set, and the version group id is v5's;
+ * - every field up to the end of the transparent bundle is present (no truncation);
+ * - every CompactSize (input and output counts, scriptSig and scriptPubKey lengths) is canonical and at most 32 bits.
+ *
+ * Not validated:
+ * - the consensus branch id, `lock_time` and `nExpiryHeight` (returned as read);
+ * - output values (any signed 64-bit value, including negative or above `MAX_MONEY`), scripts and signatures, and
+ *   whether counts or sizes respect consensus or standardness limits;
+ * - everything after the transparent bundle: it is returned unparsed in `shieldedRaw`. For a transparent-only
+ *   transaction that is exactly `00 00 00` (no Sapling spends or outputs, no Orchard actions), but here it may be any
+ *   bytes, including malformed or trailing data.
+ *
+ * So the shielded part must not drive any decision. In this package and `@paralock/sdk`, `shieldedRaw` is only read by
+ * `transparentTxid`, which requires it to be exactly `00 00 00` and otherwise reports no txid (and that only runs on a
+ * transaction Paralock built itself). `@paralock/lightwalletd` hands it to a full Sapling/Orchard parser
+ * (`shieldedDigests`, which rejects malformed or trailing data) to compute txids. Don't hash or trust `shieldedRaw`
+ * without such a parser.
  */
 export function parseTx(data: Uint8Array | string): TransparentTx & { shieldedRaw: Uint8Array } {
   const r = new Reader(toBytes(data));

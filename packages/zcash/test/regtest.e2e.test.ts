@@ -31,7 +31,7 @@ async function faucet(address: string, zat: bigint): Promise<void> {
     const res = await fetch(`${THS_URL}/api/v1/faucet/address`, { method: "POST", headers: { "content-type": "application/json" }, body });
     if (res.ok) return;
     const text = await res.text();
-    if (attempt >= 5 || !/checkpoint changed|synchronization failed/.test(text)) throw new Error(`faucet failed: ${res.status} ${text}`);
+    if (attempt >= 5 || !/checkpoint changed|synchronization failed|getblock failed/.test(text)) throw new Error(`faucet failed: ${res.status} ${text}`);
     await new Promise((r) => setTimeout(r, 1_000 * attempt));
   }
 }
@@ -70,6 +70,7 @@ describe.skipIf(!reachable)("HTLC on regtest", () => {
       utxos: await utxosOf(keyAddress(taker, "regtest")),
       key: taker,
       branchId,
+      network: "regtest",
     });
     expect(await rpc.sendRawTransaction(funding.hex)).toBe(funding.txid);
     await rpc.generate(1);
@@ -78,7 +79,7 @@ describe.skipIf(!reachable)("HTLC on regtest", () => {
     expect(locked?.value).toBe(100_000_000n);
 
     const makerAddress = keyAddress(maker, "regtest");
-    const claim = buildHtlcClaim({ htlc, utxo: locked!, key: maker, preimage: secret, to: makerAddress, branchId });
+    const claim = buildHtlcClaim({ htlc, utxo: locked!, key: maker, preimage: secret, to: makerAddress, branchId, network: "regtest" });
     expect(await rpc.sendRawTransaction(claim.hex)).toBe(claim.txid);
     await rpc.generate(1);
 
@@ -104,12 +105,13 @@ describe.skipIf(!reachable)("HTLC on regtest", () => {
       utxos: await utxosOf(keyAddress(taker, "regtest")),
       key: taker,
       branchId,
+      network: "regtest",
     });
     await rpc.sendRawTransaction(funding.hex);
     await rpc.generate(1);
     const [locked] = await utxosOf(htlc.address);
 
-    const refund = buildHtlcRefund({ htlc, utxo: locked!, key: taker, to: keyAddress(taker, "regtest"), branchId });
+    const refund = buildHtlcRefund({ htlc, utxo: locked!, key: taker, to: keyAddress(taker, "regtest"), branchId, network: "regtest" });
     await expect(rpc.sendRawTransaction(refund.hex)).rejects.toThrow();
 
     const tip = await rpc.getBlockCount();
@@ -137,6 +139,8 @@ describe.skipIf(!reachable)("HTLC on regtest", () => {
         key: taker,
         preimage: secret,
         to: keyAddress(taker, "regtest"),
+        branchId,
+        network: "regtest",
       }),
     ).toThrow("not the HTLC claimer");
   });

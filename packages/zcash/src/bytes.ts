@@ -79,16 +79,25 @@ export class Reader {
     return this.view.getBigInt64(at, true);
   }
 
-  /** A CompactSize length (up to 32 bits). */
+  /**
+   * A CompactSize length (up to 32 bits). Only the canonical (shortest) encoding is accepted, as Zcash and Bitcoin
+   * consensus require: `fd` followed by a value below `0xfd`, or `fe` followed by a value below `0x10000`, throws.
+   */
   compactSize(): number {
     const first = this.u8();
     if (first < 0xfd) return first;
     if (first === 0xfd) {
       const at = this.pos;
       this.take(2);
-      return this.view.getUint16(at, true);
+      const n = this.view.getUint16(at, true);
+      if (n < 0xfd) throw new Error(`non-canonical compactSize: ${n} encoded in 3 bytes`);
+      return n;
     }
-    if (first === 0xfe) return this.u32();
+    if (first === 0xfe) {
+      const n = this.u32();
+      if (n <= 0xffff) throw new Error(`non-canonical compactSize: ${n} encoded in 5 bytes`);
+      return n;
+    }
     throw new Error("compactSize > 32 bits not supported");
   }
 
