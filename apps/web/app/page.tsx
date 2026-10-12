@@ -116,6 +116,16 @@ const DEV_FEATURES = [
   },
 ];
 
+const LOCAL_STEPS = [
+  { command: "git clone https://github.com/bitfalt/Paralock", text: "Get the code." },
+  { command: "cd Paralock && pnpm install && pnpm build", text: "Install dependencies, then build the packages and the CLI." },
+  { command: "pnpm paralock doctor", text: "Check every prerequisite. Anything missing comes with its install command." },
+  {
+    command: "pnpm paralock dev --web --evm all",
+    text: "Start a Zcash regtest, all six EVM chains, the contracts, a maker and this app at localhost:3000.",
+  },
+];
+
 const DEV_LINKS = [
   { label: "Read the docs", href: "/docs" },
   { label: "Quickstart", href: "/docs/quickstart" },
@@ -480,12 +490,23 @@ export default function Landing() {
                   ))}
                 </ul>
                 <div className="dev__cli">
-                  <h3>The whole stack, locally</h3>
-                  <CopyCommand command="pnpm paralock dev" />
-                  <p>
-                    Starts a Zcash regtest, EVM chains and a maker in one command; add <code>--web</code> for this app.{" "}
-                    <code>pnpm paralock doctor</code> checks Docker, Foundry and the rest first.
+                  <h3>Run the whole stack locally</h3>
+                  <p className="dev__cli-lede">
+                    <code>pnpm paralock</code> is the CLI inside the repo, so there&apos;s nothing to install globally. You
+                    need Node 20+, pnpm, Docker or OrbStack, Foundry 1.8+ and{" "}
+                    <a className="textlink" href="https://github.com/zcashlabs/thus-spoke-zakura" target="_blank" rel="noreferrer">
+                      ths
+                    </a>{" "}
+                    (a one-command Zcash regtest).
                   </p>
+                  <ol className="dev__steps">
+                    {LOCAL_STEPS.map((step) => (
+                      <li key={step.command}>
+                        <p>{step.text}</p>
+                        <CopyCommand command={step.command} />
+                      </li>
+                    ))}
+                  </ol>
                 </div>
               </div>
               <CodeSample file="pay.ts" code={SNIPPET} />

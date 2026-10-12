@@ -958,6 +958,30 @@
   white-space: nowrap;
 }
 
+.dev__cli-lede {
+  margin-bottom: 16px;
+}
+
+.dev__steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  counter-reset: step;
+}
+
+.dev__steps li {
+  counter-increment: step;
+}
+
+.dev__steps p {
+  margin: 0 0 8px;
+}
+
+.dev__steps p::before {
+  content: counter(step) ". ";
+  color: var(--fg-3);
+}
+
 .devfeat {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
