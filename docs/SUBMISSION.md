@@ -104,7 +104,7 @@ disappears: the ZEC simply comes back after the timeout.
 spread on every swap, and start with a "pay in dollars" button for Zcash wallets. The protocol is open, so more
 makers, and peer-to-peer offers, can join.
 
-**[2:40, close]** I'm Daniel. I build backend infrastructure for zero-knowledge systems. Paralock: keep your savings
+**[2:40, close]** I'm bitfalt. I build backend infrastructure for zero-knowledge systems. Paralock: keep your savings
 private, spend them in dollars, and trust no one in between. Thank you.
 
 ## Demo video script (~2:30)
