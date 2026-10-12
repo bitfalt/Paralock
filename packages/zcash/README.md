@@ -122,4 +122,4 @@ pnpm --filter @paralock/zcash test   # vectors and unit tests; the regtest suite
 
 ## Status
 
-0.2.0. Experimental and not audited. Transparent only: the locks are visible on-chain.
+0.3.0: transaction builders require `branchId` and `network`, and parsing is strict. Experimental and not audited. Transparent only: the locks are visible on-chain.

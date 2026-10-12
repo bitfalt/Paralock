@@ -18,7 +18,7 @@ Both contracts store one slot per swap, pay only the recipient fixed at lock tim
 npm install @paralock/evm viem
 ```
 
-This page describes version 0.3.0 (the release before it is 0.2.0). In 0.3.0: `approveAndLock`, `outcome`, `now`, `blockNumber`, `maxLockSeconds`, the chain-id check, pinned lock lookups, verified read-backs, coordinated sends and `deployParalockContracts` with the embedded artifacts. Its only dependency is `viem`. Amounts are `bigint` token base units (the supported stablecoins have 6 decimals: 25 USDC = `25_000_000n`). Expiries are Unix seconds.
+This page describes version 0.3.0. New in 0.3.0: `approveAndLock`, `outcome`, `now`, `blockNumber`, `maxLockSeconds`, the chain-id check, pinned lock lookups, verified read-backs, coordinated sends and `deployParalockContracts` with the embedded artifacts. Its only dependency is `viem`. Amounts are `bigint` token base units (the supported stablecoins have 6 decimals: 25 USDC = `25_000_000n`). Expiries are Unix seconds.
 
 ## createEvmHtlc
 

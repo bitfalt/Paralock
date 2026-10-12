@@ -107,7 +107,7 @@ The SDK is a public good under the MIT license. The business model is running th
 | Web app | Pay with payment links, and Swap, at `/app` | | Shipped |
 | Agent docs | A skill, `llms.txt`, Markdown pages and an MCP server | | Shipped |
 
-The TypeScript versions are the repository's: this site describes 0.3.0, the release that follows 0.2.0 on npm, and features it marks "in 0.3.0" need it. `npx paralock` arrives with 0.3.0, the CLI's first npm release. The npm packages are ESM-only and need Node.js 20 or newer; `@paralock/zcash`, `@paralock/adaptor` and `@paralock/evm` also run in browsers. The Rust crates are published on crates.io at 0.1.0.
+The npm packages are at 0.3.0, the CLI's first npm release, and features this site marks "in 0.3.0" need it. They are ESM-only and need Node.js 20 or newer; `@paralock/zcash`, `@paralock/adaptor` and `@paralock/evm` also run in browsers. The Rust crates are published on crates.io at 0.1.0.
 
 ```sh
 npm install @paralock/sdk     # also installs @paralock/zcash, /evm and /adaptor

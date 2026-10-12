@@ -15,7 +15,7 @@ The SDK wires a Zcash backend, the EVM escrow clients and a durable store. It pe
 npm install @paralock/sdk
 ```
 
-This page describes version 0.3.0 (the release before it is 0.2.0). In 0.3.0 the maker accepts and reserves before the taker broadcasts its htlc funding (`fundingExpiryHeight`, the `reserved` stage), the maker's public swap view no longer carries adaptor data, and the devnet helpers find the CLI's state directory outside a checkout. A 0.3.0 maker refuses private-mode proposals from older takers, which can still swap in htlc mode.
+This page describes version 0.3.0. New in 0.3.0 the maker accepts and reserves before the taker broadcasts its htlc funding (`fundingExpiryHeight`, the `reserved` stage), the maker's public swap view no longer carries adaptor data, and the devnet helpers find the CLI's state directory outside a checkout. A 0.3.0 maker refuses private-mode proposals from older takers, which can still swap in htlc mode.
 
 Node.js 20 or newer (the SDK uses `node:crypto` and `node:fs`, so it does not run in a browser). It depends on [`@paralock/zcash`](/docs/zcash), [`@paralock/adaptor`](/docs/adaptor), [`@paralock/evm`](/docs/evm) and `viem`.
 

@@ -8,8 +8,7 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 ::: milestones legend
 
 - **Shipped:** usable today, on the devnet or public testnets
-- **In progress:** being built now, in the repository
-- **Next:** planned; starts after what is in progress
+- **Next:** planned, in rough order
 - **In research:** open questions remain before it can be built
 
 :::
@@ -36,9 +35,9 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 
   Why: real block times and public infrastructure find bugs a local devnet can't.
 
-- **The hardened protocol, in 0.3.0.** The maker accepts and reserves before any ZEC moves (`fundingExpiryHeight`), its public swap view carries no adaptor data, and `@paralock/zcash` parses strictly and needs an explicit branch id and network.
+- **The hardened protocol, in 0.3.0 on npm.** [`@paralock/sdk`](https://www.npmjs.com/package/@paralock/sdk) and its packages, and the [`paralock` CLI](https://www.npmjs.com/package/paralock)'s first npm release (`npx paralock`). The maker accepts and reserves before any ZEC moves (`fundingExpiryHeight`), its public swap view carries no adaptor data, and `@paralock/zcash` parses strictly and needs an explicit branch id and network.
 
-  Why: they close the bug from run 1 and other gaps found while hardening the code.
+  Why: they close the bug from run 1, and port the failure-handling fixes from the Rust reviews to TypeScript.
 
 - **The protocol spec and test vectors.** [`spec/PROTOCOL.md`](https://github.com/bitfalt/Paralock/blob/main/spec/PROTOCOL.md) (protocol v1.1) with cross-language vectors in [`spec/vectors`](https://github.com/bitfalt/Paralock/tree/main/spec/vectors).
 
@@ -63,16 +62,6 @@ This is Paralock's official roadmap. Every shipped item links to something you c
 - **The `paralock` binary.** [`paralock-cli`](https://crates.io/crates/paralock-cli) 0.1.0: quote, swap, pay, recovery and a maker from one executable configured by `paralock.toml`, prebuilt for macOS and Linux (`curl -fsSL https://paralock.xyz/install | sh`). See [Rust CLI](/docs/rust-cli).
 
   Why: a maker runs as a single executable, without a Node.js runtime.
-
-:::
-
-## In progress
-
-::: milestones in-progress
-
-- **Publish 0.3.0 to npm.** The hardened protocol, the TypeScript fixes from the Rust reviews and the `paralock` CLI's first npm release are in the repository; npm still serves 0.2.0, so `npx paralock` needs this release.
-
-  Why: everything this site describes for TypeScript reaches people who install from npm.
 
 :::
 

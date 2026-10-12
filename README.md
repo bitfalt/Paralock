@@ -222,7 +222,7 @@ Two command-line tools share the name `paralock`:
 
 | | npm `paralock` | Rust `paralock` (crate `paralock-cli`) |
 |---|---|---|
-| Install | `npx paralock` (first npm release with 0.3.0) | `curl -fsSL https://paralock.xyz/install \| sh` or `cargo install paralock-cli` |
+| Install | `npx paralock` (Node.js 20+) | `curl -fsSL https://paralock.xyz/install \| sh` or `cargo install paralock-cli` |
 | For | The local devnet: Zcash regtest, EVM chains, contracts and a maker, plus swaps and payments on it | A standalone taker and maker for any network you configure, with no Node process |
 | Commands | `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund` | `doctor`, `quote`, `swap`, `pay`, `swaps`, `resume`, `refund`, `maker`, `version` |
 
@@ -251,7 +251,7 @@ You need Node.js 20+, Docker or OrbStack, [Foundry](https://getfoundry.sh)'s `an
 [`ths`](https://github.com/zcashlabs/thus-spoke-zakura) (a one-command Zcash regtest). pnpm too, in a clone.
 
 ```sh
-# No clone (with the 0.3.0 npm release)
+# No clone
 npx paralock doctor        # checks every prerequisite and prints a fix for each
 npx paralock dev           # Tempo, Base and Ethereum; --evm all adds Arbitrum, Robinhood Chain and HyperEVM
 
@@ -280,7 +280,7 @@ Step by step, with what's running where: [Quickstart](https://paralock.xyz/docs/
 | [![@paralock/adaptor](https://img.shields.io/npm/v/@paralock/adaptor?label=%40paralock%2Fadaptor)](https://www.npmjs.com/package/@paralock/adaptor) | ECDSA adaptor signatures on secp256k1 with DLEQ proofs | Node, browsers |
 | [![@paralock/evm](https://img.shields.io/npm/v/@paralock/evm?label=%40paralock%2Fevm)](https://www.npmjs.com/package/@paralock/evm) | viem clients for both escrows and a verified network registry | Node, browsers |
 | [![@paralock/lightwalletd](https://img.shields.io/npm/v/@paralock/lightwalletd?label=%40paralock%2Flightwalletd)](https://www.npmjs.com/package/@paralock/lightwalletd) | A Zcash backend over a lightwalletd or Zaino server, so you don't run a full node | Node |
-| [![paralock](https://img.shields.io/npm/v/paralock?label=paralock)](https://www.npmjs.com/package/paralock) | The npm CLI: local devnet, maker, swaps and payments (first release with 0.3.0) | Node |
+| [![paralock](https://img.shields.io/npm/v/paralock?label=paralock)](https://www.npmjs.com/package/paralock) | The npm CLI: local devnet, maker, swaps and payments | Node |
 
 **crates.io** (Rust)
 

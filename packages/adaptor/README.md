@@ -57,4 +57,4 @@ extract(pre, sig, point);                            // the maker recovers `secr
 
 ## Status
 
-0.1.1 (no API change from 0.1.0: hedged nonces and stricter checks). Experimental and not audited.
+0.1.2 (no API change since 0.1.0: hedged nonces and stricter checks). Experimental and not audited.

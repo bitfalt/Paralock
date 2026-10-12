@@ -5,7 +5,7 @@ description: Run a complete ZEC-to-stablecoin swap on a local devnet, then drive
 
 This page takes you from nothing to a completed swap on your machine. The local devnet runs a Zcash regtest chain, three EVM chains by default (six with `--evm all`), both escrow contracts and a maker, so nothing touches a public network and no real funds are involved.
 
-> **Note:** `npx paralock` runs the [CLI](/docs/cli) from npm with no clone of the repository, and needs 0.3.0, the CLI's first npm release. Before that release is on npm, or to work on the code, use a checkout: run `pnpm install && pnpm build` and use `pnpm paralock` instead, the same commands run from the workspace build. The web app and the examples need a checkout.
+> **Note:** `npx paralock` runs the [CLI](/docs/cli) from npm with no clone of the repository. To work on the code, use a checkout instead: run `pnpm install && pnpm build` and use `pnpm paralock` instead, the same commands run from the workspace build. The web app and the examples need a checkout.
 
 ## Prerequisites
 

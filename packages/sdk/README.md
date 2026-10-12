@@ -205,7 +205,7 @@ valid until mined.
 
 ## Status
 
-0.2.0. Experimental and not audited. In htlc mode the Zcash leg is a transparent HTLC and the same hashlock appears on
+0.3.0 (protocol v1.1: the maker accepts and reserves before any ZEC moves). Experimental and not audited. In htlc mode the Zcash leg is a transparent HTLC and the same hashlock appears on
 both chains; private mode removes the shared value but the Zcash leg is still a transparent 2-of-2. See the
 [repository README](https://github.com/bitfalt/Paralock#readme) and
 [docs/PRIVACY.md](https://github.com/bitfalt/Paralock/blob/main/docs/PRIVACY.md).

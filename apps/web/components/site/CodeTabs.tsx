@@ -4,10 +4,10 @@ import { type CodeLang, CodeSample } from "./CodeSample";
 import { CopyButton } from "./CopyButton";
 
 /*
- * Four ways in: TypeScript, the CLI, the Rust core and the MCP server. The tabs are radio inputs styled with :has(),
+ * Four ways in: TypeScript, the CLI, the Rust SDK and the MCP server. The tabs are radio inputs styled with :has(),
  * so switching works without JavaScript; the copy buttons are the only client code.
- * Every snippet is checked against the code: the TypeScript against @paralock/sdk 0.2.0 on npm and the current
- * source, the CLI against packages/cli/src/main.ts, and the Rust program compiles against crates/paralock-core.
+ * Every snippet is checked against the code: the TypeScript against @paralock/sdk 0.3.0, the CLI against
+ * packages/cli/src/main.ts, and the Rust program compiles against the paralock crate 0.1.0 from crates.io.
  */
 
 
@@ -154,8 +154,8 @@ const TABS: Tab[] = [
     links: [{ label: "CLI reference", href: "/docs/cli" }],
     note: (
       <>
-        <code>npx paralock</code> ships with the next npm release (0.3.0). Until then, run the same commands from a
-        checkout: <code>pnpm install &amp;&amp; pnpm build</code>, then <code>pnpm paralock dev</code>.
+        No clone needed. To work on the code, run the same commands from a checkout:{" "}
+        <code>pnpm install &amp;&amp; pnpm build</code>, then <code>pnpm paralock dev</code>.
       </>
     ),
   },

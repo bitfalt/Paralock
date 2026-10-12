@@ -15,7 +15,7 @@ It is browser-safe: no Node built-ins. Its only dependencies are `@noble/hashes`
 npm install @paralock/zcash
 ```
 
-This page describes version 0.3.0 (the release before it is 0.2.0). In 0.3.0 the transaction builders require `branchId` and `network` (no default branch id), and parsing is strict: canonical CompactSize, only the six v5 sighash types, curve-checked HTLC keys, and a preimage check in `buildHtlcClaim` before it signs.
+This page describes version 0.3.0. New in 0.3.0 the transaction builders require `branchId` and `network` (no default branch id), and parsing is strict: canonical CompactSize, only the six v5 sighash types, curve-checked HTLC keys, and a preimage check in `buildHtlcClaim` before it signs.
 
 Conventions:
 

@@ -3,7 +3,7 @@ title: "CLI"
 description: "Reference for the paralock CLI: the local devnet, the devnet maker, swaps and payments from the terminal, recovery commands, and the files it writes."
 ---
 
-The `paralock` CLI on npm runs the whole Paralock stack on your machine: a Zcash regtest network, one local EVM chain per supported chain, the contracts, a maker, and swaps and payments from the terminal. It runs with `npx paralock`, with no clone of the repository, from version 0.3.0, its first npm release; before that release is on npm, run it from a checkout (see [Setup](#setup)).
+The `paralock` CLI on npm runs the whole Paralock stack on your machine: a Zcash regtest network, one local EVM chain per supported chain, the contracts, a maker, and swaps and payments from the terminal. It runs with `npx paralock`, with no clone of the repository (version 0.3.0 is its first npm release); to work on the code, run it from a checkout (see [Setup](#setup)).
 
 ## npm CLI or Rust binary
 
@@ -12,7 +12,7 @@ Paralock has two command-line tools, both named `paralock`. They speak the same 
 | | npm CLI (this page) | [Rust binary](/docs/rust-cli) |
 |---|---|---|
 | Package | `paralock` on npm, built on `@paralock/sdk` | `paralock-cli` on crates.io, built on the `paralock` crate |
-| Install | `npx paralock` (Node.js 20+), from 0.3.0 | `curl -fsSL https://paralock.xyz/install \| sh`, or `cargo install paralock-cli` |
+| Install | `npx paralock` (Node.js 20+) | `curl -fsSL https://paralock.xyz/install \| sh`, or `cargo install paralock-cli` |
 | Networks | The local devnet only: devnet keys, devnet maker | Any network, from a `paralock.toml`, or the devnet with `--devnet` |
 | Devnet | Starts and stops it: `dev`, `devnet up`, `devnet status`, `devnet down` | Uses the one this CLI started |
 | Commands | `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund` | `doctor`, `quote`, `swap`, `pay`, `swaps`, `resume`, `refund`, `maker`, `version`; `--json` and exit codes for scripts |

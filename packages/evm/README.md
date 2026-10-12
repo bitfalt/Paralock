@@ -87,6 +87,6 @@ The contracts live in [`contracts/`](https://github.com/bitfalt/Paralock/tree/ma
 
 ## Status
 
-0.3.0 (not yet on npm; 0.2.0 is the latest published) adds `approveAndLock`, `outcome`, `now`, `blockNumber`, the
+0.3.0 adds `approveAndLock`, `outcome`, `now`, `blockNumber`, the
 `maxLockSeconds` bound, the cached chain-id check, pinned newest-first lock lookups, verified preimages and claim
 signatures, and process-wide nonce and approval coordination. Experimental and not audited.

@@ -35,7 +35,7 @@ paralock --help
 
 ## Try it on the local devnet
 
-`--devnet` reads `devnet.json` from the same state directory as the npm CLI: `<checkout>/.paralock` inside a Paralock checkout, else `$PARALOCK_HOME`, else `~/.paralock`. Starting and stopping the devnet stays in the npm CLI (`npx paralock dev` needs version 0.3.0; from a checkout, `pnpm paralock dev` works today).
+`--devnet` reads `devnet.json` from the same state directory as the npm CLI: `<checkout>/.paralock` inside a Paralock checkout, else `$PARALOCK_HOME`, else `~/.paralock`. Starting and stopping the devnet stays in the npm CLI (`npx paralock dev`, or `pnpm paralock dev` from a checkout).
 
 ```sh
 npx paralock dev                                            # Zcash regtest, anvils, contracts and the TypeScript maker
