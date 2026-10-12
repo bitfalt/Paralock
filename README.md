@@ -234,13 +234,34 @@ To publish a new version:
 2. Run `pnpm check:deps && pnpm build`.
 3. Run `pnpm --filter <package> publish --access public` in an interactive terminal; npm asks for 2FA.
 
+## Testnet deployments
+
+Both escrows are deployed on six public testnets. Addresses, quote tokens and start blocks are in
+[`contracts/deployments/<chainId>.json`](contracts/deployments).
+
+| Network | Chain id | `ParalockHTLC` | `ParalockAdaptorEscrow` | Quote token |
+|---|---|---|---|---|
+| Tempo Moderato | 42431 | [`0xD9B2…0513`](https://explore.testnet.tempo.xyz/address/0xD9B278625B5946B8CD15dad6c0c776095B8D0513) | [`0xd2f3…2673`](https://explore.testnet.tempo.xyz/address/0xd2f352Fa313d23b3536dAA3d783263C03CED2673) | OUSD `0x20c0…74BE` |
+| Base Sepolia | 84532 | [`0xD9B2…0513`](https://sepolia.basescan.org/address/0xD9B278625B5946B8CD15dad6c0c776095B8D0513) | [`0xd2f3…2673`](https://sepolia.basescan.org/address/0xd2f352Fa313d23b3536dAA3d783263C03CED2673) | Circle USDC |
+| Sepolia | 11155111 | [`0x9a6f…B1a1`](https://sepolia.etherscan.io/address/0x9a6f3F47423f590afd1Df06E2729057b10baB1a1) | [`0xf44b…55B7`](https://sepolia.etherscan.io/address/0xf44bc4Cc4B4b6b94E4142Bb403cCeEa82AFd55B7) | Circle USDC |
+| Arbitrum Sepolia | 421614 | [`0xD9B2…0513`](https://sepolia.arbiscan.io/address/0xD9B278625B5946B8CD15dad6c0c776095B8D0513) | [`0xd2f3…2673`](https://sepolia.arbiscan.io/address/0xd2f352Fa313d23b3536dAA3d783263C03CED2673) | Circle USDC |
+| Robinhood Chain Testnet | 46630 | [`0x9a6f…B1a1`](https://explorer.testnet.chain.robinhood.com/address/0x9a6f3F47423f590afd1Df06E2729057b10baB1a1) | [`0xf44b…55B7`](https://explorer.testnet.chain.robinhood.com/address/0xf44bc4Cc4B4b6b94E4142Bb403cCeEa82AFd55B7) | MockUSD test token `0xD9B2…0513`* |
+| HyperEVM Testnet | 998 | `0xD9B278625B5946B8CD15dad6c0c776095B8D0513` | `0xd2f352Fa313d23b3536dAA3d783263C03CED2673` | Circle USDC |
+
+\* Robinhood Chain Testnet has no USDC, so a 6-decimal `MockUSD` test token stands in. Only the deployer can mint
+it.
+
+The HyperEVM docs name no official testnet explorer, so that row has no links. Testnet USDC comes from
+[faucet.circle.com](https://faucet.circle.com).
+
+These contracts are experimental and not audited. The Zcash side runs on Zcash testnet (TAZ).
+
 ## Roadmap
 
-- **Networks:** Zcash testnet and Tempo Moderato, then mainnet with real OUSD.
+- **Networks:** Zcash testnet end to end with a hosted maker, then mainnet with real OUSD.
 - **More routes:** USD → ZEC, and refunds straight to a shielded address.
 - **Solana:** an HTLC program with the same sha256 hashlock. Private mode works there too, because Solana programs
   can check secp256k1 signatures (`secp256k1_recover`), so no cross-curve proofs are needed.
-- **Testnets:** deploy the escrows to the public testnets in `@paralock/evm`'s verified network registry.
 - **Maker network:** a request-for-quote network where many makers compete; Paralock earns a small routing fee.
   P2P offers on top.
 - **Privacy level 3:** a fully shielded Zcash leg (FROST 2-of-2 plus Schnorr adaptor signatures).
