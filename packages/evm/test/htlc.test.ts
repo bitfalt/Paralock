@@ -115,6 +115,32 @@ describe.skipIf(!rpcUrl)("ParalockHTLC on a local Tempo chain", () => {
     console.info(`[gas] refund ${refundTx.gasUsed}`);
   });
 
+  it("reports a claim's hash before its receipt, and transactionStatus follows it from pending to mined", async () => {
+    const { swap, preimage } = await newSwap(3600n);
+    await maker.approveIfNeeded(TOKEN, swap.amount);
+    await maker.lock(swap);
+    let sent: Hex | undefined;
+    await testClient.setAutomine(false);
+    try {
+      // Nothing is mined: the receipt wait times out after the hash was reported.
+      await expect(taker.claim(swap, preimage, { onSent: (hash) => void (sent = hash), receiptTimeoutMs: 1_000 })).rejects.toThrow(/Timed out/i);
+      expect(sent).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(await taker.transactionStatus(sent!)).toBe("pending");
+      await testClient.mine({ blocks: 1 });
+    } finally {
+      await testClient.setAutomine(true);
+    }
+    expect(await taker.transactionStatus(sent!)).toBe("success");
+    expect((await taker.outcome(swap.hashlock)).status).toBe("claimed");
+    expect(await taker.transactionStatus(`0x${"ab".repeat(32)}`)).toBe("unknown");
+    // A nonsensical timeout is refused before anything is sent.
+    const other = await newSwap(3600n);
+    await maker.approveIfNeeded(TOKEN, other.swap.amount);
+    await maker.lock(other.swap);
+    await expect(taker.claim(other.swap, other.preimage, { receiptTimeoutMs: 0 })).rejects.toThrow(/receiptTimeoutMs/);
+    expect((await taker.getState(other.swap.hashlock)).status).toBe("active");
+  });
+
   it("rejects bad claims before sending a transaction", async () => {
     const { swap, preimage } = await newSwap(3600n);
     await maker.approveIfNeeded(TOKEN, swap.amount);

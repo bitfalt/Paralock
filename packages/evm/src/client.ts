@@ -32,8 +32,10 @@ import {
   InvalidResponseError,
   type LockReceipt,
   type ScannedLog,
+  type SendOptions,
   SettlementNotIndexedError,
   SwapRefundedError,
+  type TransactionStatus,
   type TxResult,
   type WaitOptions,
 } from "./internal.js";
@@ -127,8 +129,11 @@ export interface EvmHtlc {
    * other's exact approvals. A refused lock leaves no approval behind.
    */
   approveAndLock(swap: HtlcSwap): Promise<LockReceipt>;
-  /** Pay `swap.recipient` by revealing the 32-byte preimage. Any account may submit it. */
-  claim(swap: HtlcSwap, preimage: Hex): Promise<TxResult>;
+  /**
+   * Pay `swap.recipient` by revealing the 32-byte preimage. Any account may submit it. `options.onSent` gets the hash
+   * before the receipt wait; `options.receiptTimeoutMs` bounds that wait for this claim.
+   */
+  claim(swap: HtlcSwap, preimage: Hex, options?: SendOptions): Promise<TxResult>;
   /** Return funds to `swap.sender` once `swap.expiry` has passed. Any account may submit it. */
   refund(swap: HtlcSwap): Promise<TxResult>;
 
@@ -136,6 +141,8 @@ export interface EvmHtlc {
   now(): Promise<bigint>;
   /** The latest block number. */
   blockNumber(): Promise<bigint>;
+  /** Where a transaction stands: pending, success, reverted, or unknown to the node (e.g. dropped). */
+  transactionStatus(hash: Hex): Promise<TransactionStatus>;
   /** On-chain state of a hashlock: empty, active (locked) or settled (claimed or refunded). */
   getState(hashlock: Hex): Promise<HtlcState>;
   /** The swap locked under `hashlock`, rebuilt from its `Locked` event, or undefined if none was ever locked. */
@@ -291,7 +298,7 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
       });
     },
 
-    async claim(swap, preimage) {
+    async claim(swap, preimage, options) {
       if (hashlockOf(preimage) !== swap.hashlock.toLowerCase()) {
         throw new Error(`preimage does not hash to ${swap.hashlock}`);
       }
@@ -303,7 +310,7 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
         functionName: "claim",
         args: [swap, preimage],
       });
-      return kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })));
+      return kit.sendAndConfirm((nonce) => w.writeContract({ ...request, nonce }), options);
     },
 
     async refund(swap) {
@@ -317,6 +324,8 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
       });
       return kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })));
     },
+
+    transactionStatus: kit.transactionStatus,
 
     async getState(hashlock) {
       assertBytes32(hashlock, "hashlock");

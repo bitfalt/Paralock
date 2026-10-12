@@ -136,7 +136,10 @@ describe.each(networks)("ParalockAdaptorEscrow on $name", ({ rpcUrl, chainId, to
     ).toBe(digest);
 
     const signature = await signDigest(digest, signerKey);
-    const claimTx = await relayer.claim(swap, signature);
+    let sent: Hex | undefined;
+    const claimTx = await relayer.claim(swap, signature, { onSent: (hash) => void (sent = hash) });
+    expect(sent).toBe(claimTx.hash); // reported before the receipt wait
+    expect(await maker.transactionStatus(claimTx.hash)).toBe("success");
 
     expect(await published).toEqual({ v: 27 + signature.yParity, r: signature.r, s: signature.s });
     expect(await maker.getState(id)).toEqual({ status: "settled", raw: 2 });

@@ -9,6 +9,7 @@ import {
   type PublicClient,
   RpcError,
   TransactionNotFoundError,
+  TransactionReceiptNotFoundError,
   type Transport,
   toHex,
   WaitForTransactionReceiptTimeoutError,
@@ -27,6 +28,24 @@ export interface LockReceipt<L extends TxResult = TxResult> {
   approval: TxResult | undefined;
   lock: L;
 }
+
+/** Options of a transaction that pays out of escrow (`claim`). */
+export interface SendOptions {
+  /**
+   * Called with the hash once the node accepted the transaction, before waiting for its receipt (e.g. to persist it,
+   * so a restart can look it up instead of sending another). If it throws, the call rejects with that error; the
+   * transaction is already out.
+   */
+  onSent?: (hash: Hex) => void | Promise<void>;
+  /** Overrides the client's `receiptTimeoutMs` for this transaction. */
+  receiptTimeoutMs?: number;
+}
+
+/**
+ * Where a transaction stands: `pending` (the node knows it, not mined), `success` or `reverted` (mined), `unknown` (the
+ * node doesn't have it: never received, or dropped).
+ */
+export type TransactionStatus = "pending" | "success" | "reverted" | "unknown";
 
 /** Options of the `waitFor…` helpers. */
 export interface WaitOptions {
@@ -365,10 +384,10 @@ export function clientKit(options: {
     });
   }
 
-  async function confirm(hash: Hex): Promise<TxResult> {
+  async function confirm(hash: Hex, timeoutMs = receiptTimeoutMs): Promise<TxResult> {
     let receipt;
     try {
-      receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: receiptTimeoutMs });
+      receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: timeoutMs });
     } catch (err) {
       if (err instanceof WaitForTransactionReceiptTimeoutError && walletClient) {
         // The transaction may be stuck or dropped: recompute the next nonce from the node.
@@ -382,6 +401,29 @@ export function clientKit(options: {
     }
     if (receipt.status !== "success") throw new TransactionRevertedError(hash);
     return { hash, blockNumber: receipt.blockNumber, gasUsed: receipt.gasUsed };
+  }
+
+  /** Sends a payout (`claim`) with `SendOptions`: `onSent` gets the hash before the receipt wait. */
+  async function sendAndConfirm(write: (nonce: number | undefined) => Promise<Hex>, options: SendOptions = {}): Promise<TxResult> {
+    if (options.receiptTimeoutMs !== undefined && !(options.receiptTimeoutMs > 0)) {
+      throw new RangeError(`receiptTimeoutMs must be positive, got ${options.receiptTimeoutMs}`);
+    }
+    const hash = await send(write);
+    await options.onSent?.(hash);
+    return confirm(hash, options.receiptTimeoutMs);
+  }
+
+  /** Where `hash` stands (see `TransactionStatus`), after the chain-id check. */
+  async function transactionStatus(hash: Hex): Promise<TransactionStatus> {
+    assertBytes32(hash, "transaction hash");
+    await verifyChainId();
+    try {
+      const receipt = await publicClient.getTransactionReceipt({ hash });
+      return receipt.status === "success" ? "success" : "reverted";
+    } catch (err) {
+      if (!(err instanceof TransactionReceiptNotFoundError)) throw err;
+    }
+    return (await transactionKnown(hash)) ? "pending" : "unknown";
   }
 
   /** One `eth_getLogs` request for `events` with `topics[1] == key` on the contract; every log is checked against it. */
@@ -527,6 +569,8 @@ export function clientKit(options: {
     now,
     send,
     confirm,
+    sendAndConfirm,
+    transactionStatus,
     scanLogs,
     poll,
     checkNewLock,

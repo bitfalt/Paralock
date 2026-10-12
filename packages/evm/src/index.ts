@@ -80,9 +80,11 @@ export {
   InvalidLockError,
   InvalidResponseError,
   type LockReceipt,
+  type SendOptions,
   SettlementNotIndexedError,
   SwapRefundedError,
   TransactionRevertedError,
+  type TransactionStatus,
   type TxResult,
   type WaitOptions,
 } from "./internal.js";

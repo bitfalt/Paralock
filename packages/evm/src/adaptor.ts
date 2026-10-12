@@ -18,8 +18,10 @@ import {
   InvalidResponseError,
   type LockReceipt,
   type ScannedLog,
+  type SendOptions,
   SettlementNotIndexedError,
   SwapRefundedError,
+  type TransactionStatus,
   type TxResult,
   type WaitOptions,
 } from "./internal.js";
@@ -177,8 +179,9 @@ export interface AdaptorEscrow extends EvmClients {
   /**
    * Pay `swap.recipient` with `swap.signer`'s signature over `claimDigest(id)`. Any account may submit it. The
    * signature is normalized (`normalizeClaimSignature`) and checked against `swap.signer` before sending.
+   * `options.onSent` gets the hash before the receipt wait; `options.receiptTimeoutMs` bounds that wait.
    */
-  claim(swap: AdaptorSwap, signature: ClaimSignatureInput): Promise<TxResult>;
+  claim(swap: AdaptorSwap, signature: ClaimSignatureInput, options?: SendOptions): Promise<TxResult>;
   /** Return funds to `swap.sender` once `swap.expiry` has passed. Any account may submit it. */
   refund(swap: AdaptorSwap): Promise<TxResult>;
 
@@ -190,6 +193,8 @@ export interface AdaptorEscrow extends EvmClients {
   now(): Promise<bigint>;
   /** The latest block number. */
   blockNumber(): Promise<bigint>;
+  /** Where a transaction stands: pending, success, reverted, or unknown to the node (e.g. dropped). */
+  transactionStatus(hash: Hex): Promise<TransactionStatus>;
   /** On-chain state of a swap id. */
   getState(id: Hex): Promise<AdaptorState>;
   /** The swap locked under `id`, rebuilt from its `Locked` event, or undefined if none was ever locked. */
@@ -291,7 +296,7 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
       });
     },
 
-    async claim(swap, signature) {
+    async claim(swap, signature, options) {
       const sig = normalizeClaimSignature(signature);
       const id = adaptorSwapId(swap);
       const recovered = await recoverAddress({ hash: client.claimDigest(id), signature: { r: sig.r, s: sig.s, v: BigInt(sig.v) } });
@@ -306,8 +311,10 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
         functionName: "claim",
         args: [swap, sig.v, sig.r, sig.s],
       });
-      return kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })));
+      return kit.sendAndConfirm((nonce) => w.writeContract({ ...request, nonce }), options);
     },
+
+    transactionStatus: kit.transactionStatus,
 
     async refund(swap) {
       const w = kit.wallet();
