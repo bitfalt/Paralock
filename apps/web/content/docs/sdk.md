@@ -228,7 +228,8 @@ See [Run a maker](/docs/run-a-maker) for operations.
 | `maxZecAmountZat` | `bigint` | `1_000_000_000n` (10 ZEC) | Largest swap, in zatoshi. |
 | `maxConcurrentSwaps` | `number` | `10` | Swaps in flight (proposed, funding, locking, locked or settling) at once. |
 | `maxOpenQuotes` | `number` | `1_000` | Unexpired quotes held at once. Each adaptor quote carries a fresh key. |
-| `quoteTtlSeconds` | `number` | `60` | How long a quote is honored, in seconds. |
+| `quoteTtlSeconds` | `number` | `60` | How long a quote is honored, in seconds. A taker commits before broadcasting its funding, so this only covers a few seconds of work. |
+| `maxFundingExpiryBlocks` | `number` | `45` | Furthest a taker's `fundingExpiryHeight` may be above the tip. Bounds how long an unfunded reservation holds inventory. The SDK's taker uses 40 (`FUNDING_EXPIRY_DELTA`); the other 5 absorb a maker node that lags the taker's. |
 | `zcashFeeZat` | `bigint` | `10_000n` | ZEC the maker spends on its own claim transaction (ZIP 317 fee of a one-input, one-output spend), in zatoshi. Priced into every quote. |
 | `checkInventory` | `boolean` | `true` | Check the stablecoin balance, minus amounts reserved by other swaps, before quoting and before locking. |
 
@@ -250,7 +251,7 @@ The taker side of a ZEC to stablecoin swap. It holds the secret (htlc mode) or t
 | `validateQuote` | `validateQuote(quote: Quote): Promise<void>` | Runs [`validateQuote`](#validation) against this taker's chains and limits, checks once per process that each RPC serves the configured chain id, and checks slippage when `price` is set. Throws `quote_rejected`. |
 | `swap` | `swap(quote: Quote, opts: SwapOptions = {}): Promise<Swap>` | Runs the whole swap. See [Running a swap](#running-a-swap). |
 | `lockOnly` | `lockOnly(quote: Quote, payTo?: { recipient?: Hex; label?: string }): Promise<Swap>` | Funds the Zcash lock and stops once the funding confirms, for example to demo a refund. In htlc mode the maker is never contacted. In adaptor mode the proposal step still runs, because the maker's refund signature is required before funding. |
-| `resume` | `resume(id: string, options: { claim?: boolean } = {}): Promise<Swap>` | Continues a persisted swap. See [Resuming a swap](#resuming-a-swap). |
+| `resume` | `resume(id: string, options: { claim?: boolean; relayClaim?: boolean } = {}): Promise<Swap>` | Continues a persisted swap. See [Resuming a swap](#resuming-a-swap). |
 | `refund` | `refund(swapOrId: Swap \| string, options: { wait?: boolean } = {}): Promise<Swap>` | Refunds the Zcash lock. See [Refunding a swap](#refunding-a-swap). |
 | `getSwap` | `getSwap(id: string): Promise<Swap \| undefined>` | The public view of a persisted swap. |
 | `pendingSwaps` | `pendingSwaps(): Promise<Swap[]>` | Persisted swaps that are not finished: their ZEC may still be locked. |
@@ -258,12 +259,12 @@ The taker side of a ZEC to stablecoin swap. It holds the secret (htlc mode) or t
 
 ### Running a swap
 
-`swap(quote, opts)` validates the quote, persists the secret and keys, funds the Zcash lock, waits for the maker's EVM lock and verifies it: recipient, token, amount, signer and release pre-signature (adaptor mode), `minConfirmations` and at least `minClaimWindowSeconds` left. Only then does it claim, which reveals the secret. It resolves once the stablecoins are claimed, after waiting up to `timeouts.followMakerMs` for the maker's ZEC claim (status `completed` if seen, `evm_claimed` otherwise).
+`swap(quote, opts)` validates the quote, persists the secret, keys and signed funding, has the maker commit to the funding (htlc: `accept`, which consumes the quote and reserves the maker's stablecoins; adaptor: the maker signs the refund), and only then broadcasts it. Right before asking the maker, it re-checks the quote's expiry (with 5 s of allowance for clock skew) and fails without broadcasting if it has passed. It then waits for the maker's EVM lock and verifies it: recipient, token, amount, signer and release pre-signature (adaptor mode), `minConfirmations` and at least `minClaimWindowSeconds` left. Only then does it claim, which reveals the secret. It resolves once the stablecoins are claimed, after waiting up to `timeouts.followMakerMs` for the maker's ZEC claim (status `completed` if seen, `evm_claimed` otherwise).
 
 Errors:
 
-- Before anything is broadcast, errors are thrown as they are, usually a `ParalockError`: `quote_rejected` (validation), `invalid_request` (a bad option), `conflict` (the quote was already used), `unsafe_timeouts` (adaptor mode: a network upgrade activates before the refund height).
-- After the ZEC is locked, it throws [`SwapFailedError`](#errors). The swap stays in the store and `taker.refund(err.swap.id)` returns the ZEC once the refund height is reached.
+- Before anything is broadcast, errors are thrown as they are, usually a `ParalockError`: `quote_rejected` (validation), `invalid_request` (a bad option), `conflict` (the quote was already used), `unsafe_timeouts` (adaptor mode: a network upgrade activates before the refund height), `quote_expired` (the quote expired before the maker committed), or the maker's own error when it refuses to commit (`busy`, `insufficient_liquidity`, …). The swap is marked abandoned.
+- Once the funding may have reached the network, it throws [`SwapFailedError`](#errors). The swap stays in the store and `taker.refund(err.swap.id)` returns the ZEC once the refund height is reached. A funding broadcast that fails without the node reporting the transaction also throws `SwapFailedError`: a node may have it anyway, so the swap stays pending until `resume` settles it.
 
 ```ts
 import { SwapFailedError } from "@paralock/sdk";
@@ -299,7 +300,13 @@ These options don't hide the link between the two legs of one swap (adaptor mode
 
 ### Resuming a swap
 
-`resume(id, { claim })` continues a persisted swap after a restart. It claims if the maker's lock is there and still safe to claim, and follows the maker's ZEC claim. A funding that never reached the network is not broadcast again: the swap is marked abandoned (status `failed`, nothing was locked). `claim` overrides the option the swap was started with, so `resume(id, { claim: true })` claims a swap started with `claim: false`. A finished swap is returned as it is.
+`resume(id, { claim, relayClaim })` continues a persisted swap after a restart. It claims if the maker's lock is there and still safe to claim, and follows the maker's ZEC claim. `claim` overrides the option the swap was started with, so `resume(id, { claim: true })` claims a swap started with `claim: false`. `relayClaim: false` submits the claim from your own EVM account, for example after the relayer refused (the SDK doesn't fall back by itself); the recipient stays the one in the lock. A finished swap is returned as it is.
+
+A swap interrupted before its funding reached the network is resumed conservatively:
+
+- `prepared` (the maker never committed): marked abandoned (status `failed`, nothing was locked); the funding is not broadcast.
+- `reserved` or `proposed` (the maker committed): the funding is broadcast late only if the tip is at least `FUNDING_BROADCAST_MARGIN_BLOCKS` (5) below its expiry height, at least `limits.minZcashLockBlocks` of the refund window remain, and the maker still holds the swap. The maker re-checks its timeout policy on every poll and drops a reservation it can no longer lock safely, so that check covers the windows. Otherwise the swap is marked abandoned.
+- A funding that was already handed to a node is never given up on while it could still be mined: `resume` throws `conflict` until the tip is more than `FUNDING_EXPIRY_MARGIN_BLOCKS` (2) past its expiry height, then marks the swap abandoned.
 
 ### Refunding a swap
 
@@ -332,15 +339,16 @@ The taker persists an internal stage per swap (`TakerSwapRecord.stage`):
 
 | Stage | Meaning |
 |---|---|
-| `prepared` | Funding signed, not broadcast. |
-| `proposed` | Adaptor mode: the maker's refund signature is held. |
+| `prepared` | Funding signed, not broadcast. The maker hasn't committed. |
+| `reserved` | htlc mode: the maker accepted the HTLC and reserved its stablecoins. The funding is broadcast next. |
+| `proposed` | Adaptor mode: the maker's refund signature is held and the maker reserved its stablecoins. The funding is broadcast next. |
 | `funded` | Funding broadcast. |
-| `accepted` | Maker notified. |
+| `accepted` | The maker has all it needs to lock: htlc, the funding confirmed; adaptor, the pre-signature was sent. |
 | `locked` | Maker's lock verified. |
 | `claimed` | Stablecoins claimed: the secret is public (htlc) or the signature is published (adaptor). |
 | `completed` | The maker claimed the ZEC. |
 | `refunded` | ZEC refunded. |
-| `abandoned` | Nothing was broadcast. |
+| `abandoned` | Nothing was locked: the funding was never broadcast, or it expired without being mined. |
 
 ### TakerConfig
 
@@ -375,8 +383,8 @@ The market-maker side of ZEC to stablecoin swaps on every configured EVM chain, 
 | `stop` | `stop(): Promise<void>` | Stops the settlement loops and waits for them to wind down. They resume on the next `start()`. |
 | `quote` | `quote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote>` | Exact-in quote. Pays `zatToUsdUnits(zecAmountZat - zcashFeeZat, rate, decimals)`, rounded down. |
 | `quoteExactOut` | `quoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote>` | Exact-out quote. Asks `usdUnitsToZat(usdAmount, rate, decimals) + zcashFeeZat`, rounded up. |
-| `accept` | `accept(request: AcceptRequest): Promise<Swap>` | htlc mode: checks the taker's HTLC against the quote (template byte for byte, claim key, window) and starts watching its funding. Idempotent for an identical request. |
-| `proposeAdaptor` | `proposeAdaptor(proposal: AdaptorProposal): Promise<AdaptorProposalAccepted>` | Adaptor mode, step 2: checks the proposal and signs the taker's time-locked refund before the taker funds anything. Idempotent for an identical proposal. |
+| `accept` | `accept(request: AcceptRequest): Promise<Swap>` | htlc mode: checks the taker's HTLC against the quote (template byte for byte, claim key, window, inventory, `fundingExpiryHeight`), consumes the quote, reserves the stablecoins and starts watching the funding, which a 0.3 taker broadcasts only after this returns. Idempotent for an identical request. |
+| `proposeAdaptor` | `proposeAdaptor(proposal: AdaptorProposal): Promise<AdaptorProposalAccepted>` | Adaptor mode, step 2: checks the proposal and signs the taker's time-locked refund before the taker funds anything; consumes the quote and reserves the stablecoins. Idempotent for an identical proposal. |
 | `adaptorPreSignature` | `adaptorPreSignature(swapId: string, request: AdaptorPreSignatureRequest): Promise<Swap>` | Adaptor mode, steps 3 and 4: verifies the taker's pre-signature on the maker's claim, then in the background waits for the funding, locks stablecoins and publishes the escrow pre-signature. Idempotent. |
 | `getSwap` | `getSwap(id: string): Swap \| undefined` | Public view of a swap (synchronous). |
 | `listSwaps` | `listSwaps(): Swap[]` | Public views of every swap this maker knows. |
@@ -394,7 +402,7 @@ Quote errors: `invalid_request` (unknown chain, bad mode, chain not served, priv
 | Stage | Meaning |
 |---|---|
 | `proposed` | Adaptor mode: waiting for the taker's pre-signature. |
-| `funding` | Waiting for the taker's Zcash funding to confirm with `policy.minZcashConfirmations`. |
+| `funding` | The stablecoins are reserved; waiting for the taker's Zcash funding to be broadcast and confirm with `policy.minZcashConfirmations`. Abandoned once the funding is still unmined more than `FUNDING_EXPIRY_MARGIN_BLOCKS` (2) past the declared `fundingExpiryHeight`, or once the window is too short to lock. |
 | `locking` | Lock parameters persisted; sending or confirming the EVM lock. |
 | `locked` | Waiting for the taker's claim or the EVM expiry. |
 | `claiming` | Claim built and persisted; broadcasting until it confirms. |
@@ -408,8 +416,8 @@ Quote errors: `invalid_request` (unknown chain, bad mode, chain not served, priv
 
 | Type | Fields |
 |---|---|
-| `AcceptRequest` | `quoteId: string`, `redeemScript: Hex`, `fundingTxid: string`, `fundingVout: number`, `takerEvmAddress: Hex` |
-| `AdaptorProposal` | `quoteId`, `takerZcashPubkey: Hex`, `adaptorPoint: Hex`, `fundingTxid`, `fundingVout`, `amountZat: string` (decimal zatoshi, must equal the quote), `refundHeight: number`, `refundAddress: string`, `takerEvmRecipient: Hex` |
+| `AcceptRequest` | `quoteId: string`, `redeemScript: Hex`, `fundingTxid: string`, `fundingVout: number`, `takerEvmAddress: Hex`, `fundingExpiryHeight?: number` (the funding's last minable block; optional, absent from 0.1 and 0.2 takers) |
+| `AdaptorProposal` | `quoteId`, `takerZcashPubkey: Hex`, `adaptorPoint: Hex`, `fundingTxid`, `fundingVout`, `amountZat: string` (decimal zatoshi, must equal the quote), `refundHeight: number`, `refundAddress: string`, `takerEvmRecipient: Hex`, `fundingExpiryHeight?: number` (as in `AcceptRequest`) |
 | `AdaptorProposalAccepted` | `swapId`, `makerRefundSignature: Hex` (DER plus sighash byte), `claimTo: string`, `branchId: number`, `signer: Hex`, `signerPubkey: Hex` |
 | `AdaptorPreSignatureRequest` | `takerPreSignature: string` (162-byte encoded pre-signature, see [@paralock/adaptor](/docs/adaptor)) |
 
@@ -518,7 +526,7 @@ type EvmChain = "tempo" | "base" | "ethereum" | "arbitrum" | "robinhood" | "hype
 type Chain = "zcash" | EvmChain;
 ```
 
-`EVM_CHAIN_NAMES: Record<EvmChain, string>` maps them to display names (`"Robinhood Chain"`, `"HyperEVM"`, …). Any EVM chain with the Paralock escrows works; these are the names the SDK, devnet and app know.
+`EVM_CHAIN_NAMES: Record<EvmChain, string>` maps them to display names (`"Robinhood Chain"`, `"HyperEVM"`, …). `createTaker` and `createMaker` accept only these six names. Each one works with any chain id and RPC where the Paralock escrows are deployed (for example its testnet); another chain needs a new `EvmChain` name.
 
 ## Timeout policy
 
@@ -543,6 +551,8 @@ The maker's EVM lock must expire well before the taker's Zcash refund height, so
 `MAINNET_POLICY` is the default of `createMaker` on every network (Zcash testnet also has 75 s blocks). `DEVNET_POLICY` uses short windows so refunds can be demoed on the local devnet.
 
 `assertValidPolicy(policy)` and `assertSafeWindows(policy, blocksUntilZcashRefund, evmLockSeconds)` throw `ParalockError("unsafe_timeouts")`. The maker checks the window when it accepts a lock and again right before it locks stablecoins.
+
+Two constants govern the funding's expiry height (`FUNDING_EXPIRY_DELTA`, 40 blocks after it is built): `FUNDING_BROADCAST_MARGIN_BLOCKS` (5), the taker broadcasts a funding only while the tip is at least this far below its expiry; and `FUNDING_EXPIRY_MARGIN_BLOCKS` (2), once the tip is more than this far past it and the funding is unmined, both sides treat it as dead (the maker drops its reservation, the taker abandons the swap).
 
 ## Stores
 

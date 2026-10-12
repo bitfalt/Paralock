@@ -18,8 +18,10 @@ but privacy is about what the two chains reveal. There are three levels.
 - **Fresh recipient.** Stablecoins are paid to an address created for this swap; its key goes to the user (devnet:
   `.paralock/recipients.jsonl`).
 - **Relayed claim.** A relayer submits the claim, so the fresh address needs no gas. The relayer can't redirect the
-  funds: the escrow always pays the recipient fixed at lock time. It could refuse to relay, in which case the taker
-  submits the claim itself.
+  funds: the escrow always pays the recipient fixed at lock time. It could refuse to relay. The SDK doesn't fall back
+  by itself: the swap fails with `SwapFailedError`, and `taker.resume(id, { relayClaim: false })` submits the claim
+  from the taker's own EVM account (which pays the gas and is linked to the claim) before the lock expires. The
+  recipient stays the one in the lock.
 - **Standard amounts** (0.1 / 0.5 / 1 / 5 ZEC) and **timing jitter**, so amounts and timestamps don't single out a
   swap.
 

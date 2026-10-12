@@ -136,7 +136,8 @@ Keep the policy inside what takers accept by default: a Zcash window of 10 to 28
 | `maxZecAmountZat` | 1,000,000,000 (10 ZEC) | Largest swap |
 | `maxConcurrentSwaps` | 10 | Swaps in flight at once; more get `busy` (HTTP 429) |
 | `maxOpenQuotes` | 1,000 | Unexpired quotes held at once (each private-mode quote carries a fresh key) |
-| `quoteTtlSeconds` | 60 | How long a quote is honored |
+| `quoteTtlSeconds` | 60 | How long a quote is honored. Takers commit before broadcasting their funding, so this covers seconds of work, not a block |
+| `maxFundingExpiryBlocks` | 45 | Furthest a taker's `fundingExpiryHeight` may be above your tip: bounds how long an unfunded reservation holds inventory |
 | `zcashFeeZat` | 10,000 | ZEC priced into each quote for your own claim (the ZIP 317 minimum) |
 | `checkInventory` | true | Check the stablecoin balance before quoting and before locking |
 
@@ -168,8 +169,8 @@ The maker writes to its store before every step that matters:
 
 | Stage | Waiting for |
 |---|---|
-| `proposed` | The taker's pre-signature (private mode). Expires once locking would no longer be safe |
-| `funding` | The taker's funding to reach `minZcashConfirmations` with the right amount |
+| `proposed` | The taker's pre-signature (private mode). The stablecoins are reserved. Dropped once the funding is unmined 2 blocks past its declared `fundingExpiryHeight`, or once locking would no longer be safe |
+| `funding` | The taker's funding to be broadcast and reach `minZcashConfirmations` with the right amount. The stablecoins are reserved (the taker commits before it broadcasts). Dropped like `proposed` |
 | `locking` | The EVM lock to appear on-chain. Locks are idempotent, so resending after a crash is safe |
 | `locked` | The taker's claim, or expiry T |
 | `claiming` | The maker's ZEC claim to confirm. It is rebroadcast until it does |

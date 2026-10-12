@@ -204,7 +204,7 @@ pnpm paralock refund <id> [--no-shield]
 | Command | Behavior |
 |---|---|
 | `swaps` | Lists unfinished swaps in `.paralock/taker` (their ZEC may still be locked): id, mode, status, amount, chain and refund block. The web app shares this store, so swaps started there appear too. |
-| `resume <id>` | Calls `taker.resume(id, { claim: true })`: claims if the maker's lock is there and still safe to claim, then follows the maker's ZEC claim. A funding that never reached the network is marked abandoned, not rebroadcast. |
+| `resume <id>` | Calls `taker.resume(id, { claim: true })`: claims if the maker's lock is there and still safe to claim, then follows the maker's ZEC claim. A funding that never reached the network is broadcast late only if the maker committed to it, it is at least 5 blocks from its expiry and the maker still holds the swap; otherwise the swap is marked abandoned. |
 | `refund <id>` | Calls `taker.refund(id)`: waits for the refund height (mining regtest blocks), broadcasts the refund and prints its txid. Then shields the refunded ZEC, unless `--no-shield`. |
 
 The swap id is the hashlock (htlc mode) or the quote id (adaptor mode); `swaps` prints it. See [Persistence and recovery](/docs/recovery).

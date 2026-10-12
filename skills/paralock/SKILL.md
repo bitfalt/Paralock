@@ -67,7 +67,8 @@ const swap = await taker.swap(quote, { recipient: "0xMerchant…", label: "Acme 
   `taker.refund(err.swap.id)` returns the ZEC once the refund height is reached. After a crash, call
   `taker.pendingSwaps()` and then `taker.resume(id)`.
 - Privacy options: `swap(quote, { privacy: { freshRecipient, relayClaim, standardAmountsOnly, jitterMs } })`. With
-  `relayClaim`, set `relayer` on the chain, an account that pays the claim gas but can't redirect the funds.
+  `relayClaim`, set `relayer` on the chain, an account that pays the claim gas but can't redirect the funds. If the
+  relayer refuses, `taker.resume(id, { relayClaim: false })` claims from your own account (no automatic fallback).
 
 ## Maker
 

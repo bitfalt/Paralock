@@ -46,9 +46,9 @@ From `expiry` on, anyone can call `refund`, which returns the funds to the maker
 The swap id in this mode is the hashlock.
 
 1. **Quote.** The taker calls `taker.quote(zat, chain, "htlc")`. The maker answers with the amounts, the rate, its long-term Zcash public key, its EVM address, the lock windows (`zcashLockBlocks`, `evmLockSeconds`) and an expiry 60 seconds out. The taker validates all of it against its own configuration and limits.
-2. **Prepare.** The taker draws a random 32-byte secret, computes `hashlock = sha256(secret)`, builds the HTLC with `refundHeight = tip + zcashLockBlocks`, and signs a funding transaction that expires if it isn't mined within 40 blocks. It writes the secret and the signed funding to its store.
-3. **Fund.** The taker broadcasts the funding and waits for it to confirm.
-4. **Accept.** The taker sends the maker the quote id, the redeem script, the funding outpoint and the recipient (`POST /swaps`). The maker checks that the script matches its HTLC template byte for byte, that it pays the maker's key, that the window is still safe and that it has the inventory.
+2. **Prepare.** The taker draws a random 32-byte secret, computes `hashlock = sha256(secret)`, builds the HTLC with `refundHeight = tip + zcashLockBlocks`, and signs a funding transaction that expires if it isn't mined within 40 blocks. Zcash v5 transaction ids (ZIP 244) don't commit to signatures, so the funding txid is final before anything is sent. It writes the secret and the signed funding to its store.
+3. **Accept.** Before broadcasting anything, the taker re-checks that the quote hasn't expired and sends the maker the quote id, the redeem script, the funding outpoint, the funding's expiry height (`fundingExpiryHeight`) and the recipient (`POST /swaps`). The maker checks that the script matches its HTLC template byte for byte, that it pays the maker's key, that the funding expiry is above its tip and at most `maxFundingExpiryBlocks` (45) ahead, that the window is still safe and that it has the inventory. It then consumes the quote and reserves the stablecoins. If anything fails here, nothing was broadcast: the taker abandons the swap.
+4. **Fund.** The taker broadcasts the funding. If the funding is still unmined 2 blocks after its expiry height, it can never be mined, and the maker drops the reservation.
 5. **Maker locks.** Once the funding has `minZcashConfirmations` and holds at least the quoted ZEC, the maker re-checks the window, saves the lock parameters and locks the stablecoins in `ParalockHTLC` under the same hashlock, with `expiry = now + evmLockSeconds`.
 6. **Taker verifies.** The taker finds the lock by its hashlock, waits for `minEvmConfirmations`, and checks the recipient, the token, the amount and that at least `minClaimWindowSeconds` remain before expiry.
 7. **Taker claims.** The taker (or its relayer) submits the secret. The recipient is paid, and the secret is now public in the `Claimed` event.
@@ -62,8 +62,8 @@ Private mode replaces the hash with an adaptor signature. An **adaptor signature
 
 1. **Quote.** The taker calls `taker.quote(zat, chain, "adaptor")`. The maker generates a fresh Zcash key for this quote and stores it before returning the quote, so the 2-of-2 reveals nothing about which maker it is.
 2. **Prepare.** The taker draws the adaptor secret `y` and its point `Y`, a fresh per-swap multisig key, builds the 2-of-2 address and signs a funding transaction but does **not** broadcast it. Zcash v5 transaction ids (ZIP 244) don't commit to signatures, so the funding txid is final before anything is sent. The taker checks that no network upgrade activates before the refund height, then stores `y`, the multisig key and the funding.
-3. **Propose.** The taker sends the maker the 2-of-2 key, `Y`, the funding txid, the amount, the refund height and address, and the recipient (`POST /adaptor/swaps`).
-4. **Maker signs the refund.** The maker checks the amount equals the quote, the window is safe, the refund height is at most twice the policy's window away, no upgrade activates before it, and it has the inventory. It builds both possible spends of the 2-of-2: the taker's refund (time-locked with `lock_time = refundHeight`) and its own claim. It signs the refund, creates a one-time EVM `signer` key, and returns the refund signature, its claim address, the consensus branch id and the signer.
+3. **Propose.** The taker re-checks that the quote hasn't expired and sends the maker the 2-of-2 key, `Y`, the funding txid and expiry height, the amount, the refund height and address, and the recipient (`POST /adaptor/swaps`).
+4. **Maker signs the refund.** The maker checks the amount equals the quote, the funding expiry (as in htlc mode), the window is safe, the refund height is at most twice the policy's window away, no upgrade activates before it, and it has the inventory. It consumes the quote and reserves the stablecoins until the funding confirms, or until 2 blocks after the funding's expiry height if it is never mined. It builds both possible spends of the 2-of-2: the taker's refund (time-locked with `lock_time = refundHeight`) and its own claim. It signs the refund, creates a one-time EVM `signer` key, and returns the refund signature, its claim address, the consensus branch id and the signer.
 5. **Taker funds.** The taker checks the branch id against its own node, rebuilds the lock and the refund, verifies the maker's refund signature and that the signer's public key matches its address. It saves the refund signature, and only then broadcasts the funding. From here on the taker can always get its ZEC back after the refund height.
 6. **Taker pre-signs the maker's claim.** Once the funding confirms, the taker creates an adaptor pre-signature on the maker's Zcash claim, encrypted to `Y` with a DLEQ proof, and sends it (`POST /adaptor/swaps/:id/presignature`). The maker verifies it with `preVerify`: once `y` is known, it becomes a valid signature.
 7. **Maker locks.** When the funding has `minZcashConfirmations` and holds exactly the proposed amount, the maker re-checks the window, builds the escrow lock (recipient, signer, amount, expiry and a random salt), pre-signs its `claimDigest` with the one-time signer key encrypted to `Y`, saves everything and locks the stablecoins in `ParalockAdaptorEscrow`.
@@ -122,7 +122,8 @@ The taker has its own timing rule. A claim mined after T reverts, but its callda
 | The taker claims | The claim reveals the secret, and the maker has until N, well after T, to claim the ZEC |
 | Someone copies the secret from the mempool | Nothing to steal. The EVM lock only pays the recipient, and the Zcash lock also needs the maker's signature (htlc) or both parties' signatures (adaptor) |
 | The taker funds the wrong script or amount | The maker refuses and never locks, so it risks nothing |
-| The funding never confirms | It expires after 40 blocks, so it can't confirm hours later. Nothing was locked |
+| The funding never confirms | It expires after 40 blocks, so it can't confirm hours later. Nothing was locked, and 2 blocks later the maker drops its reservation |
+| The quote expires, or the maker refuses, before it commits | Nothing was broadcast: the taker abandons the swap and gets the maker's error (for example `quote_expired`) |
 | Either side crashes | Everything needed to continue or refund was stored before each step. See [Persistence and recovery](/docs/recovery) |
 | The maker goes offline after the taker claims | The maker must claim before N. If it stays offline past N, the taker could also refund the ZEC. This is the maker's risk, never the taker's |
 
@@ -130,7 +131,8 @@ The taker has its own timing rule. A claim mined after T reverts, but its callda
 
 - **Funds have exactly two exits.** The ZEC goes to the maker (secret plus the maker's signature) or back to the taker (after N). The stablecoins go to the recipient (secret or signature, before T) or back to the maker (from T). No third party can take either.
 - **The taker reveals nothing before the maker's lock is verified on-chain:** recipient, token, amount, signer, confirmations and time left.
-- **The maker commits nothing before the taker's ZEC is confirmed** in a lock it rebuilt byte for byte, holding the right amount, with enough window left.
+- **The maker locks nothing before the taker's ZEC is confirmed** in a lock it rebuilt byte for byte, holding the right amount, with enough window left. It only reserves inventory, until the funding confirms or expires.
+- **The taker funds nothing before the maker commits:** in htlc mode the maker has accepted the HTLC and reserved its stablecoins; in private mode it has also signed the taker's refund.
 - **In private mode, the taker funds only after holding a valid refund** signed by the maker. That is safe because the funding txid can't change after signing.
 - **Whoever learns the secret second always has time to use it,** because of the window ordering above.
 - **Secrets are single-use.** The contracts mark every hashlock and escrow id settled forever.
@@ -139,7 +141,7 @@ These guarantees assume the code is correct (it has not been audited) and that e
 
 ## Quotes and pricing
 
-A quote is the maker's offer: amounts, rate, keys, lock windows and an expiry. The maker honors it for 60 seconds by default (`quoteTtlSeconds`), the taker rejects one that expires within 5 seconds, and each quote can start only one swap.
+A quote is the maker's offer: amounts, rate, keys, lock windows and an expiry. The maker honors it for 60 seconds by default (`quoteTtlSeconds`), the taker rejects one that expires within 5 seconds, and each quote can start only one swap. The taker has the maker commit before it broadcasts its funding, so the quote only has to last from the quote to that commitment, a few seconds, never a Zcash block. Right before asking, the taker re-checks the expiry (allowing 5 seconds of clock skew) and fails without broadcasting if it has passed.
 
 The maker prices from its feed (for example `zecUsdPrice()`, which reads CoinGecko) minus its spread:
 

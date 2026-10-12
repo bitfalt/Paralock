@@ -36,7 +36,7 @@ The SDK doesn't move shielded funds: your wallet does. The devnet shows the patt
 
 ### Relayed claim
 
-A fresh address has no gas. `relayClaim: true` lets the `relayer` account configured on that chain submit the claim and pay its gas. The relayer can't redirect the funds: the escrow always pays the recipient fixed at lock time. It could refuse or fail to relay; then the claim fails and has to be submitted from another account before the lock expires.
+A fresh address has no gas. `relayClaim: true` lets the `relayer` account configured on that chain submit the claim and pay its gas. The relayer can't redirect the funds: the escrow always pays the recipient fixed at lock time. It could refuse or fail to relay; then the swap fails with `SwapFailedError` (the SDK doesn't fall back by itself), and `taker.resume(id, { relayClaim: false })` submits the claim from your own EVM account before the lock expires. That account pays the gas and is linked to the claim; the recipient stays the one in the lock.
 
 ### Standard amounts
 

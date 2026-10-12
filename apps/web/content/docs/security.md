@@ -39,12 +39,13 @@ The escrow contracts have no owner, admin, pause or upgrade function. Once funds
 |---|---|
 | Lock ZEC and walk away after the maker locks (the "free option"). The maker's inventory stays locked until expiry, and it pays the refund gas. The spread prices this in | Get the stablecoins without revealing the secret, or the adaptor secret, to the maker |
 | Request many quotes or proposals. Capped by `maxOpenQuotes` (1,000), `maxConcurrentSwaps` (10) and the 60-second quote lifetime | Make the maker lock against a tampered script, a different claim key or a short funding: the maker rebuilds the lock byte for byte and checks the value |
+| Reserve inventory and never fund. The maker commits before the funding is broadcast, so each reservation holds stablecoins until the declared `fundingExpiryHeight` (at most `maxFundingExpiryBlocks`, 45 blocks, ahead) plus 2 blocks, or until the window gets too short to lock, and counts against `maxConcurrentSwaps` | Get the maker to lock without a confirmed funding: it locks only once the funding has `minZcashConfirmations` |
 | Stall until its refund nears. The maker re-checks the window right before locking and abandons the swap instead | Refund its ZEC before the refund height: consensus rejects it |
 | Send an invalid pre-signature or a far-away refund height | Pass the maker's checks: pre-signatures are verified, and refund heights more than twice the policy window away are refused |
 
 ### A relayer
 
-A relayer can refuse or delay a claim. Then the claim has to be submitted from another account before the lock expires; the SDK doesn't fall back automatically. A relayer only sees data that becomes public anyway. It can't redirect funds, because the escrow pays the recipient fixed at lock time.
+A relayer can refuse or delay a claim. Then the claim has to be submitted from another account before the lock expires: the SDK doesn't fall back automatically, but `taker.resume(id, { relayClaim: false })` submits it from your own EVM account. A relayer only sees data that becomes public anyway. It can't redirect funds, because the escrow pays the recipient fixed at lock time.
 
 ### Observers, miners and the mempool
 

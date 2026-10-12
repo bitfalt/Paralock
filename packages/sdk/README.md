@@ -1,7 +1,8 @@
 # @paralock/sdk
 
 Maker and taker engines for trustless atomic swaps and payments between Zcash and stablecoins on EVM chains (Tempo,
-Base, Ethereum, Arbitrum, Robinhood Chain, HyperEVM, or any EVM chain with the Paralock escrows). The taker sells ZEC;
+Base, Ethereum, Arbitrum, Robinhood Chain and HyperEVM: the six chain names the SDK accepts, each on any network where
+the Paralock escrows are deployed, such as its testnet). The taker sells ZEC;
 the maker pays stablecoins to the taker or to any third party (exact-out payments). Either both legs settle or both
 refund. The SDK wires a Zcash node, the EVM escrow clients and a durable store, persists every secret before it
 matters, and resumes or refunds swaps after a crash. Node.js ≥ 20.
@@ -36,9 +37,13 @@ const quote = await taker.quoteExactOut(25_000_000n, "base", "adaptor"); // pay 
 const swap = await taker.swap(quote, { recipient: "0xMerchant…", privacy: { relayClaim: true } });
 ```
 
-`taker.swap` locks the ZEC, waits for the maker's EVM lock, verifies it (recipient, token, amount, signer, confirmations,
-time left) and only then claims, which reveals the secret. It throws `SwapFailedError` if something fails after the
-ZEC was locked; the swap stays in the store.
+`taker.swap` signs and stores the funding, has the maker commit to it before any ZEC moves (htlc: `accept`, which
+reserves the maker's stablecoins; private mode: the maker signs the taker's refund), and only then broadcasts it. The
+funding txid is final before broadcast (v5 txids don't commit to signatures), so the quote only has to last seconds,
+not a Zcash block. It then waits for the maker's EVM lock, verifies it (recipient, token, amount, signer,
+confirmations, time left) and only then claims, which reveals the secret. If the maker refuses or the quote expired,
+nothing is broadcast: the error is rethrown and the swap is marked abandoned. It throws `SwapFailedError` if something
+fails once the funding may have reached the network; the swap stays in the store.
 
 ## Maker: quote and settle
 
@@ -90,17 +95,21 @@ for (const swap of await taker.pendingSwaps()) {
 await taker.refund(id, { wait: false });         // throws "the refund opens at block N" instead of waiting
 ```
 
-`resume(id, { claim: true })` claims a swap that was started with `claim: false`. A funding that never reached the
-network is not rebroadcast on resume; the swap is marked abandoned. On the maker side, `await maker.start()` resumes
-every swap: it waits for the taker's funding, locks, watches for the claim, claims the ZEC (rebroadcasting until it
-confirms) or refunds after the EVM expiry.
+`resume(id, { claim: true })` claims a swap that was started with `claim: false`; `resume(id, { relayClaim: false })`
+submits the claim from your own EVM account if the relayer refused (the SDK doesn't fall back by itself). A swap
+interrupted before its funding reached the network is resumed conservatively: one the maker never committed to
+(`prepared`) is abandoned; one it committed to (`reserved`, `proposed`) is broadcast late only while the funding is at
+least 5 blocks from its expiry height, at least `minZcashLockBlocks` of the refund window remain and the maker still
+holds the swap, and is abandoned otherwise. A funding that may already be on the network is never given up on before its
+expiry height. On the maker side, `await maker.start()` resumes every swap: it waits for the taker's funding, locks,
+watches for the claim, claims the ZEC (rebroadcasting until it confirms) or refunds after the EVM expiry.
 
 ## API overview
 
 | Area | Exports |
 |---|---|
 | Factories | `createTaker`, `createMaker`, `connectEvmChain`, `zcashKeyFrom`, `zcashNodeFrom`; options types `CreateTakerOptions`, `CreateMakerOptions`, `ZcashOptions` (`rpcUrl` or any `node: ZcashNode`), `EvmChainOptions`, `TakerEvmChainOptions` (`tokens`, `tokenDecimals`, `relayer`, `minConfirmations`, `minClaimWindowSeconds`), `MakerEvmChainOptions` (`token`) |
-| Taker | `Taker`: `quote`, `quoteExactOut`, `validateQuote`, `swap`, `lockOnly`, `resume(id, { claim })`, `refund(idOrSwap, { wait })`, `getSwap`, `pendingSwaps`, `freshRecipient(id)`; `TakerLimits` / `DEFAULT_TAKER_LIMITS`, `TakerTimeouts` / `DEFAULT_TAKER_TIMEOUTS`, `SwapOptions`, `MakerApi` |
+| Taker | `Taker`: `quote`, `quoteExactOut`, `validateQuote`, `swap`, `lockOnly`, `resume(id, { claim, relayClaim })`, `refund(idOrSwap, { wait })`, `getSwap`, `pendingSwaps`, `freshRecipient(id)`; `TakerLimits` / `DEFAULT_TAKER_LIMITS`, `TakerTimeouts` / `DEFAULT_TAKER_TIMEOUTS`, `SwapOptions`, `MakerApi` |
 | Maker | `Maker`: `start`, `stop`, `quote`, `quoteExactOut`, `accept`, `proposeAdaptor`, `adaptorPreSignature`, `getSwap`, `getStage`, `listSwaps`; `MakerLimits` / `DEFAULT_MAKER_LIMITS`, `MakerStage` |
 | Persistence | `SwapStore`, `MemorySwapStore` (not durable), `FileSwapStore` (one file per record, atomic write + fsync + rename, dir 0700 / files 0600), `encodeRecord` / `decodeRecord` (JSON with bigints, for database-backed stores) |
 | Transport | `makerHandler(maker, { cors, maxBodyBytes = 16 KiB, exposeSwapList = false, onError })`, `HttpMakerApi(url, { timeoutMs = 30 s, retries = 2, headers })` (validates responses, maps error codes) |
@@ -121,17 +130,27 @@ confirms) or refunds after the EVM expiry.
 | `minEvmLockSeconds` / `maxEvmLockSeconds` | 30 / 86,400 | `maxConcurrentSwaps` | 10 |
 | `minClaimWindowSeconds` | 30 | `maxOpenQuotes` | 1,000 |
 | `minEvmConfirmations` | 1 | `quoteTtlSeconds` | 60 |
+| `expiryMarginSeconds` | 5 | `maxFundingExpiryBlocks` | 45 |
 | `maxSlippageBps` (with `price`) | 200 | `zcashFeeZat` (priced into quotes) | 10,000 |
 | `fundingConfirmationMs` / `makerLockMs` | 30 min each | `checkInventory` | true |
 
 ## Transaction expiry
 
 Funding transactions expire at `tip + 40` blocks (`FUNDING_EXPIRY_DELTA`), so a stuck funding can't confirm hours
-later. Claims and refunds never expire (`expiryHeight = 0`): the private-mode refund and claim are signed before the
-funding is broadcast and must stay valid until mined.
+later. The taker sends that height to the maker as `fundingExpiryHeight` (in the htlc accept request and the private-mode
+proposal; optional on the wire, since 0.1 and 0.2 takers don't send it). The maker refuses one that isn't above its tip
+or is more than `maxFundingExpiryBlocks` ahead, and drops its reservation, releasing the stablecoins, once the tip is
+more than 2 blocks past it and the funding was never mined: it can't be mined any more, so this can't strand the
+taker. Without the field, the reservation lasts until the Zcash window is too short to lock. Claims and refunds never
+expire (`expiryHeight = 0`): the private-mode refund and claim are signed before the funding is broadcast and must stay
+valid until mined.
 
 ## Security notes
 
+- **Commit before funding.** The taker broadcasts its funding only after the maker committed to it: htlc `accept`
+  (the maker consumes the quote and reserves the stablecoins) or, in private mode, the maker's refund signature. The
+  taker also re-checks the quote's expiry right before asking, and never broadcasts a funding within 5 blocks of its
+  expiry height. The maker serializes commitments, so concurrent requests can't reserve the same inventory twice.
 - **Persist before broadcast.** The taker stores the secret (htlc), or the adaptor secret, multisig key and the maker's
   refund signature (private mode), before broadcasting any funding. The maker stores each per-quote key before the quote
   is returned and the EVM lock parameters before locking. Use a durable store; the factories refuse a non-durable one

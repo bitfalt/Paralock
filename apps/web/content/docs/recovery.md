@@ -67,7 +67,7 @@ Keys are short ASCII paths of at most 200 characters (`[A-Za-z0-9._:/-]`), and w
 
 | Party | Written to the store | Before |
 |---|---|---|
-| Taker (htlc) | The secret and the signed funding transaction | Broadcasting the funding |
+| Taker (htlc) | The secret and the signed funding transaction | Asking the maker to accept the HTLC, and so before broadcasting the funding |
 | Taker (private) | The adaptor secret `y`, the per-swap multisig key and the signed funding | Sending the proposal to the maker |
 | Taker (private) | The maker's signature on the time-locked refund | Broadcasting the funding |
 | Taker (private) | Its pre-signature on the maker's claim | Sending it to the maker |
@@ -109,7 +109,7 @@ try {
 }
 ```
 
-If it fails **before** anything was broadcast, `swap()` rethrows the original error, and the record is marked `abandoned`: no funds moved.
+If it fails **before** anything was broadcast, `swap()` rethrows the original error, and the record is marked `abandoned`: no funds moved. That includes the maker refusing to commit (for example `quote_expired` or `insufficient_liquidity`), because the taker broadcasts its funding only after the maker accepted it. If the funding broadcast itself fails and the node doesn't report the transaction, the swap is **not** abandoned, since a node may have it anyway: `swap()` throws `SwapFailedError` and the swap stays pending until `resume` settles it.
 
 ## After a crash or restart
 
@@ -129,25 +129,28 @@ for (const swap of await taker.pendingSwaps()) {
 
 | Stage | Meaning | Finished? |
 |---|---|---|
-| `prepared` | Funding signed, not broadcast | No |
-| `proposed` | Private mode: the maker's refund signature is held | No |
+| `prepared` | Funding signed, not broadcast; the maker hasn't committed | No |
+| `reserved` | htlc: the maker accepted the HTLC and reserved its stablecoins; the funding is broadcast next | No |
+| `proposed` | Private mode: the maker's refund signature is held and the maker reserved its stablecoins; the funding is broadcast next | No |
 | `funded` | Funding broadcast | No |
-| `accepted` | The maker was told about the lock | No |
+| `accepted` | The maker has all it needs to lock (htlc: the funding confirmed; private: the pre-signature was sent) | No |
 | `locked` | The maker's lock was verified | No |
 | `claimed` | Stablecoins claimed; the secret is public | Yes |
 | `completed` | The maker claimed the ZEC | Yes |
 | `refunded` | The ZEC came back | Yes |
-| `abandoned` | Nothing was broadcast | Yes |
+| `abandoned` | Nothing was locked: the funding was never broadcast, or it expired without being mined | Yes |
 
 ### `resume(id, { claim? })`
 
 `resume` continues the state machine from the stored stage:
 
 - A finished swap is returned as it is.
-- A swap stuck at `prepared` or `proposed` continues only if its funding already reached the network. A funding that never left the process is **not** broadcast again, and the swap is marked `abandoned`. Funding transactions expire 40 blocks after they are built, so a stale one can't confirm later anyway.
-- Otherwise it waits for the funding to confirm, notifies the maker, verifies the maker's lock, and claims if the lock is still safe to claim. If the claim already landed before the crash, it finds it on-chain instead of claiming twice.
+- A swap whose funding already reached the network continues from `funded`, whatever stage it was saved at.
+- A swap stuck at `prepared` (the maker never committed) is marked `abandoned`, and its funding is **not** broadcast.
+- A swap stuck at `reserved` or `proposed` (the maker committed, the funding wasn't broadcast) is broadcast late only if all of these hold: the tip is at least 5 blocks below the funding's expiry height, at least `minZcashLockBlocks` of the refund window remain, and the maker still holds the swap (`getSwap`). The maker re-checks its timeout policy on every poll and drops a reservation it can no longer lock safely, so that last check covers the windows. Otherwise the swap is marked `abandoned`. If the taker had already handed the funding to a node (a broadcast that failed ambiguously), it is never abandoned while that funding could still be mined: `resume` throws `conflict` until 2 blocks after the funding's expiry height.
+- Otherwise it waits for the funding to confirm, verifies the maker's lock, and claims if the lock is still safe to claim. If the funding expires without being mined, the swap is marked `abandoned`. If the claim already landed before the crash, it finds it on-chain instead of claiming twice.
 
-`resume(id, { claim: true })` claims a swap that was started with `swap(quote, { claim: false })`. If the maker's lock never appears, was refunded, or expires too soon, `resume` throws, and you refund.
+`resume(id, { claim: true })` claims a swap that was started with `swap(quote, { claim: false })`, and `resume(id, { relayClaim: false })` submits the claim from your own EVM account after a relayer refused. If the maker's lock never appears, was refunded, or expires too soon, `resume` throws, and you refund.
 
 ### `refund(id, { wait? })`
 
