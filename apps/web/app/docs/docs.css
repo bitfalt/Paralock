@@ -459,10 +459,18 @@
 .prose > .doc-table,
 .prose > .callout,
 .prose > .deploy,
+.prose > .tabs,
+.prose > .doc-panel,
+.prose > .dtl,
+.prose > .dseq,
 .prose > .doc-code + *,
 .prose > .doc-table + *,
 .prose > .callout + *,
-.prose > .deploy + * {
+.prose > .deploy + *,
+.prose > .tabs + *,
+.prose > .doc-panel + *,
+.prose > .dtl + *,
+.prose > .dseq + * {
   margin-top: 28px;
 }
 
@@ -1356,4 +1364,1108 @@ html:has(dialog.search[open]) {
   .search__foot {
     display: none;
   }
+}
+
+/* ---- Code: file + language bar, script blocks ---------------------------------------------------- */
+
+.doc-code__lang--dim {
+  margin-left: auto;
+  color: var(--fg-4);
+}
+
+/*
+ * Zcash script (```zscript): an annotated block. Each line's code wraps with a hanging indent instead of scrolling,
+ * and its # comment sits in a second column (below the line on narrow screens).
+ */
+.doc-script {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 16px 20px 18px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--fg-2);
+  font-variant-ligatures: none;
+}
+
+.doc-script--annotated {
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  column-gap: 24px;
+}
+
+.doc-script:focus-visible {
+  outline-offset: -2px;
+}
+
+.doc-script__row {
+  display: contents;
+}
+
+.prose .doc-script__code {
+  display: block;
+  padding: 0 0 0 calc(var(--indent, 0) * 2ch + 2ch);
+  border-radius: 0;
+  background: none;
+  text-indent: -2ch;
+  font-size: inherit;
+  color: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.doc-script__note {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--fg-3);
+  text-wrap: pretty;
+}
+
+.doc-script__note::before {
+  content: "— ";
+  color: var(--fg-4);
+}
+
+.doc-script__note--empty::before {
+  content: none;
+}
+
+@media (max-width: 720px) {
+  .doc-script--annotated {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .doc-script__note {
+    padding-left: calc(var(--indent, 0) * 2ch + 2ch);
+    margin-bottom: 6px;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .doc-script__note::before {
+    content: "# ";
+    font-family: var(--font-mono);
+  }
+  .doc-script__note--empty {
+    display: none;
+  }
+}
+
+/* ---- Tabs (::: tabs) ----------------------------------------------------------------------------- */
+
+.tabs {
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-l);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+.tabs__list {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.tabs__list::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs__list[data-fade-end="true"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+}
+
+.tabs__list[data-fade-start="true"] {
+  mask-image: linear-gradient(to right, transparent, #000 48px);
+}
+
+.tabs__list[data-fade-start="true"][data-fade-end="true"] {
+  mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent);
+}
+
+.tabs__tab {
+  position: relative;
+  flex: none;
+  height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--fg-3);
+  white-space: nowrap;
+  transition: color 0.15s var(--ease);
+}
+
+.tabs__tab:hover {
+  color: var(--fg-2);
+}
+
+.tabs__tab[aria-selected="true"] {
+  color: var(--fg);
+}
+
+.tabs__tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 1px;
+  background: var(--fg);
+}
+
+.tabs__tab:focus-visible {
+  outline-offset: -4px;
+}
+
+.tabs__panel {
+  display: none;
+}
+
+.tabs[data-active="0"] > .tabs__panels > .tabs__panel:nth-child(1),
+.tabs[data-active="1"] > .tabs__panels > .tabs__panel:nth-child(2),
+.tabs[data-active="2"] > .tabs__panels > .tabs__panel:nth-child(3),
+.tabs[data-active="3"] > .tabs__panels > .tabs__panel:nth-child(4),
+.tabs[data-active="4"] > .tabs__panels > .tabs__panel:nth-child(5),
+.tabs[data-active="5"] > .tabs__panels > .tabs__panel:nth-child(6),
+.tabs[data-active="6"] > .tabs__panels > .tabs__panel:nth-child(7),
+.tabs[data-active="7"] > .tabs__panels > .tabs__panel:nth-child(8),
+.tabs[data-active="8"] > .tabs__panels > .tabs__panel:nth-child(9),
+.tabs[data-active="9"] > .tabs__panels > .tabs__panel:nth-child(10),
+.tabs[data-active="10"] > .tabs__panels > .tabs__panel:nth-child(11),
+.tabs[data-active="11"] > .tabs__panels > .tabs__panel:nth-child(12),
+.tabs[data-active="12"] > .tabs__panels > .tabs__panel:nth-child(13),
+.tabs[data-active="13"] > .tabs__panels > .tabs__panel:nth-child(14),
+.tabs[data-active="14"] > .tabs__panels > .tabs__panel:nth-child(15),
+.tabs[data-active="15"] > .tabs__panels > .tabs__panel:nth-child(16) {
+  display: block;
+}
+
+.tabs__panel:focus-visible {
+  outline-offset: -2px;
+}
+
+.doc-code--tab {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.tabs__panel > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.tabs__panel > :not(.doc-code) {
+  margin: 0;
+  padding: 12px 20px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--fg-3);
+}
+
+.tabs__panel > ul:not(.doc-code) {
+  padding-left: 20px;
+}
+
+/* ---- Panel (::: panel) --------------------------------------------------------------------------- */
+
+.doc-panel {
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-l);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+.prose .doc-panel > * {
+  margin: 0;
+}
+
+.doc-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--fg);
+}
+
+.doc-panel__title::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.prose .doc-panel > p:not(.doc-panel__title) {
+  padding: 14px 20px 16px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--fg-3);
+}
+
+.prose .doc-panel > .tabs + p {
+  border-top: 1px solid var(--line);
+}
+
+.prose .doc-panel__rows {
+  padding: 4px 20px;
+}
+
+.prose .doc-panel__row {
+  padding: 11px 0;
+}
+
+.prose .doc-panel__row + .doc-panel__row {
+  margin-top: 0;
+  border-top: 1px solid var(--line);
+}
+
+.prose .doc-panel__row::before {
+  display: none;
+}
+
+.prose .doc-panel__row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 2px 20px;
+  align-items: baseline;
+}
+
+.doc-panel__key {
+  font-size: 14px;
+}
+
+.prose .doc-panel__key {
+  font-weight: 500;
+}
+
+.doc-panel__val {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--fg-2);
+}
+
+.doc-panel__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.doc-panel__copy .doc-copy {
+  width: 24px;
+  height: 24px;
+}
+
+.doc-panel > .tabs {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.doc-panel > .tabs .tabs__list {
+  padding: 0 10px;
+}
+
+@media (max-width: 560px) {
+  .doc-panel__title,
+  .prose .doc-panel__rows,
+  .prose .doc-panel > p:not(.doc-panel__title) {
+    padding-inline: 16px;
+  }
+  .prose .doc-panel__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- Roadmap rail (::: milestones) --------------------------------------------------------------- */
+
+.prose .milestones > ul {
+  position: relative;
+}
+
+.prose .milestones li {
+  padding: 0 0 4px 34px;
+}
+
+.prose .milestones li + li {
+  margin-top: 20px;
+}
+
+.prose .milestones > ul > li::before {
+  left: 0;
+  top: 0.42em;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--fg);
+  border-radius: 2px;
+  background: var(--fg);
+  z-index: 1;
+}
+
+/* The rail between nodes. */
+.prose .milestones > ul > li::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: calc(0.42em + 15px);
+  bottom: -18px;
+  width: 1px;
+  background: var(--line-2);
+}
+
+.prose .milestones > ul > li:last-child::after {
+  display: none;
+}
+
+.prose .milestones[data-status="in-progress"] > ul > li::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.prose .milestones[data-status="next"] > ul > li::before {
+  border-color: var(--fg-3);
+  background: var(--bg);
+}
+
+.prose .milestones[data-status="in-research"] > ul > li::before {
+  border: 1.5px dashed var(--fg-4);
+  background: var(--bg);
+}
+
+.prose .milestones li > p:first-child > strong:first-child {
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+/* The reason, on its own line under each item. */
+.prose .milestones li > p + p {
+  margin-top: 4px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--fg-3);
+}
+
+/* The legend: four statuses in a compact grid, no rail. */
+.prose .milestones--legend > ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 32px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+}
+
+.prose .milestones--legend li {
+  padding: 0 0 0 24px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg-3);
+}
+
+.prose .milestones--legend li + li {
+  margin-top: 0;
+}
+
+.prose .milestones--legend > ul > li::before {
+  top: 0.4em;
+  width: 9px;
+  height: 9px;
+}
+
+.prose .milestones--legend > ul > li::after {
+  display: none;
+}
+
+.prose .milestones--legend strong {
+  font-weight: 500;
+}
+
+.prose .milestones--legend li[data-status="in-progress"]::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.prose .milestones--legend li[data-status="next"]::before {
+  border-color: var(--fg-3);
+  background: var(--bg);
+}
+
+.prose .milestones--legend li[data-status="in-research"]::before {
+  border: 1.5px dashed var(--fg-4);
+  background: var(--bg);
+}
+
+@media (max-width: 560px) {
+  .prose .milestones--legend > ul {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px 16px;
+  }
+}
+
+/* Status chips on the roadmap's section headings (the heading right before a rail). */
+.prose h2:has(+ .milestones:not(.milestones--legend))::before,
+.prose h2:has(+ p + .milestones:not(.milestones--legend))::before {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 14px;
+  vertical-align: 0.06em;
+  border: 1.5px solid var(--fg);
+  border-radius: 2px;
+  background: var(--fg);
+}
+
+.prose h2:has(+ .milestones[data-status="in-progress"])::before,
+.prose h2:has(+ p + .milestones[data-status="in-progress"])::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.prose h2:has(+ .milestones[data-status="next"])::before,
+.prose h2:has(+ p + .milestones[data-status="next"])::before {
+  border-color: var(--fg-3);
+  background: transparent;
+}
+
+.prose h2:has(+ .milestones[data-status="in-research"])::before,
+.prose h2:has(+ p + .milestones[data-status="in-research"])::before {
+  border: 1.5px dashed var(--fg-4);
+  background: transparent;
+}
+
+/* ---- Timeline diagram (```timeline) -------------------------------------------------------------- */
+
+.dtl {
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--bg-1);
+}
+
+.dtl__title,
+.dseq__title {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--fg);
+}
+
+.dtl__diagram {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  row-gap: 18px;
+  padding: 28px 44px 26px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dtl__labels {
+  display: grid;
+  grid-template-rows: repeat(var(--lanes), minmax(0, 1fr));
+}
+
+.dtl__labels span {
+  align-self: center;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--fg);
+}
+
+.dtl__labels small {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--fg-3);
+}
+
+.dtl__field {
+  position: relative;
+  height: calc(var(--lanes) * 84px);
+}
+
+.dtl__lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--y);
+  height: 0;
+}
+
+.dtl__rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -0.5px;
+  height: 1px;
+  background: var(--line-2);
+}
+
+.dtl__window {
+  position: absolute;
+  top: -13px;
+  height: 26px;
+  left: calc(var(--a) * 100%);
+  width: calc((var(--b) - var(--a)) * 100%);
+  background: rgba(237, 237, 234, 0.03);
+}
+
+.dtl__bar {
+  position: absolute;
+  top: -1px;
+  height: 2px;
+  left: calc(var(--a) * 100%);
+  width: calc((var(--b) - var(--a)) * 100%);
+  background: var(--fg-3);
+}
+
+.dtl__node {
+  position: absolute;
+  left: calc(var(--x) * 100%);
+  top: 0;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid var(--fg);
+  border-radius: 2px;
+  background: var(--fg);
+}
+
+.dtl__node[data-key] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.dtl__node i,
+.dtl__limit i {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+
+.dtl__node i {
+  top: 17px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.dtl__node b {
+  margin-right: 5px;
+  font-weight: 400;
+  color: var(--fg-4);
+}
+
+.dtl__node[data-key] b {
+  color: var(--accent);
+}
+
+/* The top lane labels its nodes above, so the secret's path between the lanes stays clear. */
+.dtl__lane[data-first] .dtl__node i {
+  top: auto;
+  bottom: 17px;
+}
+
+.dtl__limit {
+  position: absolute;
+  left: calc(var(--x) * 100%);
+  top: -15px;
+  height: 30px;
+  border-left: 1px dashed var(--line-3);
+}
+
+.dtl__limit b {
+  position: absolute;
+  top: -22px;
+  left: 0;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--fg);
+}
+
+.dtl__limit i {
+  top: -20px;
+  left: 10px;
+  color: var(--fg-3);
+}
+
+.dtl__limit[data-end] i {
+  left: auto;
+  right: 10px;
+}
+
+.dtl__key {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.dtl__key line {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.dtl__spans {
+  grid-column: 2;
+  display: grid;
+  gap: 12px;
+}
+
+.dtl__span {
+  position: relative;
+  padding-top: 10px;
+}
+
+.dtl__span-line {
+  position: absolute;
+  top: 3px;
+  left: calc(var(--a) * 100%);
+  width: calc((var(--b) - var(--a)) * 100%);
+  height: 1px;
+  background: var(--line-3);
+}
+
+.dtl__span-line::before,
+.dtl__span-line::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  width: 1px;
+  height: 7px;
+  background: var(--line-3);
+}
+
+.dtl__span-line::before {
+  left: 0;
+}
+
+.dtl__span-line::after {
+  right: 0;
+}
+
+.dtl__span-label {
+  display: block;
+  margin-left: calc(var(--a) * 100%);
+  width: calc((var(--b) - var(--a)) * 100%);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--fg-3);
+  text-wrap: balance;
+}
+
+.prose .dtl__log {
+  padding: 6px 20px;
+}
+
+.prose .dtl__log > li {
+  display: grid;
+  grid-template-columns: 20px 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  margin: 0;
+  padding: 9px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg-2);
+}
+
+.prose .dtl__log > li + li {
+  border-top: 1px solid var(--line);
+}
+
+.prose .dtl__log > li::before {
+  display: none;
+}
+
+.dtl__n {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-3);
+}
+
+.dtl__log li[data-key] .dtl__n {
+  color: var(--accent);
+}
+
+.dtl__log li[data-mark] .dtl__n {
+  color: var(--fg);
+}
+
+.dtl__where {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+
+.dtl__caption {
+  padding: 12px 20px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-3);
+}
+
+@media (max-width: 640px) {
+  .dtl__diagram {
+    grid-template-columns: 62px minmax(0, 1fr);
+    padding: 22px 22px 22px 14px;
+  }
+  .dtl__field {
+    height: calc(var(--lanes) * 80px);
+  }
+  .dtl__span-label {
+    width: auto;
+    text-align: left;
+    overflow-wrap: normal;
+  }
+  .dtl__labels span {
+    font-size: 13px;
+  }
+  .dtl__labels small {
+    font-size: 10.5px;
+  }
+  .dtl__limit i {
+    display: none;
+  }
+  .dtl__node i {
+    font-size: 10.5px;
+  }
+  .dtl__node b {
+    margin-right: 3px;
+  }
+  .prose .dtl__log,
+  .dtl__title,
+  .dtl__caption {
+    padding-inline: 16px;
+  }
+  .prose .dtl__log > li {
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 2px 10px;
+  }
+  .dtl__where {
+    grid-column: 2;
+  }
+  .dtl__text {
+    grid-column: 2;
+  }
+}
+
+/* ---- Sequence diagram (```sequence) -------------------------------------------------------------- */
+
+.dseq {
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--bg-1);
+}
+
+.dseq__actors,
+.dseq__lifelines,
+.prose .dseq__msg,
+.prose .dseq__note {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+}
+
+.dseq__actors {
+  padding: 20px 20px 0;
+}
+
+.dseq__actors span {
+  justify-self: center;
+  max-width: 100%;
+  padding: 5px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dseq__body {
+  position: relative;
+  padding: 6px 20px 22px;
+}
+
+.dseq__lifelines {
+  position: absolute;
+  inset: 0 20px;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.dseq__lifelines span {
+  justify-self: center;
+  width: 1px;
+  background: var(--line-2);
+}
+
+.dseq__steps {
+  position: relative;
+}
+
+.prose .dseq__steps > li {
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.prose .dseq__steps > li::before {
+  display: none;
+}
+
+.prose .dseq__steps > .dseq__msg {
+  row-gap: 5px;
+  padding-top: 12px;
+}
+
+.dseq__label {
+  grid-row: 1;
+  padding: 0 6px;
+  text-align: center;
+  color: var(--fg-2);
+  text-wrap: balance;
+}
+
+/* Text sits on the card's color so lifelines pass behind it. */
+.dseq__label .dseq__n,
+.dseq__label .dseq__text {
+  padding: 1px 3px;
+  background: var(--bg-1);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.dseq__label .dseq__n {
+  margin-right: 1px;
+}
+
+.dseq__n {
+  margin-right: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+
+.dseq__msg[data-key] .dseq__n,
+.dseq__note[data-key] .dseq__n {
+  color: var(--accent);
+}
+
+.dseq__msg[data-key] .dseq__text {
+  color: var(--fg);
+}
+
+/* Visually hidden on wide screens (the arrow says it), shown on phones. */
+.dseq__msg .dseq__who {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.dseq__arrow {
+  grid-row: 2;
+  position: relative;
+  height: 9px;
+}
+
+.dseq__arrow::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 1px;
+  background: var(--fg-3);
+}
+
+.dseq__arrow::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -1px;
+  border-top: 4.5px solid transparent;
+  border-bottom: 4.5px solid transparent;
+  border-left: 7px solid var(--fg-3);
+}
+
+.dseq__msg[data-dir="left"] .dseq__arrow::after {
+  right: auto;
+  left: -1px;
+  border-left: 0;
+  border-right: 7px solid var(--fg-3);
+}
+
+.dseq__msg[data-reply] .dseq__arrow::before {
+  background: repeating-linear-gradient(to right, var(--fg-3) 0 4px, transparent 4px 8px);
+}
+
+.dseq__msg[data-key] .dseq__arrow::before {
+  background: var(--accent);
+}
+
+.dseq__msg[data-key] .dseq__arrow::after {
+  border-left-color: var(--accent);
+}
+
+.dseq__msg[data-key][data-dir="left"] .dseq__arrow::after {
+  border-left-color: transparent;
+  border-right-color: var(--accent);
+}
+
+.dseq__msg[data-key][data-reply] .dseq__arrow::before {
+  background: repeating-linear-gradient(to right, var(--accent) 0 4px, transparent 4px 8px);
+}
+
+.prose .dseq__steps > .dseq__note {
+  padding-top: 12px;
+}
+
+.dseq__box {
+  grid-row: 1;
+  position: relative;
+  padding: 8px 12px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  text-wrap: pretty;
+}
+
+.dseq__note .dseq__who {
+  margin-right: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+
+.dseq__pin {
+  display: none;
+}
+
+.prose .dseq__steps > .dseq__divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 20px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+
+.dseq__divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.dseq__divider span {
+  padding: 2px 0;
+  background: var(--bg-1);
+}
+
+@media (max-width: 640px) {
+  .dseq__actors,
+  .dseq__lifelines {
+    display: none;
+  }
+  .dseq__body {
+    padding: 4px 16px 10px;
+  }
+  .dseq__title {
+    padding-inline: 16px;
+  }
+  .prose .dseq__steps > .dseq__msg,
+  .prose .dseq__steps > .dseq__note {
+    display: block;
+    padding: 11px 0 12px;
+  }
+  .prose .dseq__steps > li + li:not(.dseq__divider) {
+    border-top: 1px solid var(--line);
+  }
+  .prose .dseq__steps > .dseq__divider + li:not(.dseq__divider) {
+    border-top: 0;
+  }
+  .dseq__label,
+  .dseq__box {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+  }
+  .dseq__label .dseq__n,
+  .dseq__label .dseq__text {
+    padding: 0;
+    background: none;
+  }
+  .dseq__n {
+    grid-row: 1 / span 2;
+    margin: 0;
+    line-height: 1.6;
+  }
+  .dseq__msg .dseq__who,
+  .dseq__note .dseq__who {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    grid-column: 2;
+    margin: 0 0 2px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-3);
+  }
+  .dseq__text {
+    grid-column: 2;
+  }
+  .dseq__arrow {
+    display: none;
+  }
+  .prose .dseq__steps > .dseq__divider {
+    padding: 22px 0 6px;
+  }
+}
+
+/* Blocks inside list items (an indented fence) get room on both sides. */
+.prose li > .doc-code,
+.prose li > .doc-code + * {
+  margin-top: 14px;
 }

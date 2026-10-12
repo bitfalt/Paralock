@@ -100,7 +100,7 @@ const handler = createMcpHandler(
   },
   {
     serverInfo: { name: "paralock-docs", version: "1.0.0" },
-    instructions: `${SUMMARY} This server is read-only: use list_docs and search_docs to find pages, read_doc to read one as Markdown, and get_deployments for testnet contract addresses. The code is experimental and not audited; the escrows run on testnets only.`,
+    instructions: `${SUMMARY} This server is read-only: use list_docs and search_docs to find pages, read_doc to read one as Markdown, and get_deployments for testnet contract addresses. The code is experimental and not audited by a third party; the escrows run on testnets only.`,
   },
 );
 

@@ -1,17 +1,19 @@
 import { type Doc, getDocs, getNav } from "@/lib/docs/content";
 import { DEPLOYMENTS_PLACEHOLDER, deploymentsMarkdown } from "@/lib/docs/deployments";
+import { agentMarkdown } from "@/lib/docs/directives";
 import { docMarkdownPath, docPath, GITHUB_URL, INDEX_SLUG, NPM_PACKAGES, npmUrl, SITE_URL } from "@/lib/docs/site";
 
 /** Plain-text views of the docs for agents: one page as Markdown, llms.txt and llms-full.txt. Server-only. */
 
 /** One paragraph on what Paralock is (llms.txt summary, MCP server instructions). */
 export const SUMMARY =
-  "Paralock does trustless swaps and payments between shielded ZEC and stablecoins on EVM chains (Tempo, Base, Ethereum, Arbitrum, Robinhood Chain and HyperEVM). There is a lock on each chain and one secret opens both, so either both sides settle or both refund: no bridge, custodian or wrapped token. The TypeScript SDK is published on npm as the `@paralock/*` packages.";
+  "Paralock does trustless swaps and payments between shielded ZEC and stablecoins on EVM chains (Tempo, Base, Ethereum, Arbitrum, Robinhood Chain and HyperEVM). There is a lock on each chain and one secret opens both, so either both sides settle or both refund: no bridge, custodian or wrapped token. The TypeScript SDK is published on npm as the `@paralock/*` packages; a Rust port is in progress.";
 
 const NOTES = [
-  "The code is experimental and has not been audited. The escrows are deployed on public testnets only; mainnet is not supported.",
+  "The code is experimental and has not been audited by a third party. The escrows are deployed on public testnets only; mainnet is not supported.",
   "Standard (`htlc`) mode puts a transparent HTLC on Zcash that shares a hash with the EVM lock. Private (`adaptor`) mode settles with ECDSA adaptor signatures, so no hash links the two chains.",
-  "Every link below is a plain Markdown page. Append `.md` to any docs URL, or send `Accept: text/markdown`, to get Markdown.",
+  "Every link below is a plain Markdown page. Append `.md` to any docs URL, or send `Accept: text/markdown`, to get Markdown. Tabbed examples appear as labeled code blocks in order, and diagrams as numbered text.",
+  "What is shipped, in progress, next and in research is on the Roadmap page below.",
 ];
 
 /** The canonical (HTML) URL of a page. */
@@ -50,9 +52,12 @@ const absolutize = (path: string) => {
   return `${SITE_URL}${fixed}`;
 };
 
-/** A page body ready for agents: the deployments table filled in and site links made absolute. */
+/**
+ * A page body ready for agents: the deployments table filled in, containers unwrapped (tabs become labeled fences in
+ * order), diagrams replaced by their text versions, and site links made absolute.
+ */
 export function agentBody(body: string): string {
-  const filled = body.replace(DEPLOYMENTS_PLACEHOLDER, () => deploymentsMarkdown());
+  const filled = agentMarkdown(body.replace(DEPLOYMENTS_PLACEHOLDER, () => deploymentsMarkdown()));
   return outsideFences(filled, (text) =>
     text
       .replace(/\]\((\/(?!\/)[^)\s]*)/g, (_m, p: string) => `](${absolutize(p)}`)

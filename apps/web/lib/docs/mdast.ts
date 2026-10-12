@@ -5,6 +5,8 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
+import { diagramText, isDiagramLang } from "@/lib/docs/diagrams";
+import { applyContainers, type ContainerNode, markContainers } from "@/lib/docs/directives";
 
 /**
  * Markdown → mdast with the docs' conventions applied: GitHub-style heading ids, callouts from
@@ -87,9 +89,10 @@ function calloutKind(node: Blockquote): CalloutKind | undefined {
   return kind;
 }
 
-/** Parses a page body and applies heading ids and callouts. Returns the tree and its h2/h3 outline. */
+/** Parses a page body and applies containers, heading ids and callouts. Returns the tree and its h2/h3 outline. */
 export function parseDoc(markdown: string): { tree: Root; toc: TocEntry[] } {
-  const tree = parser.runSync(parser.parse(markdown)) as Root;
+  const tree = parser.runSync(parser.parse(markContainers(markdown))) as Root;
+  applyContainers(tree);
   const slugger = new GithubSlugger();
   const toc: TocEntry[] = [];
 
@@ -129,11 +132,12 @@ export interface DocSection {
 }
 
 /** Plain text of a node, keeping word boundaries between blocks, list items and table cells. */
-function plain(node: Nodes): string {
+function plain(node: Nodes | ContainerNode): string {
   switch (node.type) {
+    case "code":
+      return isDiagramLang(node.lang) ? diagramText(node.lang.trim().toLowerCase() as "timeline" | "sequence", node.value) : node.value;
     case "text":
     case "inlineCode":
-    case "code":
       return node.value;
     case "html":
       return "";
@@ -148,7 +152,8 @@ function plain(node: Nodes): string {
     case "listItem":
     case "blockquote":
     case "table":
-      return node.children.map(plain).join("\n");
+    case "container":
+      return (node.children as Nodes[]).map(plain).join("\n");
     default:
       return "children" in node ? (node.children as Nodes[]).map(plain).join("") : "";
   }
