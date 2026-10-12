@@ -86,7 +86,7 @@ export default async function Image() {
         </div>
 
         <div style={{ display: "flex", gap: 34, marginTop: "auto", fontFamily: "Fragment Mono", fontSize: 19, color: FG3 }}>
-          <span>Open-source TypeScript SDK</span>
+          <span>TypeScript SDK and Rust core</span>
           <span>Six EVM chains</span>
           <span>Live on public testnets</span>
         </div>

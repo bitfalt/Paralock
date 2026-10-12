@@ -7,14 +7,29 @@ const mono = Fragment_Mono({ subsets: ["latin"], weight: "400", variable: "--fon
 
 const TITLE = "Paralock: pay in dollars from shielded ZEC";
 const DESCRIPTION =
-  "Pay anyone an exact dollar amount from shielded ZEC, with no bridge or custodian. Two on-chain locks share one secret, so both sides settle or both refund. Open source and experimental.";
+  "Pay anyone an exact dollar amount from shielded ZEC on six EVM chains, with no bridge or custodian. Two on-chain locks share one secret, so both sides settle or both refund. Open source, live on public testnets, experimental and not audited.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://paralock.xyz"),
   title: { default: TITLE, template: "%s | Paralock" },
   description: DESCRIPTION,
   applicationName: "Paralock",
-  keywords: ["Zcash", "ZEC", "atomic swap", "stablecoin payments", "adaptor signatures", "HTLC", "Tempo", "Base"],
+  keywords: [
+    "Zcash",
+    "ZEC",
+    "atomic swap",
+    "stablecoin payments",
+    "adaptor signatures",
+    "HTLC",
+    "Tempo",
+    "Base",
+    "Ethereum",
+    "Arbitrum",
+    "Robinhood Chain",
+    "HyperEVM",
+    "TypeScript SDK",
+    "Rust",
+  ],
   openGraph: {
     type: "website",
     siteName: "Paralock",
@@ -31,7 +46,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+    // data-scroll-behavior: smooth scrolling for in-page anchors, instant jumps between routes (Next 16 opt-in).
+    <html lang="en" className={`${sans.variable} ${mono.variable}`} data-scroll-behavior="smooth">
       <body>{children}</body>
     </html>
   );

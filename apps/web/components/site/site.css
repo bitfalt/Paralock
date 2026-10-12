@@ -1,0 +1,162 @@
+/*
+ * Site chrome shared by the landing page and the docs: the nav's landing behavior and the footer. The base nav and
+ * footer rules live in globals.css; these refine them.
+ */
+
+/* ---- Nav ----------------------------------------------------------------------------------------- */
+
+.nav__links a {
+  position: relative;
+}
+
+/* The section in view (landing only, set by NavScroll): a hairline under the link. */
+.nav__links a::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -20px;
+  height: 1px;
+  background: var(--fg);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.35s var(--ease);
+}
+
+.nav__links a[data-active] {
+  color: var(--fg);
+}
+
+.nav__links a[data-active]::after {
+  transform: scaleX(1);
+}
+
+/*
+ * At the top of the landing page the bar melts into the hero; it gains its border and blur once the page scrolls.
+ * Only with JavaScript (data-js), which is what tracks the scroll; without it the bar keeps its normal look.
+ */
+.nav[data-landing] {
+  transition:
+    background-color 0.3s var(--ease),
+    border-color 0.3s var(--ease),
+    backdrop-filter 0.3s var(--ease);
+}
+
+.nav[data-landing][data-js]:not([data-scrolled]) {
+  background: rgba(8, 9, 10, 0);
+  border-bottom-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Launch app becomes the primary action once the hero's own button has scrolled away. */
+.nav .nav__cta {
+  transition:
+    background-color 0.3s var(--ease),
+    border-color 0.3s var(--ease),
+    color 0.3s var(--ease);
+}
+
+.nav[data-cta] .nav__cta {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.nav[data-cta] .nav__cta:hover {
+  background: var(--accent-hi);
+  border-color: var(--accent-hi);
+}
+
+@media (max-width: 1099px) {
+  .nav__links .nav__wide {
+    display: none;
+  }
+}
+
+/* ---- Footer -------------------------------------------------------------------------------------- */
+
+.footer .footer__inner {
+  grid-template-columns: minmax(0, 2.2fr) repeat(4, minmax(0, 1fr));
+  gap: 40px 32px;
+}
+
+.footer .footer__brand p {
+  max-width: 30ch;
+}
+
+.footer .footer__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+
+.footer__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--fg-2);
+  animation: footer-blink 2.4s var(--ease) infinite;
+}
+
+@keyframes footer-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.footer .footer__col a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.footer__ext {
+  color: var(--fg-4);
+  transition: color 0.15s var(--ease);
+}
+
+.footer .footer__col a:hover .footer__ext {
+  color: var(--fg-2);
+}
+
+.footer .footer__fine {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 32px;
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.footer .footer__fine p {
+  padding-top: 0;
+  border-top: 0;
+  max-width: 72ch;
+}
+
+@media (max-width: 960px) {
+  .footer .footer__inner {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .footer .footer__brand {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .footer .footer__inner {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .footer__dot {
+    animation: none;
+  }
+}
