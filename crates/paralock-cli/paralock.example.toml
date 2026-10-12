@@ -1,0 +1,78 @@
+# paralock.toml: the configuration of the `paralock` binary.
+#
+# Where it is read from: --config <file>, else $PARALOCK_CONFIG, else ./paralock.toml, else
+# <state dir>/paralock.toml (<checkout>/.paralock in a Paralock checkout, else $PARALOCK_HOME, else ~/.paralock).
+# For the local devnet, skip this file and use `paralock --devnet …`.
+#
+# Keys: every private key comes from an environment variable (key_env) or a file only you can read (key_file,
+# `chmod 600`; paralock warns about looser permissions). A key written here by value (key = "…") is refused unless
+# allow_inline_keys = true, which is meant for throwaway testnet keys.
+#
+# Paralock is experimental and not audited. The Zcash leg is transparent on chain. Start small.
+
+network = "mainnet"                      # mainnet | testnet | regtest
+maker_url = "https://maker.example"      # the maker that `quote`, `swap` and `pay` trade with (or --maker-url)
+# store_dir = "~/.paralock/rust-mainnet" # swap stores (<dir>/taker, <dir>/maker): back them up, they hold keys
+# allow_inline_keys = false
+
+[zcash]
+rpc = "http://127.0.0.1:8232"            # a Zebra / Zakura JSON-RPC endpoint…
+# lightwalletd = "https://zec.rocks:443" # …or a lightwalletd / Zaino server (no full node needed)
+# rpc_user = "paralock"                  # basic auth: with rpc_password_env or rpc_password_file,
+# rpc_password_env = "ZEBRA_RPC_PASSWORD"
+# rpc_cookie_file = "~/.cache/zebra/.cookie"  # or Zebra's cookie file
+key_env = "PARALOCK_ZCASH_KEY"           # the transparent key that funds swaps (32 bytes of hex)
+# key_file = "~/.paralock/zcash.key"
+# return_address = "t1…"                 # change and refunds (default: the key's own address)
+
+# One section per EVM chain: tempo, base, ethereum, arbitrum, robinhood, hyperevm. On a testnet whose chain id
+# Paralock has deployed to, htlc, adaptor_escrow, from_block and the token default to that deployment.
+[evm.base]
+rpc = "https://mainnet.base.org"
+# verify_rpc = "https://base.other-provider.example"  # taker: a second, independent endpoint; the last check
+#                                                      # before claiming needs both to report the same lock
+chain_id = 8453
+htlc = "0x…"                             # ParalockHTLC
+adaptor_escrow = "0x…"                   # ParalockAdaptorEscrow: enables --private
+from_block = 0                           # the deployment block (event scans start here)
+key_env = "PARALOCK_EVM_KEY"             # your account on this chain (receives the stablecoins; pays claim gas)
+# relayer_key_env = "PARALOCK_RELAYER_KEY"  # a second account that submits claims for `--relay`
+# tokens = ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"]  # taker: stablecoins you accept (default: known ones)
+token = { address = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol = "USDC", decimals = 6 }  # maker: quoted
+# fee_token = "0x20c0…"                  # Tempo only: the TIP-20 that pays fees
+# rpc_timeout_seconds = 10
+
+[price]
+source = "coingecko"                     # quotes are checked against this price (and makers quote from it)
+# url = "https://…"                      # another endpoint answering { "zcash": { "usd": <price> } }
+# fixed = 50.0                           # regtest / testnet only
+
+[taker]
+# max_slippage_bps = 200                 # refuse quotes more than 2 % below your price
+# min_claim_window_seconds = 30          # time left on the maker's lock before claiming (the floor is 30)
+# min_evm_confirmations = 1
+# max_zcash_lock_blocks = 288            # longest your ZEC may stay locked if the maker vanishes
+# max_zec = "1000"
+
+# `paralock maker`. A maker on the open internet: keep the defaults, run it behind TLS, back up its store.
+[maker]
+listen = "127.0.0.1:7420"
+# payout_address = "t1…"                 # where claimed ZEC goes (default: the maker key's address)
+# zcash_key_env = "PARALOCK_MAKER_ZCASH_KEY"  # default: [zcash].key_*
+spread_bps = 50
+policy = "mainnet"                       # mainnet | devnet (devnet is refused on mainnet)
+min_zec = "0.01"
+max_zec = "10"
+max_concurrent_swaps = 10
+quote_ttl_seconds = 60
+# check_inventory = true
+# cors = ["https://app.example"]         # or ["*"]
+# expose_swap_list = false               # GET /swaps lets anyone link swaps
+# request_timeout_seconds = 30           # 0 disables
+# max_concurrent_requests = 256
+# rate_limit_per_minute = 120            # per client, on GET /quote and the POSTs; rate_limit = false disables
+# rate_limit_burst = 30
+# client_ip_header = "x-forwarded-for"   # behind a reverse proxy that sets it
+# max_connections = 1024
+# idle_timeout_seconds = 75
+# finished_swaps_in_memory = 256

@@ -1,0 +1,46 @@
+[package]
+name = "paralock-cli"
+description = "The paralock command-line tool: swap shielded ZEC for stablecoins on EVM chains (quote, swap, pay, resume, refund) and run a Paralock market maker, without a Node process. Built on the paralock Rust SDK."
+version.workspace = true
+edition.workspace = true
+# The SDK's `evm` feature builds on paralock-evm (alloy 2.x and tempo-alloy need Rust 1.95).
+rust-version = "1.95"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/paralock-cli"
+authors.workspace = true
+readme = "README.md"
+keywords = ["zcash", "atomic-swap", "stablecoin", "cli", "market-maker"]
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
+include = ["src/**/*.rs", "tests/*.rs", "paralock.example.toml", "Cargo.toml", "README.md", "LICENSE"]
+default-run = "paralock"
+
+[[bin]]
+name = "paralock"
+path = "src/main.rs"
+# Documented by the `paralock_cli` library; a `paralock` bin page would overwrite the SDK's (cargo#6313).
+doc = false
+
+[dependencies]
+paralock = { path = "../paralock", version = "0.1.0", features = ["client", "server", "evm", "price-feed", "lightwalletd"] }
+paralock-core = { path = "../paralock-core", version = "0.1.0" }
+paralock-evm = { path = "../paralock-evm", version = "0.1.0" }
+clap = { version = "4.5.48", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions", "color", "wrap_help"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { version = "1.1.0", default-features = false, features = ["parse", "serde"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync", "io-std", "io-util"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "env-filter", "ansi", "std"] }
+zeroize = { workspace = true }
+rand_core = { workspace = true }
+async-trait = "0.1.89"
+
+[dev-dependencies]
+axum = { version = "0.8.4", default-features = false, features = ["tokio", "http1"] }
+tempfile = "3.20.0"
+
+[lints]
+workspace = true
