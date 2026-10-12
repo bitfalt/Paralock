@@ -25,12 +25,15 @@ const reachable = await rpc.getBlockCount().then(
 );
 
 async function faucet(address: string, zat: bigint): Promise<void> {
-  const res = await fetch(`${THS_URL}/api/v1/faucet/address`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ address, amount_zatoshi: Number(zat), idempotency_key: bytesToHex(randomBytes(8)) }),
-  });
-  if (!res.ok) throw new Error(`faucet failed: ${res.status} ${await res.text()}`);
+  // Same idempotency key on every attempt: ths fails transiently while another process (e.g. the maker) mines.
+  const body = JSON.stringify({ address, amount_zatoshi: Number(zat), idempotency_key: bytesToHex(randomBytes(8)) });
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${THS_URL}/api/v1/faucet/address`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    if (res.ok) return;
+    const text = await res.text();
+    if (attempt >= 5 || !/checkpoint changed|synchronization failed/.test(text)) throw new Error(`faucet failed: ${res.status} ${text}`);
+    await new Promise((r) => setTimeout(r, 1_000 * attempt));
+  }
 }
 
 async function utxosOf(address: string) {

@@ -8,3 +8,4 @@ export * from "./script.js";
 export * from "./sighash.js";
 export * from "./tx.js";
 export * from "./multisig.js";
+export * from "./node.js";

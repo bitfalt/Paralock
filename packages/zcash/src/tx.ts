@@ -3,16 +3,20 @@ import { Reader, bytesToTxid, compactSize, concatBytes, i64le, toBytes, txidToBy
 
 /** v5 transaction format (ZIP 225). */
 export const TX_VERSION_5 = 5;
+/** v5 version group id. */
 export const V5_VERSION_GROUP_ID = 0x26a7270a;
+/** The fOverwintered bit of the header. */
 export const OVERWINTERED_FLAG = 0x80000000;
 
 /** Consensus branch id for NU6.3 ("Ironwood"). Prefer reading the live value from the node. */
 export const BRANCH_ID_NU6_3 = 0x37a5165b;
 
+/** Final sequence: `lock_time` is ignored for this input. */
 export const SEQUENCE_FINAL = 0xffffffff;
 /** Non-final sequence so that `lock_time` (and OP_CHECKLOCKTIMEVERIFY) is enforced. */
 export const SEQUENCE_ENABLE_LOCKTIME = 0xfffffffe;
 
+/** A transparent input. */
 export interface TxIn {
   /** Display-order (big-endian) txid of the output being spent. */
   prevTxid: string;
@@ -21,7 +25,9 @@ export interface TxIn {
   sequence: number;
 }
 
+/** A transparent output. */
 export interface TxOut {
+  /** Zatoshi. */
   value: bigint;
   scriptPubKey: Uint8Array;
 }
@@ -41,20 +47,24 @@ export interface PrevOut {
   scriptPubKey: Uint8Array;
 }
 
+/** BLAKE2b-256 with a 16-byte personalization, as ZIP 244 uses it. */
 export const blake2b256 = (personalization: string | Uint8Array, data: Uint8Array): Uint8Array =>
   blake2b(data, {
     dkLen: 32,
     personalization: typeof personalization === "string" ? new TextEncoder().encode(personalization) : personalization,
   });
 
+/** 32-byte serialized txid ‖ u32 vout. */
 export function serializeOutpoint(input: Pick<TxIn, "prevTxid" | "vout">): Uint8Array {
   return concatBytes(txidToBytes(input.prevTxid), u32le(input.vout));
 }
 
+/** i64 value ‖ CompactSize-prefixed scriptPubKey. */
 export function serializeTxOut(out: TxOut): Uint8Array {
   return concatBytes(i64le(out.value), withLength(out.scriptPubKey));
 }
 
+/** The v5 header fields (version, group id, branch id, lock time, expiry height). */
 export function headerBytes(tx: Pick<TransparentTx, "branchId" | "lockTime" | "expiryHeight">): Uint8Array {
   return concatBytes(
     u32le((TX_VERSION_5 | OVERWINTERED_FLAG) >>> 0),
@@ -65,6 +75,7 @@ export function headerBytes(tx: Pick<TransparentTx, "branchId" | "lockTime" | "e
   );
 }
 
+/** Serializes a transparent-only v5 transaction (empty Sapling and Orchard bundles). */
 export function serializeTx(tx: TransparentTx): Uint8Array {
   return concatBytes(
     headerBytes(tx),
@@ -106,9 +117,12 @@ export function parseTx(data: Uint8Array | string): TransparentTx & { shieldedRa
 
 // ZIP 244 digests. Shielded digests default to the empty-bundle values used by transparent-only transactions.
 
+/** ZIP 244 digest of an empty Sapling bundle. */
 export const emptySaplingDigest = (): Uint8Array => blake2b256("ZTxIdSaplingHash", new Uint8Array());
+/** ZIP 244 digest of an empty Orchard bundle. */
 export const emptyOrchardDigest = (): Uint8Array => blake2b256("ZTxIdOrchardHash", new Uint8Array());
 
+/** ZIP 244 digests of the shielded bundles (empty for transparent-only transactions). */
 export interface ShieldedDigests {
   sapling: Uint8Array;
   orchard: Uint8Array;
@@ -116,22 +130,28 @@ export interface ShieldedDigests {
 
 const emptyShielded = (): ShieldedDigests => ({ sapling: emptySaplingDigest(), orchard: emptyOrchardDigest() });
 
+/** ZIP 244 header digest. */
 export const headerDigest = (tx: TransparentTx): Uint8Array => blake2b256("ZTxIdHeadersHash", headerBytes(tx));
 
+/** ZIP 244 prevouts digest. */
 export const prevoutsDigest = (tx: TransparentTx): Uint8Array =>
   blake2b256("ZTxIdPrevoutHash", concatBytes(...tx.inputs.map(serializeOutpoint)));
 
+/** ZIP 244 sequence digest. */
 export const sequenceDigest = (tx: TransparentTx): Uint8Array =>
   blake2b256("ZTxIdSequencHash", concatBytes(...tx.inputs.map((i) => u32le(i.sequence))));
 
+/** ZIP 244 outputs digest. */
 export const outputsDigest = (outputs: TxOut[]): Uint8Array =>
   blake2b256("ZTxIdOutputsHash", concatBytes(...outputs.map(serializeTxOut)));
 
+/** ZIP 244 transparent digest for the txid. */
 export function transparentTxidDigest(tx: TransparentTx): Uint8Array {
   if (tx.inputs.length === 0 && tx.outputs.length === 0) return blake2b256("ZTxIdTranspaHash", new Uint8Array());
   return blake2b256("ZTxIdTranspaHash", concatBytes(prevoutsDigest(tx), sequenceDigest(tx), outputsDigest(tx.outputs)));
 }
 
+/** `"ZcashTxHash_" ‖ branchId`: the txid and signature-hash personalization. */
 export function txidPersonalization(branchId: number): Uint8Array {
   return concatBytes(new TextEncoder().encode("ZcashTxHash_"), u32le(branchId));
 }
@@ -143,4 +163,18 @@ export function txid(tx: TransparentTx, shielded: ShieldedDigests = emptyShielde
     concatBytes(headerDigest(tx), transparentTxidDigest(tx), shielded.sapling, shielded.orchard),
   );
   return bytesToTxid(digest);
+}
+
+/**
+ * The txid of a raw transparent-only v5 transaction, or undefined if it has shielded parts (their digests aren't
+ * computed here). Used to recognize a transaction the node already has.
+ */
+export function transparentTxid(hex: string): string | undefined {
+  try {
+    const tx = parseTx(hex);
+    const empty = tx.shieldedRaw.length === 3 && tx.shieldedRaw.every((b) => b === 0);
+    return empty ? txid(tx) : undefined;
+  } catch {
+    return undefined;
+  }
 }

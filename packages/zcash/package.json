@@ -1,14 +1,16 @@
 {
   "name": "@paralock/zcash",
-  "version": "0.1.0",
-  "description": "Zcash transparent HTLCs in pure TypeScript: v5 transactions, ZIP-244 sighash, claim/refund for atomic swaps.",
+  "version": "0.2.0",
+  "description": "Zcash transparent HTLCs and 2-of-2 multisig locks in pure TypeScript: v5 transactions, ZIP 244 signature hashes (checked against the official vectors), ZIP 317 fees, and a Zebra JSON-RPC client. Browser-safe.",
   "keywords": [
     "zcash",
     "htlc",
+    "multisig",
     "atomic-swap",
     "zip-244",
-    "transparent",
-    "bitcoin-script",
+    "zip-317",
+    "transaction-builder",
+    "zebra",
     "typescript"
   ],
   "license": "MIT",

@@ -2,10 +2,12 @@ import { ripemd160 } from "@noble/hashes/legacy.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, toBytes } from "./bytes.js";
 
+/** Script opcodes used by Paralock's templates. */
 export const OP = {
   OP_0: 0x00,
   OP_PUSHDATA1: 0x4c,
   OP_PUSHDATA2: 0x4d,
+  OP_PUSHDATA4: 0x4e,
   OP_1: 0x51,
   OP_IF: 0x63,
   OP_ELSE: 0x67,
@@ -21,6 +23,12 @@ export const OP = {
   OP_CHECKLOCKTIMEVERIFY: 0xb1,
 } as const;
 
+/** Consensus limit on a single pushed element (and so on a P2SH redeem script). */
+export const MAX_SCRIPT_ELEMENT_SIZE = 520;
+/** Standardness limit on a scriptSig; larger inputs are not relayed by nodes. */
+export const MAX_STANDARD_SCRIPTSIG_SIZE = 1650;
+
+/** ripemd160(sha256(data)): the hash in P2PKH and P2SH scripts. */
 export const hash160 = (data: Uint8Array): Uint8Array => ripemd160(sha256(data));
 
 /** Minimal data push. */
@@ -47,22 +55,26 @@ export function scriptNum(n: number): Uint8Array {
   return Uint8Array.from(out);
 }
 
+/** Minimal push of a non-negative script number (`OP_0`, `OP_1`…`OP_16`, or a data push). */
 export function pushNumber(n: number): Uint8Array {
   if (n === 0) return Uint8Array.of(OP.OP_0);
   if (n >= 1 && n <= 16) return Uint8Array.of(OP.OP_1 + n - 1);
   return pushData(scriptNum(n));
 }
 
+/** `OP_DUP OP_HASH160 <hash> OP_EQUALVERIFY OP_CHECKSIG`. */
 export function p2pkhScript(pubkeyHash: Uint8Array): Uint8Array {
   if (pubkeyHash.length !== 20) throw new Error("pubkey hash must be 20 bytes");
   return concatBytes(Uint8Array.of(OP.OP_DUP, OP.OP_HASH160, 20), pubkeyHash, Uint8Array.of(OP.OP_EQUALVERIFY, OP.OP_CHECKSIG));
 }
 
+/** `OP_HASH160 <hash> OP_EQUAL`. */
 export function p2shScript(scriptHash: Uint8Array): Uint8Array {
   if (scriptHash.length !== 20) throw new Error("script hash must be 20 bytes");
   return concatBytes(Uint8Array.of(OP.OP_HASH160, 20), scriptHash, Uint8Array.of(OP.OP_EQUAL));
 }
 
+/** Parameters of a Paralock HTLC redeem script. */
 export interface HtlcParams {
   /** sha256 of the 32-byte secret. */
   hashlock: Uint8Array | string;
@@ -74,6 +86,7 @@ export interface HtlcParams {
   refundHeight: number;
 }
 
+/** The HTLC secret is exactly 32 bytes (the script enforces it with `OP_SIZE`). */
 export const PREIMAGE_SIZE = 32;
 
 /**
@@ -95,9 +108,12 @@ export function htlcRedeemScript(p: HtlcParams): Uint8Array {
   const refundPubkey = toBytes(p.refundPubkey);
   if (hashlock.length !== 32) throw new Error("hashlock must be 32 bytes");
   for (const pk of [claimPubkey, refundPubkey]) {
-    if (pk.length !== 33) throw new Error("pubkeys must be 33-byte compressed keys");
+    if (pk.length !== 33 || (pk[0] !== 0x02 && pk[0] !== 0x03)) throw new Error("pubkeys must be 33-byte compressed keys");
   }
-  if (p.refundHeight < 1 || p.refundHeight >= 500_000_000) throw new Error("refundHeight must be a block height");
+  if (bytesToHex(claimPubkey) === bytesToHex(refundPubkey)) throw new Error("claim and refund keys must differ");
+  if (!Number.isSafeInteger(p.refundHeight) || p.refundHeight < 1 || p.refundHeight >= 500_000_000) {
+    throw new Error("refundHeight must be a block height");
+  }
   return concatBytes(
     Uint8Array.of(OP.OP_IF, OP.OP_SIZE),
     pushNumber(PREIMAGE_SIZE),
@@ -121,10 +137,18 @@ export function decompile(script: Uint8Array): Array<number | Uint8Array> {
     const op = script[i++]!;
     let len = -1;
     if (op > 0 && op < OP.OP_PUSHDATA1) len = op;
-    else if (op === OP.OP_PUSHDATA1) len = script[i++]!;
+    else if (op === OP.OP_PUSHDATA1) {
+      if (i >= script.length) throw new Error("push past end of script");
+      len = script[i++]!;
+    }
     else if (op === OP.OP_PUSHDATA2) {
+      if (i + 2 > script.length) throw new Error("push past end of script");
       len = script[i]! | (script[i + 1]! << 8);
       i += 2;
+    } else if (op === OP.OP_PUSHDATA4) {
+      if (i + 4 > script.length) throw new Error("push past end of script");
+      len = (script[i]! | (script[i + 1]! << 8) | (script[i + 2]! << 16) | (script[i + 3]! << 24)) >>> 0;
+      i += 4;
     }
     if (len >= 0) {
       if (i + len > script.length) throw new Error("push past end of script");
@@ -173,13 +197,29 @@ export function parseHtlcRedeemScript(script: Uint8Array | string): {
   return parsed;
 }
 
-export function claimScriptSig(signature: Uint8Array, preimage: Uint8Array, redeemScript: Uint8Array): Uint8Array {
-  if (preimage.length !== PREIMAGE_SIZE) throw new Error("preimage must be 32 bytes");
-  return concatBytes(pushData(signature), pushData(preimage), Uint8Array.of(OP.OP_1), pushData(redeemScript));
+/** Throws unless a P2SH spend with this redeem script and scriptSig is within consensus and relay limits. */
+export function assertP2shSizes(redeemScript: Uint8Array, scriptSig: Uint8Array): void {
+  if (redeemScript.length > MAX_SCRIPT_ELEMENT_SIZE) {
+    throw new Error(`redeem script is ${redeemScript.length} bytes; the limit is ${MAX_SCRIPT_ELEMENT_SIZE}`);
+  }
+  if (scriptSig.length > MAX_STANDARD_SCRIPTSIG_SIZE) {
+    throw new Error(`scriptSig is ${scriptSig.length} bytes; the standard limit is ${MAX_STANDARD_SCRIPTSIG_SIZE}`);
+  }
 }
 
+/** HTLC claim scriptSig: `<sig> <preimage> OP_1 <redeemScript>`. */
+export function claimScriptSig(signature: Uint8Array, preimage: Uint8Array, redeemScript: Uint8Array): Uint8Array {
+  if (preimage.length !== PREIMAGE_SIZE) throw new Error("preimage must be 32 bytes");
+  const scriptSig = concatBytes(pushData(signature), pushData(preimage), Uint8Array.of(OP.OP_1), pushData(redeemScript));
+  assertP2shSizes(redeemScript, scriptSig);
+  return scriptSig;
+}
+
+/** HTLC refund scriptSig: `<sig> OP_0 <redeemScript>`. */
 export function refundScriptSig(signature: Uint8Array, redeemScript: Uint8Array): Uint8Array {
-  return concatBytes(pushData(signature), Uint8Array.of(OP.OP_0), pushData(redeemScript));
+  const scriptSig = concatBytes(pushData(signature), Uint8Array.of(OP.OP_0), pushData(redeemScript));
+  assertP2shSizes(redeemScript, scriptSig);
+  return scriptSig;
 }
 
 /** Returns the preimage if `scriptSig` is a claim of an HTLC with the given hashlock. */

@@ -14,9 +14,13 @@ import {
   txidPersonalization,
 } from "./tx.js";
 
+/** Sign all inputs and outputs (what Paralock uses everywhere). */
 export const SIGHASH_ALL = 0x01;
+/** Sign the inputs only. */
 export const SIGHASH_NONE = 0x02;
+/** Sign the inputs and the output with the same index. */
 export const SIGHASH_SINGLE = 0x03;
+/** Modifier: sign only this input. */
 export const SIGHASH_ANYONECANPAY = 0x80;
 
 const empty = new Uint8Array();

@@ -1,23 +1,54 @@
 # @paralock/zcash
 
-Zcash transparent HTLCs (hash-time-locked contracts) in pure TypeScript, for atomic swaps and conditional payments.
-
-- **v5 transactions** (ZIP 225) for NU6.3 "Ironwood", which consensus accepts today.
-- **ZIP 244 signature hashes** for every transparent sighash type, checked against the
-  [official test vectors](https://github.com/zcash/zcash-test-vectors).
-- **HTLC redeem script** with a sha256 hashlock, a 32-byte secret size check, and an `OP_CHECKLOCKTIMEVERIFY`
-  refund branch, wrapped in P2SH.
-- **Builders** for funding (from P2PKH UTXOs, with change), claiming (signature + secret) and refunding (after
-  the timeout).
-- **ZIP 317 fees**, base58check addresses for mainnet, testnet and regtest, and secret extraction from a
-  claim's scriptSig.
-- A **minimal JSON-RPC client** for Zebra / Zakura (`getaddressutxos`, `sendrawtransaction`, …).
-
-Its only dependencies are [`@noble/hashes`](https://github.com/paulmillr/noble-hashes),
+Zcash transparent locks for atomic swaps and conditional payments, in pure TypeScript: sha256 HTLCs, 2-of-2
+multisig locks with pre-signed time-locked refunds, v5 transactions with ZIP 244 signature hashes (checked against
+the [official test vectors](https://github.com/zcash/zcash-test-vectors)), ZIP 317 fees, and a Zebra / Zakura JSON-RPC
+client. Its only dependencies are [`@noble/hashes`](https://github.com/paulmillr/noble-hashes),
 [`@noble/curves`](https://github.com/paulmillr/noble-curves) and [`@scure/base`](https://github.com/paulmillr/scure-base).
-It runs in Node and in browsers.
+It is browser-safe: no Node built-ins (enforced by `pnpm check:deps`).
 
-## The script
+```sh
+npm install @paralock/zcash
+```
+
+## Example: fund, claim or refund an HTLC
+
+```ts
+import {
+  FUNDING_EXPIRY_DELTA, ZcashRpc, buildHtlcClaim, buildHtlcFunding, buildHtlcRefund, createHtlc, extractPreimage,
+} from "@paralock/zcash";
+
+const rpc = new ZcashRpc("http://127.0.0.1:8232", { timeoutMs: 15_000, retries: 3 });
+const network = "mainnet";
+const tip = await rpc.getBlockCount();
+const branchId = await rpc.getNextBranchId(); // always sign with the node's next branch id
+
+const htlc = createHtlc(
+  { hashlock, claimPubkey: maker.publicKey, refundPubkey: taker.publicKey, refundHeight: tip + 144 },
+  network,
+);
+
+// The taker funds it from P2PKH UTXOs. The funding expires if it isn't mined within 40 blocks.
+const funding = buildHtlcFunding({
+  htlc, amount: 100_000_000n, utxos: await rpc.getAddressUtxos([takerAddress]), key: taker,
+  branchId, network, expiryHeight: tip + FUNDING_EXPIRY_DELTA,
+});
+await rpc.sendRawTransaction(funding.hex);
+const utxo = { txid: funding.txid, vout: 0, value: 100_000_000n, scriptPubKey: htlc.scriptPubKey };
+
+// The maker claims with the secret…
+const claim = buildHtlcClaim({ htlc, utxo, key: maker, preimage: secret, to: makerAddress, branchId, network });
+// …or the taker refunds once the tip reaches refundHeight.
+const refund = buildHtlcRefund({ htlc, utxo, key: taker, to: takerAddress, branchId, network });
+
+// Anyone can read the secret from a confirmed claim.
+const spend = await rpc.findSpend(htlc.address, funding.txid, 0);
+const revealed = extractPreimage(spend!.vin[0]!.scriptSig!.hex, htlc.params.hashlock);
+```
+
+## The scripts
+
+HTLC redeem script (P2SH):
 
 ```
 OP_IF
@@ -28,44 +59,65 @@ OP_ENDIF
 OP_CHECKSIG
 ```
 
-- **Claim:** scriptSig `<sig> <secret> OP_1 <redeemScript>`.
-- **Refund:** scriptSig `<sig> OP_0 <redeemScript>`, with `lock_time = refundHeight` and a non-final sequence.
-  It can be mined once the chain tip reaches `refundHeight`.
+- **Claim:** `<sig> <secret> OP_1 <redeemScript>`.
+- **Refund:** `<sig> OP_0 <redeemScript>`, with `lock_time = refundHeight` and a non-final sequence. It can be mined
+  once the tip reaches `refundHeight`.
+- **2-of-2:** `OP_2 <pkA> <pkB> OP_2 OP_CHECKMULTISIG` with BIP 67 sorted keys. On-chain it looks like any multisig.
 
-## Example
+## API overview
 
-```ts
-import { createHtlc, buildHtlcFunding, buildHtlcClaim, buildHtlcRefund, extractPreimage, ZcashRpc } from "@paralock/zcash";
+| Area | Exports |
+|---|---|
+| HTLC | `createHtlc`, `htlcFromRedeemScript` (byte-for-byte template check), `buildHtlcFunding`, `buildHtlcClaim`, `buildHtlcRefund`, `extractPreimage`, `htlcRedeemScript`, `parseHtlcRedeemScript` |
+| 2-of-2 | `createMultisig2of2`, `multisigFromRedeemScript`, `buildMultisigSpend` (with optional `lockTime` for refunds), `signMultisigSpend`, `verifyMultisigSignature`, `finalizeMultisigSpend` (verifies both signatures first), `multisigSignaturesFromScriptSig` |
+| Spending | `buildP2pkhSpend` (spends every given UTXO, change ≥ `DUST_LIMIT` or dropped into the fee), `SignedTx`, `TxOptions` (`branchId`, `expiryHeight`, `fee`, `network`) |
+| Transactions | `serializeTx`, `parseTx`, `txid`, `transparentTxid(hex)`, `transparentSighash` (all six sighash types), `SIGHASH_*`, `BRANCH_ID_NU6_3` |
+| Fees and limits | `zip317Fee`, `MARGINAL_FEE`, `DUST_LIMIT` (1,000 zat), `MIN_CHANGE`, `MAX_MONEY`, `FUNDING_EXPIRY_DELTA` (40), `MAX_SCRIPT_ELEMENT_SIZE` (520), `MAX_STANDARD_SCRIPTSIG_SIZE` (1,650), `assertOutputValue`, `assertExpiryHeight`, `assertP2shSizes` |
+| Keys and addresses | `randomKeyPair`, `keyPairFromPrivate`, `isValidPublicKey`, `assertValidPublicKey`, `keyAddress`, `signDigest` (low-S, RFC 6979), `p2pkhAddress`, `p2shAddress`, `decodeTransparentAddress`, `isTransparentAddress(address, network?)`, `scriptPubKeyForAddress(address, network?)` |
+| Node | `ZcashNode` (the interface the SDK engines use), `ZcashRpc`, `ZcashRpcError` (`.alreadyKnown`), `ZcashRpcTransportError`, `RawTransaction`, `BlockchainInfo` |
 
-const rpc = new ZcashRpc("http://127.0.0.1:18232");
-const branchId = await rpc.getNextBranchId();
+### `ZcashNode` and `ZcashRpc`
 
-const htlc = createHtlc(
-  { hashlock, claimPubkey: maker.publicKey, refundPubkey: taker.publicKey, refundHeight: (await rpc.getBlockCount()) + 144 },
-  "testnet",
-);
+`ZcashNode` is the backend interface the Paralock engines depend on: `getBlockCount`, `getNextBranchId`,
+`getAddressUtxos`, `getAddressTxids`, `getRawTransaction`, `sendRawTransaction`, `findSpend`, plus optional
+`getTxOut`, `upgradeBefore` and `generate` (light backends such as lightwalletd may omit them).
 
-// Taker funds the HTLC from their P2PKH UTXOs.
-const funding = buildHtlcFunding({ htlc, amount: 100_000_000n, utxos: await rpc.getAddressUtxos([takerAddress]), key: taker, branchId });
-await rpc.sendRawTransaction(funding.hex);
+`ZcashRpc` implements all of it over JSON-RPC:
 
-// Maker claims with the secret…
-const [utxo] = await rpc.getAddressUtxos([htlc.address]);
-const claim = buildHtlcClaim({ htlc, utxo, key: maker, preimage: secret, to: makerAddress, branchId });
+- `new ZcashRpc(url, { auth, timeoutMs = 15_000, retries = 3, retryDelayMs = 250, fetch })`. A bare
+  `{ username, password }` second argument is still accepted.
+- Every call has a timeout. Idempotent calls are retried with exponential backoff on transport failures (network
+  errors, timeouts, HTTP 5xx, non-JSON bodies) and throw `ZcashRpcTransportError` when retries run out. JSON-RPC
+  errors throw `ZcashRpcError` at once. `generate` is never retried.
+- `sendRawTransaction` returns the txid; if the node already has a transparent-only transaction (mempool or chain),
+  that counts as success.
+- `getTxOut`, `getBlockchainInfo`, and `upgradeBefore(height)`: the first network upgrade activating before a height.
 
-// …or the taker refunds after the timeout.
-const refund = buildHtlcRefund({ htlc, utxo, key: taker, to: takerAddress, branchId });
+## Transaction expiry
 
-// Anyone can recover the secret from a confirmed claim.
-const spend = await rpc.findSpend(htlc.address, utxo.txid, utxo.vout);
-const revealed = extractPreimage(spend!.vin[0]!.scriptSig!.hex, htlc.params.hashlock);
-```
+`expiryHeight` defaults to 0 (never expires). Paralock sets an expiry only on **funding** transactions
+(`tip + FUNDING_EXPIRY_DELTA`), so a stuck funding can't confirm hours later. **Claims and refunds keep 0**: they are
+often signed long before broadcast (pre-signed refunds, adaptor-completed claims) and must stay valid until mined.
+Nodes reject transactions that expire within 3 blocks of the tip.
+
+## Security notes
+
+- Public keys are checked to be valid compressed points; HTLC claim and refund keys must differ.
+- Signatures are low-S, strict DER, with RFC 6979 nonces. `finalizeMultisigSpend` verifies both signatures
+  (`{ verify: false }` exists only for tests that need consensus to reject a bad spend).
+- Pass `network` to the builders so a mainnet address can't slip into a testnet transaction (and vice versa).
+- A pre-signed spend commits to the consensus branch id; it becomes invalid if a network upgrade activates first.
+  Check with `upgradeBefore`.
+- Redeem scripts and scriptSigs are checked against consensus and relay size limits.
+- v5 txids (ZIP 244) don't commit to signatures, so a funding txid is final before signing. That is what makes
+  pre-signed refunds safe.
 
 ## Tests
 
 ```sh
-pnpm --filter @paralock/zcash test   # test vectors; the regtest suite runs when a local ths/Zakura node is up
+pnpm --filter @paralock/zcash test   # vectors and unit tests; the regtest suites run when a local ths/Zakura node is up
 ```
 
-The regtest suite funds, claims and refunds real HTLCs on a local
-[ths](https://github.com/zcashlabs/thus-spoke-zakura) network.
+## Status
+
+0.2.0. Experimental and not audited. Transparent only: the locks are visible on-chain.

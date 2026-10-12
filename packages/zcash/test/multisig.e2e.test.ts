@@ -26,12 +26,15 @@ const reachable = await rpc.getBlockCount().then(
 );
 
 async function faucet(address: string, zat: bigint) {
-  const res = await fetch(`${THS_URL}/api/v1/faucet/address`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ address, amount_zatoshi: Number(zat), idempotency_key: bytesToHex(randomBytes(8)) }),
-  });
-  if (!res.ok) throw new Error(`faucet failed: ${res.status}`);
+  // Same idempotency key on every attempt: ths fails transiently while another process (e.g. the maker) mines.
+  const body = JSON.stringify({ address, amount_zatoshi: Number(zat), idempotency_key: bytesToHex(randomBytes(8)) });
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${THS_URL}/api/v1/faucet/address`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    if (res.ok) return;
+    const text = await res.text();
+    if (attempt >= 5 || !/checkpoint changed|synchronization failed/.test(text)) throw new Error(`faucet failed: ${res.status} ${text}`);
+    await new Promise((r) => setTimeout(r, 1_000 * attempt));
+  }
 }
 
 describe.skipIf(!reachable)("2-of-2 multisig with adaptor signatures on regtest", () => {
@@ -104,10 +107,12 @@ describe.skipIf(!reachable)("2-of-2 multisig with adaptor signatures on regtest"
     const claim = buildMultisigSpend({ multisig, utxo, to: keyAddress(maker, "regtest"), branchId });
     const pre = preSign(taker.privateKey, claim.sighash, adaptorKeyPair().point);
     const wrong = concatBytes(der(adapt(pre, adaptorKeyPair().secret)), Uint8Array.of(1));
-    const signed = finalizeMultisigSpend(claim, {
+    const signatures = {
       [bytesToHex(taker.publicKey)]: wrong,
       [bytesToHex(maker.publicKey)]: signMultisigSpend(claim, maker),
-    });
+    };
+    expect(() => finalizeMultisigSpend(claim, signatures)).toThrow(/invalid signature/);
+    const signed = finalizeMultisigSpend(claim, signatures, { verify: false });
     await expect(rpc.sendRawTransaction(signed.hex)).rejects.toThrow();
   });
 });

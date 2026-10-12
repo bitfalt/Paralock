@@ -2,9 +2,9 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex, concatBytes, toBytes } from "./bytes.js";
 import { type Network, p2shAddress, scriptPubKeyForAddress } from "./address.js";
 import { zip317Fee } from "./fee.js";
-import type { SignedTx, TxOptions, Utxo } from "./htlc.js";
-import { type KeyPair, signDigest } from "./keys.js";
-import { OP, decompile, hash160, p2shScript, pushData } from "./script.js";
+import { DUST_LIMIT, type SignedTx, type TxOptions, type Utxo, assertExpiryHeight } from "./htlc.js";
+import { type KeyPair, assertValidPublicKey, signDigest } from "./keys.js";
+import { OP, assertP2shSizes, decompile, hash160, p2shScript, pushData } from "./script.js";
 import { SIGHASH_ALL, transparentSighash } from "./sighash.js";
 import {
   BRANCH_ID_NU6_3,
@@ -33,7 +33,7 @@ export interface Multisig2of2 {
 /** `OP_2 <pk1> <pk2> OP_2 OP_CHECKMULTISIG` with lexicographically sorted keys. */
 export function createMultisig2of2(pubkeyA: Uint8Array | string, pubkeyB: Uint8Array | string, network: Network): Multisig2of2 {
   const keys = [bytesToHex(toBytes(pubkeyA)), bytesToHex(toBytes(pubkeyB))].sort() as [string, string];
-  for (const k of keys) if (k.length !== 66) throw new Error("pubkeys must be 33-byte compressed keys");
+  for (const k of keys) assertValidPublicKey(k, "multisig pubkey");
   if (keys[0] === keys[1]) throw new Error("multisig keys must differ");
   const redeemScript = concatBytes(
     Uint8Array.of(OP_2),
@@ -44,6 +44,7 @@ export function createMultisig2of2(pubkeyA: Uint8Array | string, pubkeyB: Uint8A
   return { pubkeys: keys, redeemScript, scriptPubKey: p2shScript(hash160(redeemScript)), address: p2shAddress(redeemScript, network) };
 }
 
+/** Parses and validates a redeem script against the sorted 2-of-2 template, byte for byte. */
 export function multisigFromRedeemScript(redeemScript: Uint8Array | string, network: Network): Multisig2of2 {
   const ops = decompile(toBytes(redeemScript));
   const a = ops[1];
@@ -56,6 +57,7 @@ export function multisigFromRedeemScript(redeemScript: Uint8Array | string, netw
   return ms;
 }
 
+/** An unsigned spend of a 2-of-2 output, with the digest both keys sign. */
 export interface MultisigSpend {
   multisig: Multisig2of2;
   /** Unsigned transaction (placeholder scriptSig). */
@@ -79,7 +81,9 @@ export function buildMultisigSpend(
 ): MultisigSpend {
   const utxoScript = toBytes(args.utxo.scriptPubKey);
   if (bytesToHex(utxoScript) !== bytesToHex(args.multisig.scriptPubKey)) throw new Error("UTXO is not this multisig");
+  assertExpiryHeight(args.expiryHeight ?? 0);
   const lockTime = args.lockTime ?? 0;
+  if (!Number.isSafeInteger(lockTime) || lockTime < 0 || lockTime >= 500_000_000) throw new Error("lockTime must be a block height");
   const unsigned: TransparentTx = {
     branchId: args.branchId ?? BRANCH_ID_NU6_3,
     lockTime,
@@ -92,11 +96,11 @@ export function buildMultisigSpend(
         sequence: lockTime > 0 ? SEQUENCE_ENABLE_LOCKTIME : SEQUENCE_FINAL,
       },
     ],
-    outputs: [{ value: 0n, scriptPubKey: scriptPubKeyForAddress(args.to) }],
+    outputs: [{ value: 0n, scriptPubKey: scriptPubKeyForAddress(args.to, args.network) }],
   };
   const fee = args.fee ?? zip317Fee(unsigned);
   const value = args.utxo.value - fee;
-  if (value <= 0n) throw new Error("multisig amount does not cover the fee");
+  if (value < DUST_LIMIT) throw new Error("multisig amount does not cover the fee");
   const tx: TransparentTx = { ...unsigned, outputs: [{ ...unsigned.outputs[0]!, value }] };
   const sighash = transparentSighash(tx, 0, [{ value: args.utxo.value, scriptPubKey: utxoScript }], SIGHASH_ALL);
   return { multisig: args.multisig, tx, sighash, fee, prevValue: args.utxo.value };
@@ -110,14 +114,24 @@ export function signMultisigSpend(spend: MultisigSpend, key: KeyPair): Uint8Arra
 
 /**
  * Assembles the scriptSig from both signatures (each DER + sighash type byte), keyed by compressed pubkey hex.
- * Signatures can come from anywhere, e.g. one completed from an adaptor pre-signature.
+ * Signatures can come from anywhere, e.g. one completed from an adaptor pre-signature. Each one is verified (low-S,
+ * SIGHASH_ALL) against the spend first, so a bad signature fails here instead of at broadcast.
  */
-export function finalizeMultisigSpend(spend: MultisigSpend, signatures: Record<string, Uint8Array>): SignedTx {
+export function finalizeMultisigSpend(
+  spend: MultisigSpend,
+  signatures: Record<string, Uint8Array>,
+  options: { /** Skip the signature checks (tests that need consensus to reject a bad spend). Default true. */ verify?: boolean } = {},
+): SignedTx {
   const [k1, k2] = spend.multisig.pubkeys;
   const s1 = signatures[k1];
   const s2 = signatures[k2];
   if (!s1 || !s2) throw new Error("need a signature for both multisig keys");
+  if (options.verify !== false) {
+    if (!verifyMultisigSignature(spend, k1, s1)) throw new Error(`invalid signature for multisig key ${k1}`);
+    if (!verifyMultisigSignature(spend, k2, s2)) throw new Error(`invalid signature for multisig key ${k2}`);
+  }
   const scriptSig = concatBytes(Uint8Array.of(OP.OP_0), pushData(s1), pushData(s2), pushData(spend.multisig.redeemScript));
+  assertP2shSizes(spend.multisig.redeemScript, scriptSig);
   const signed: TransparentTx = { ...spend.tx, inputs: [{ ...spend.tx.inputs[0]!, scriptSig }] };
   return { tx: signed, hex: bytesToHex(serializeTx(signed)), txid: txid(signed), fee: spend.fee };
 }
