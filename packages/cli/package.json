@@ -1,0 +1,14 @@
+{
+  "name": "@paralock/cli",
+  "version": "0.1.0",
+  "description": "paralock CLI: local Zcash + Tempo devnet, maker server, and swaps from the terminal.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "paralock": "dist/main.js" },
+  "scripts": { "build": "tsc -p .", "typecheck": "tsc -p . --noEmit", "start": "node dist/main.js" },
+  "dependencies": {
+    "@paralock/sdk": "workspace:*",
+    "@paralock/tempo": "workspace:*",
+    "@paralock/zcash": "workspace:*"
+  }
+}
