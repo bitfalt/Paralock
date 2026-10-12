@@ -19,7 +19,7 @@ colosseum.com before the deadline.
   - it runs on public testnets today, with every transaction recorded.
   - a business model with a payer.
 - **General pool:** the business is hosted makers: takers pay through the spread, the first integrations are wallets
-  adding "swap to dollars" with the SDK, and the founder is a backend engineer working on ZK infrastructure.
+  adding "swap to dollars" with the SDK, and the founder is a backend engineer who builds trading bots and exchange tooling.
 - **Public Good award:** the open-source Zcash libraries in TypeScript and Rust (npm and crates.io), adaptor
   signatures, the protocol spec with cross-language test vectors, the one-command devnet and the agent docs (llms.txt,
   MCP). 3 of the last 5 winners of that award were open-source dev tools.
@@ -88,30 +88,30 @@ earn the spread.
    - **Private mode:** removes that link (adaptor signatures).
    - **Next:** a fully shielded leg with FROST. See docs/PRIVACY.md.
 
-## Pitch video script (2:00 max; 237 words, about 1:55 at ~125 wpm)
+## Pitch video script (2:00 max; about 1:55 at ~125 wpm)
 
 The form asks you to introduce yourself, say what you're building and why you're the one to build it.
 
-**[intro]** Hi, I'm bitfalt. I'm a backend engineer working on zero-knowledge infrastructure, and a computer
-engineering master's student in Costa Rica.
+**[intro]** Hi, I'm bitfalt. I'm a backend engineer from Costa Rica, building trading bots and tooling for an
+exchange, and a computer science master's student at TEC.
 
 **[problem]** Zcash has the strongest privacy in crypto. But the moment you want to spend it in dollars, you have to
 hand your ZEC to a bridge, an exchange or a solver. Somebody holds your money in the middle.
 
 **[what]** I'm building Paralock, an open-source toolkit that removes that somebody. Two locks, one key. You lock ZEC
 on Zcash, a market maker locks stablecoins on a chain like Tempo or Base, and one secret opens both. Either both
-sides get paid, or both get refunded. In private mode, not even a hash links the two chains.
+sides get paid, or both get refunded.
 
 **[developers]** It's built for developers. There's a TypeScript SDK on npm, a Rust SDK and a native binary on
 crates.io, a one-command local network, and docs that coding agents can read. Wallets can add "swap to dollars"
-without ever holding user funds. And it already runs on public testnets, with every transaction published.
+without ever holding user funds. It already runs on public testnets, with every transaction published.
 
 **[business]** The business is liquidity. The toolkit is free; we host the market makers and earn the spread on every
 swap.
 
-**[why me]** Why me? I build backend systems for zero-knowledge infrastructure every day, and this needed both sides:
-low-level Zcash transaction code and production-grade engineering. In one hackathon I shipped both SDKs, the
-contracts and real testnet swaps.
+**[why me]** Why me? I build trading systems every day, so I know how makers and liquidity work. I've won hackathons,
+contributed to open source, and I organize blockchain community events in Costa Rica. And in this one hackathon I
+shipped both SDKs, the contracts and real testnet swaps.
 
 **[close]** Paralock: keep it shielded, spend it in dollars, and trust no one in between. Thanks.
 
