@@ -46,6 +46,32 @@ jobs:
           PARALOCK_BACKEND: mock
         run: npx tsc --noEmit && npx next build
 
+  rust:
+    name: Rust crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # anvil (plain and --network tempo) for the integration tests; Node for the TypeScript interop tests.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile && pnpm build
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: Audit dependencies
+        run: cargo install --locked cargo-audit && cargo audit
+
   contracts:
     name: Contracts (Foundry)
     runs-on: ubuntu-latest
