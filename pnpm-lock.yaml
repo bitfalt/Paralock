@@ -26,12 +26,12 @@ importers:
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
+      '@paralock/evm':
+        specifier: workspace:*
+        version: link:../../packages/evm
       '@paralock/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@paralock/tempo':
-        specifier: workspace:*
-        version: link:../../packages/tempo
       '@scure/base':
         specifier: ^2.4.0
         version: 2.4.0
@@ -69,15 +69,21 @@ importers:
 
   packages/cli:
     dependencies:
+      '@paralock/evm':
+        specifier: workspace:*
+        version: link:../evm
       '@paralock/sdk':
         specifier: workspace:*
         version: link:../sdk
-      '@paralock/tempo':
-        specifier: workspace:*
-        version: link:../tempo
       '@paralock/zcash':
         specifier: workspace:*
         version: link:../zcash
+
+  packages/evm:
+    dependencies:
+      viem:
+        specifier: ^2.57.4
+        version: 2.57.4(typescript@5.9.3)
 
   packages/sdk:
     dependencies:
@@ -87,9 +93,12 @@ importers:
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
-      '@paralock/tempo':
+      '@paralock/adaptor':
         specifier: workspace:*
-        version: link:../tempo
+        version: link:../adaptor
+      '@paralock/evm':
+        specifier: workspace:*
+        version: link:../evm
       '@paralock/zcash':
         specifier: workspace:*
         version: link:../zcash
@@ -99,12 +108,6 @@ importers:
       '@scure/bip39':
         specifier: ^2.4.0
         version: 2.4.0
-
-  packages/tempo:
-    dependencies:
-      viem:
-        specifier: ^2.57.4
-        version: 2.57.4(typescript@5.9.3)
 
   packages/zcash:
     dependencies:

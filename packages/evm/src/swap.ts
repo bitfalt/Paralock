@@ -1,17 +1,20 @@
 import { type Address, encodeAbiParameters, type Hex, keccak256, sha256 } from "viem";
 import { paralockHtlcAbi } from "./abi.js";
+import { assertBytes32 } from "./internal.js";
+
+export { assertBytes32 };
 
 /** On-chain swap parameters, mirroring `ParalockHTLC.Swap`. */
 export interface HtlcSwap {
   /** sha256 of the 32-byte secret; also the Zcash HTLC's hashlock. */
   hashlock: Hex;
-  /** TIP-20 token held in escrow. */
+  /** Token held in escrow (a TIP-20 on Tempo, any standard ERC-20 elsewhere). */
   token: Address;
   /** Locks the funds; refunded from `expiry` on (the maker). */
   sender: Address;
   /** Paid on claim (the taker). */
   recipient: Address;
-  /** Token base units (TIP-20 stablecoins have 6 decimals). */
+  /** Token base units (TIP-20 stablecoins and USDC have 6 decimals). */
   amount: bigint;
   /** Unix seconds from which the swap can only be refunded. */
   expiry: bigint;
@@ -49,8 +52,4 @@ export function statusOf(raw: Hex): HtlcStatus {
   if (value === 0n) return "empty";
   if (value === 1n) return "settled";
   return "active";
-}
-
-export function assertBytes32(value: Hex, name: string): void {
-  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) throw new TypeError(`${name} must be 32 bytes of hex, got ${value}`);
 }

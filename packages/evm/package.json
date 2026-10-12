@@ -1,7 +1,7 @@
 {
-  "name": "@paralock/tempo",
+  "name": "@paralock/evm",
   "version": "0.1.0",
-  "description": "Paralock HTLC client for Tempo (TIP-20 escrow) built on viem.",
+  "description": "Paralock escrow clients for EVM chains (Tempo, Base, Ethereum): the hash-time-locked ParalockHTLC and the adaptor-signature ParalockAdaptorEscrow, built on viem.",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
