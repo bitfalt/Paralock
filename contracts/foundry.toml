@@ -6,7 +6,8 @@ solc_version = "0.8.33"
 evm_version = "prague"
 optimizer = true
 optimizer_runs = 20_000
-# Tempo precompiles (TIP-20, TIP20Factory, FeeManager) and 0x76 transactions in forge's EVM.
+# Tempo precompiles (TIP-20, TIP20Factory, FeeManager) and 0x76 transactions in forge's EVM. Override with
+# FOUNDRY_NETWORK=ethereum when broadcasting to a non-Tempo chain (Base, Ethereum).
 network = "tempo"
 remappings = [
     "forge-std/=lib/forge-std/src/",
@@ -20,6 +21,9 @@ runs = 1024
 
 [rpc_endpoints]
 tempo_local = "http://localhost:8545"
+# Plain EVM devnet chains: run forge with FOUNDRY_NETWORK=ethereum against these (see script/Deploy.s.sol).
+base_local = "http://localhost:8546"
+ethereum_local = "http://localhost:8547"
 moderato = "https://rpc.moderato.tempo.xyz"
 
 [lint]
