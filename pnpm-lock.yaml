@@ -85,6 +85,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/zcash
 
+  examples/testnet:
+    dependencies:
+      '@paralock/lightwalletd':
+        specifier: workspace:*
+        version: link:../../packages/lightwalletd
+      '@paralock/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@paralock/zcash':
+        specifier: workspace:*
+        version: link:../../packages/zcash
+
   packages/adaptor:
     dependencies:
       '@noble/curves':

@@ -1,0 +1,14 @@
+{
+  "name": "@paralock/example-testnet",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A real swap on public testnets: Zcash testnet (TAZ) to OUSD on Tempo Moderato, through lightwalletd.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": { "start": "tsx src/index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@paralock/lightwalletd": "workspace:*",
+    "@paralock/sdk": "workspace:*",
+    "@paralock/zcash": "workspace:*"
+  }
+}
