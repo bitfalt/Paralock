@@ -7,7 +7,7 @@ description: "Reference for the browser-safe Zcash package: keys and addresses, 
 
 It is browser-safe: no Node built-ins. Its only dependencies are `@noble/hashes`, `@noble/curves` and `@scure/base`.
 
-> **Warning:** Experimental and not audited. Use testnets and regtest only. The locks are transparent: they are visible on-chain.
+> **Warning:** Experimental and not audited by a third party. Use testnets and regtest only. The locks are transparent: they are visible on-chain.
 
 ## Install
 
@@ -15,7 +15,9 @@ It is browser-safe: no Node built-ins. Its only dependencies are `@noble/hashes`
 npm install @paralock/zcash
 ```
 
-Version 0.2.0. Conventions:
+This page describes version 0.3.0 (the release before it is 0.2.0). In 0.3.0 the transaction builders require `branchId` and `network` (no default branch id), and parsing is strict: canonical CompactSize, only the six v5 sighash types, curve-checked HTLC keys, and a preimage check in `buildHtlcClaim` before it signs.
+
+Conventions:
 
 - Amounts are `bigint` zatoshi (1 ZEC = 100,000,000 zat).
 - Txids are display-order hex without `0x`.
@@ -53,17 +55,26 @@ Version 0.2.0. Conventions:
 
 The HTLC is a P2SH output. Its redeem script puts the claim branch first, with a sha256 hashlock and a 32-byte size check:
 
-```text
-OP_IF
-  OP_SIZE 32 OP_EQUALVERIFY OP_SHA256 <hashlock> OP_EQUALVERIFY <claimPubkey>
-OP_ELSE
-  <refundHeight> OP_CHECKLOCKTIMEVERIFY OP_DROP <refundPubkey>
+```zscript
+OP_IF                                    # claim branch
+  OP_SIZE 32 OP_EQUALVERIFY              # a 32-byte secret
+  OP_SHA256 <hashlock> OP_EQUALVERIFY    # whose sha256 is the hashlock
+  <claimPubkey>
+OP_ELSE                                  # refund branch, from refundHeight
+  <refundHeight> OP_CHECKLOCKTIMEVERIFY OP_DROP
+  <refundPubkey>
 OP_ENDIF
-OP_CHECKSIG
+OP_CHECKSIG                              # signed by the key picked above
 ```
 
-- **Claim:** `<sig> <secret> OP_1 <redeemScript>`. Works before and after the timeout.
-- **Refund:** `<sig> OP_0 <redeemScript>`, with `lock_time = refundHeight` and a non-final input sequence. It can be mined once the tip reaches `refundHeight` (in block `refundHeight + 1` or later).
+The two ways to spend it (scriptSigs):
+
+```zscript
+<sig> <secret> OP_1 <redeemScript>       # claim: works before and after the timeout
+<sig> OP_0 <redeemScript>                # refund: only after refundHeight
+```
+
+A refund sets `lock_time = refundHeight` and a non-final input sequence, so it can be mined once the tip reaches `refundHeight` (in block `refundHeight + 1` or later).
 
 The same `hashlock` (sha256 of the secret) locks the EVM side, see [`ParalockHTLC`](/docs/contracts).
 
@@ -174,7 +185,12 @@ const revealed = spend && extractPreimage(spend.vin[0]!.scriptSig!.hex, htlc.par
 
 ## 2-of-2 multisig
 
-Private (adaptor) mode locks ZEC in a plain 2-of-2 multisig: `OP_2 <pkA> <pkB> OP_2 OP_CHECKMULTISIG` with BIP 67 sorted keys. On-chain it looks like any multisig: no hashlock, no timelock. The refund path is a pre-signed transaction with a `lock_time`.
+Private (adaptor) mode locks ZEC in a plain 2-of-2 multisig with BIP 67 sorted keys. On-chain it looks like any multisig: no hashlock, no timelock. The refund path is a pre-signed transaction with a `lock_time`.
+
+```zscript
+OP_2 <pkA> <pkB> OP_2 OP_CHECKMULTISIG   # redeem script, keys sorted
+OP_0 <sigA> <sigB> <redeemScript>        # any spend: both signatures, in key order
+```
 
 | Export | Signature | Meaning |
 |---|---|---|

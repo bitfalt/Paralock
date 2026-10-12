@@ -5,7 +5,7 @@ description: The invariants Paralock never breaks, what a malicious maker, taker
 
 Paralock's goal is that neither party can take the other's funds, and that no third party ever holds them. This page states what the code guarantees, what it assumes, and where it falls short.
 
-> **Warning:** Paralock is experimental and **not audited**. The escrows are deployed on six public testnets only, and there is no mainnet support. In both modes the Zcash leg is a transparent output.
+> **Warning:** Paralock is experimental and **not audited** by a third party. The escrows are deployed on six public testnets only, and there is no mainnet support. In both modes the Zcash leg is a transparent output.
 
 ## Protocol invariants
 
@@ -62,7 +62,7 @@ The engines believe your nodes. A malicious or broken Zcash node or EVM RPC endp
 
 | You trust | Why | How to reduce it |
 |---|---|---|
-| The code | It is not audited, and ECDSA adaptor signatures have had far less scrutiny than Schnorr ones | Small amounts, testnets, reading the source and tests |
+| The code | It has not been audited by a third party, and ECDSA adaptor signatures have had far less scrutiny than Schnorr ones | Small amounts, testnets, reading the source and tests |
 | The maker's price | Only for the rate, never with your funds | `price` and `maxSlippageBps` on the taker |
 | Your own liveness | The taker must claim before expiry, with `minClaimWindowSeconds` to spare; the maker must claim the ZEC before the refund height | Durable stores, `resume` and `maker.start()` after restarts, supervised processes |
 | Your nodes | They report chain state | Run your own Zebra or Zakura node and EVM RPC |
@@ -95,20 +95,22 @@ Never commit keys. Anvil's development keys are public, and `.paralock/` (the de
 
 ## Test coverage
 
-| Suite | Tests | What it covers |
-|---|---|---|
-| `packages/zcash` | 29 | ZIP 244 txid and all six transparent sighash types against the official test vectors; RPC timeouts, retries and duplicate broadcasts; key, address-network, dust and signature checks; live regtest: HTLC fund, claim and refund (refund rejected before the timeout), 2-of-2 claim with an adaptor-completed signature, pre-signed refund only after its lock time, wrong secret rejected |
-| `packages/adaptor` | 32 | Pre-sign, pre-verify, adapt, verify, extract over random rounds; tampering and out-of-range scalars rejected; fresh nonces per call; EVM `ecrecover` compatibility |
-| `packages/evm` | 23 | Both escrow clients against local Tempo and plain EVM chains, including lock lookups with block numbers |
-| `packages/sdk` | 65 | Both engines on fake chains in both modes; restart and resume of both parties; secrets persisted before funding; claim rebroadcast; refunds from the store; a maker refusing an underfunded 2-of-2, a delayed funding and a missing pre-signature; maker limits; stores; quote and request validation; retries; factories; HTTP handler and client |
-| `packages/lightwalletd` | 6 | Txid vectors and live regtest through lightwalletd |
-| `contracts` | 146 | Both escrows: happy paths, wrong secret or signer, high-s signatures, expiry edges, double claims, reuse, tampering, fuzzing, real TIP-20 tokens |
+| Suite | What it covers |
+|---|---|
+| `packages/zcash` | ZIP 244 txid and all six transparent sighash types against the official test vectors; strict parsing (canonical CompactSize, curve-checked keys, required branch id and network); RPC timeouts, retries and duplicate broadcasts; key, address-network, dust and signature checks; live regtest: HTLC fund, claim and refund (refund rejected before the timeout), 2-of-2 claim with an adaptor-completed signature, pre-signed refund only after its lock time, wrong secret rejected |
+| `packages/adaptor` | Pre-sign, pre-verify, adapt, verify, extract over random rounds; tampering and out-of-range scalars rejected; fresh nonces per call; bounded nonce retries; EVM `ecrecover` compatibility |
+| `packages/evm` | Both escrow clients against local Tempo and plain EVM chains, including lock lookups with block numbers |
+| `packages/sdk` | Both engines on fake chains in both modes; restart and resume of both parties; secrets persisted before funding; reservation before the htlc funding is broadcast; the public swap view without adaptor data; claim rebroadcast; refunds from the store; a maker refusing an underfunded 2-of-2, a delayed funding and a missing pre-signature; maker limits; stores; quote and request validation; retries; factories; HTTP handler and client; the shared protocol vectors |
+| `packages/lightwalletd` | Txid vectors and live regtest through lightwalletd |
+| `contracts` | Both escrows: happy paths, wrong secret or signer, high-s signatures, expiry edges, double claims, reuse, tampering, fuzzing, real TIP-20 tokens |
+| `crates/*` | The Rust core and EVM layer against the same `spec/vectors`, plus property tests |
 
-The live regtest suites run only when a local node is up. End-to-end swaps have also been run on the devnet: htlc mode on Tempo, private mode on Tempo, Base and Ethereum, a fresh recipient with a relayed claim, the maker-vanishes refund in both modes, and the taker-never-claims double refund.
+The live regtest suites run only when a local node is up. End-to-end swaps have also been run on the devnet (htlc mode on Tempo; private mode on Tempo, Base and Ethereum; a fresh recipient with a relayed claim; the maker-vanishes refund in both modes; the taker-never-claims double refund) and on public testnets, recorded in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md).
 
 ```sh
 pnpm --filter @paralock/sdk test
 cd contracts && forge test
+cargo test -p paralock-core -p paralock-evm
 ```
 
 ## Reporting a vulnerability

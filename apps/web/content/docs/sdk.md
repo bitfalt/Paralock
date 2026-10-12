@@ -7,7 +7,7 @@ description: "Reference for the maker and taker engines: factories and their opt
 
 The SDK wires a Zcash backend, the EVM escrow clients and a durable store. It persists every secret before it matters, and it resumes or refunds swaps after a crash. Start with [`createTaker`](#createtaker) or [`createMaker`](#createmaker). Everything else is exported for custom wiring.
 
-> **Warning:** Experimental and not audited. Use testnets and the local devnet only. In `htlc` mode the Zcash leg is a transparent HTLC and the same hashlock appears on both chains.
+> **Warning:** Experimental and not audited by a third party. Use testnets and the local devnet only. In both modes the Zcash leg is a transparent output, and in htlc mode the same hashlock appears on both chains.
 
 ## Install
 
@@ -15,7 +15,9 @@ The SDK wires a Zcash backend, the EVM escrow clients and a durable store. It pe
 npm install @paralock/sdk
 ```
 
-Version 0.2.0. Node.js 20 or newer (the SDK uses `node:crypto` and `node:fs`, so it does not run in a browser). It depends on [`@paralock/zcash`](/docs/zcash), [`@paralock/adaptor`](/docs/adaptor), [`@paralock/evm`](/docs/evm) and `viem`.
+This page describes version 0.3.0 (the release before it is 0.2.0). In 0.3.0 the maker accepts and reserves before the taker broadcasts its htlc funding (`fundingExpiryHeight`, the `reserved` stage), the maker's public swap view no longer carries adaptor data, and the devnet helpers find the CLI's state directory outside a checkout. A 0.3.0 maker refuses private-mode proposals from older takers, which can still swap in htlc mode.
+
+Node.js 20 or newer (the SDK uses `node:crypto` and `node:fs`, so it does not run in a browser). It depends on [`@paralock/zcash`](/docs/zcash), [`@paralock/adaptor`](/docs/adaptor), [`@paralock/evm`](/docs/evm) and `viem`.
 
 Units used on this page:
 
@@ -816,16 +818,18 @@ Everything that crosses a trust boundary is validated with these. Failures throw
 
 ## Devnet helpers
 
-Built on the same factories, for the local devnet that [`paralock devnet up`](/docs/cli) writes to `.paralock/devnet.json`:
+Built on the same factories, for the local devnet that [`paralock devnet up`](/docs/cli) describes in `devnet.json`, in the CLI's [state directory](/docs/cli#state-directory):
 
 | Export | Meaning |
 |---|---|
 | `devnetTaker(cfg, opts?)` | A `DevnetTaker`: the taker (ths account 2 on Zcash, anvil dev account 1, dev account 2 relaying), its HTTP maker client, `prepareFunds(amountZat, { fromShielded })` and `reshield()`. |
 | `devnetMaker(cfg, opts?)` | The devnet maker (ths account 5, anvil dev account 0) with `DEVNET_POLICY`. It shields claimed ZEC again. |
 | `DevnetSwapRunner` | Runs devnet swaps as background jobs for a UI backend: `quote`, `quoteExactOut`, `start`, `get`, `refund`. |
-| `loadDevnetFile(start?)`, `devnetFilePath(start?)` | Find and read `.paralock/devnet.json`, searching upward from `start` (default: the working directory). |
-| `devnetStorePath(role, start?)` | `.paralock/taker` or `.paralock/maker`. |
-| `saveRecipient(entry, start?)` | Appends a fresh recipient key to `.paralock/recipients.jsonl`. |
+| `loadDevnetFile(start?)`, `devnetFilePath(start?)` | Find and read `devnet.json` in the state directory as seen from `start` (default: the working directory). Throw if there is none. |
+| `paralockStateDir(options?)` | The state directory: `<checkout>/.paralock` inside a Paralock checkout, else `$PARALOCK_HOME`, else `~/.paralock`. `options` is `{ cwd?, env? }`. Since 0.3.0. |
+| `findParalockCheckout(start?)` | The root of the checkout containing `start` (a directory with both `pnpm-workspace.yaml` and `contracts/src/ParalockHTLC.sol`), or `undefined`. Since 0.3.0. |
+| `devnetStorePath(role, start?)` | `taker/` or `maker/` next to `devnet.json`. |
+| `saveRecipient(entry, start?)` | Appends a fresh recipient key to `recipients.jsonl` next to `devnet.json`. |
 | `devnetChainOptions(net, account)`, `DEVNET_TAKER_LIMITS` | Chain options of a devnet chain; taker limits for the devnet's short windows (`minClaimWindowSeconds: 15`). |
 | `ThsClient`, `mnemonicFromThsLog` | Client for the local ths (Zcash regtest) dashboard API. |
 

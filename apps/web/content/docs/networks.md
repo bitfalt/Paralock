@@ -10,9 +10,9 @@ This page lists what Paralock works with today, so you can set up the right comb
 
 | | Status |
 |---|---|
-| Zcash regtest (local devnet) | Works. `pnpm paralock dev` runs one with [ths](https://github.com/zcashlabs/thus-spoke-zakura). |
+| Zcash regtest (local devnet) | Works. `npx paralock dev` runs one with [ths](https://github.com/zcashlabs/thus-spoke-zakura). |
 | Zcash testnet | Works. The testnet is currently split into two chains; see [the testnet split](#the-zcash-testnet-split). |
-| Zcash mainnet | Not supported yet. The code is experimental and not audited. |
+| Zcash mainnet | Not supported yet. The code is experimental and not audited by a third party. |
 | EVM testnets | Escrows deployed and source-verified on six: Tempo Moderato, Base Sepolia, Sepolia, Arbitrum Sepolia, Robinhood Chain Testnet and HyperEVM Testnet. See [Contracts and deployments](/docs/contracts). |
 | EVM local chains | Works. The devnet runs an anvil per chain (Tempo in `anvil --network tempo` mode). |
 | EVM mainnets | Not supported yet. Nothing is deployed on mainnet. |
@@ -23,7 +23,8 @@ This page lists what Paralock works with today, so you can set up the right comb
 - **Transactions:** Paralock builds transparent v5 transactions (ZIP 225) and signs them with ZIP 244 signature hashes. Its
   locks are P2SH: a hashlock HTLC in `htlc` mode, a 2-of-2 multisig in `adaptor` mode.
 - **Consensus branch id:** it is never hardcoded. Paralock signs with the branch id your backend reports for the next
-  block, so the same code works on regtest, either testnet chain and mainnet.
+  block, so the same code works on regtest, either testnet chain and mainnet. Since 0.3.0 the `@paralock/zcash`
+  builders require it (and the network) explicitly, instead of defaulting to NU6.3's.
 - **Network upgrades:** refunds and claims in `adaptor` mode are signed before they are broadcast, and a signature commits
   to a branch id. If an upgrade would activate before a swap's refund height, the engines refuse the swap
   (`unsafe_timeouts`) instead of creating a refund that could never be mined.
@@ -115,7 +116,8 @@ address, and shield change and refunds again afterwards. [Privacy](/docs/privacy
 | HyperEVM | anvil, 31342 | HyperEVM Testnet, 998 | USDC |
 
 The escrows are plain Solidity. Tempo's fee tokens are the only chain-specific part, and they're handled by the client.
-Other EVM chains work once you deploy the two contracts with `contracts/script/Deploy.s.sol`. The SDK names six chains
+Other EVM chains work once you deploy the two contracts with `contracts/script/Deploy.s.sol` (see
+[Deploy it yourself](/docs/contracts#deploy-it-yourself)). The SDK names six chains
 today (`EvmChain`); adding one is a small change, described in the repository's `AGENTS.md`.
 
 ## Runtimes
@@ -128,11 +130,13 @@ today (`EvmChain`); adding one is a small change, described in the repository's 
 | `@paralock/sdk` | Yes | No | The file store and the maker server use Node APIs |
 | `@paralock/lightwalletd` | Yes | No | gRPC over HTTP/2 |
 
-The local devnet needs macOS or Linux with Docker or OrbStack, ths and Foundry's anvil. Windows isn't tested.
+The local devnet needs Node.js 20 or newer, macOS or Linux with Docker or OrbStack, ths and Foundry's anvil. Windows isn't tested.
 
 ## Not supported yet
 
-- **Mainnet** on either side. The code isn't audited.
+The [roadmap](/docs/roadmap) says what is planned and why.
+
+- **Mainnet** on either side. The code isn't audited by a third party.
 - **A shielded Zcash lock.** The Zcash leg is transparent in both modes; a fully shielded leg (FROST) is in research.
 - **Stablecoins to ZEC.** Only ZEC to stablecoins today.
 - **Solana.** On the roadmap: an HTLC program, and private mode through `secp256k1_recover`.

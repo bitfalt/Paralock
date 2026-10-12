@@ -5,7 +5,7 @@ description: Configure createMaker, price your quotes, choose a timeout policy a
 
 A **maker** is the counterparty in every swap: it quotes a price, locks stablecoins once the taker's ZEC is safely locked, and claims the ZEC when the taker claims the stablecoins. It earns the spread between its quote and the market price. The protocol is symmetric, so anyone can run one with the SDK; running the maker is also Paralock's business model.
 
-> **Warning:** The code is experimental and not audited, and the escrows are deployed on testnets only. Paralock has no mainnet deployment. `MAINNET_POLICY` and the mainnet checks exist so the defaults are safe, not as an invitation to run a maker with real funds.
+> **Warning:** The code is experimental and not audited by a third party, and the escrows are deployed on testnets only. Paralock has no mainnet deployment. `MAINNET_POLICY` and the mainnet checks exist so the defaults are safe, not as an invitation to run a maker with real funds.
 
 ## What you need
 
@@ -75,7 +75,7 @@ The addresses above are the Tempo Moderato and Base Sepolia deployments from `co
 | `evm.<chain>.htlc` | required | The `ParalockHTLC` address |
 | `evm.<chain>.adaptorEscrow` | none | The `ParalockAdaptorEscrow` address. Leave it out to offer only htlc mode on this chain |
 | `evm.<chain>.account` | required | A `0x` private key or a viem `Account`, for example one backed by a KMS |
-| `evm.<chain>.fromBlock` | none | The escrows' deployment block. Lock lookups scan logs from here, so set it on public chains |
+| `evm.<chain>.fromBlock` | `0` | The escrows' deployment block (`startBlock` in the deployment file). Lock lookups scan logs from here, so set it on public chains |
 | `evm.<chain>.feeToken` | none | Tempo only: the TIP-20 that pays fees |
 | `evm.<chain>.token` | required | `{ address, symbol, decimals? }`: the stablecoin you quote here (decimals default to 6) |
 | `evm.<chain>.rpcTimeoutMs`, `rpcRetryCount` | 10 s, 3 | Per-request timeout, and retries on network errors, 5xx and 429 |
@@ -204,8 +204,8 @@ createServer(async (req, res) => {
 | Route | Purpose |
 |---|---|
 | `GET /quote?zat=…&chain=…&mode=…` | Exact-in quote (`?usd=…` instead of `zat` for exact-out). `chain` defaults to `tempo`, `mode` to `htlc` |
-| `POST /swaps` | htlc mode: the taker reports its funded HTLC |
-| `POST /adaptor/swaps` | Private mode: the taker's proposal; returns your signed refund |
+| `POST /swaps` | htlc mode: the taker's HTLC and its signed funding, before the taker broadcasts it. You check it and reserve the stablecoins |
+| `POST /adaptor/swaps` | Private mode: the taker's proposal; you reserve the stablecoins and return your signed refund |
 | `POST /adaptor/swaps/:id/presignature` | Private mode: the taker's pre-signature on your claim |
 | `GET /swaps/:id` | One swap's public view: status, both legs and events, never the adaptor point, pre-signatures, signer key or salt |
 | `GET /health` | `{ ok, chains, zcashPubkey }` |
@@ -219,6 +219,8 @@ createServer(async (req, res) => {
 | `onError` | `console.error` | Receives unexpected errors. Clients only get a generic 500 |
 
 Errors come back as `{ error, code }` with the HTTP status of the `ParalockError` code, for example 410 for `quote_expired` and 503 for `insufficient_liquidity`.
+
+Version 0.3.0 changed this API in two ways: `GET /swaps/:id` no longer includes the adaptor data (the taker gets it in the answer to its own pre-signature request), and private-mode proposals must carry `fundingExpiryHeight`. A 0.3.0 maker therefore refuses private-mode swaps from takers older than 0.3.0; those can still swap in htlc mode.
 
 > **Warning:** TLS and rate limiting are left to your deployment. The handler caps body sizes and open quotes, but it doesn't limit requests per client. Put it behind a reverse proxy that terminates TLS and rate-limits `/quote` and the POST routes.
 
@@ -240,7 +242,7 @@ Takers connect with a URL (`createTaker({ maker: "https://maker.example" })`), w
 | Reorgs | A funding or lock could disappear | `minZcashConfirmations`; the maker re-checks a lock that vanished |
 | Network upgrades | A Zcash upgrade before N invalidates pre-signed spends | Private-mode proposals are refused if an upgrade activates before the refund height |
 | Losing the store | In private mode, the key that claims the ZEC exists only there | Durable store, backups |
-| Software | Not audited | Small limits, testnets only |
+| Software | Not audited by a third party | Small limits, testnets only |
 
 ## Operational checklist
 

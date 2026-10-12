@@ -7,7 +7,7 @@ description: Short answers to the questions people ask most about Paralock's tru
 
 Nobody but the two parties ever holds the funds. The ZEC sits in a Zcash script and the stablecoins in an EVM contract, and one secret opens both, so either both sides settle or both refund. There is no bridge, custodian, wrapped token or operator key, and the escrows have no admin functions.
 
-You still trust three things: the code, which is experimental and not audited; the maker's price, which you can bound with your own price feed; and your own liveness, since you must claim before the EVM lock expires. The [Security model](/docs/security) lists every assumption.
+You still trust three things: the code, which is experimental and not audited by a third party; the maker's price, which you can bound with your own price feed; and your own liveness, since you must claim before the EVM lock expires. The [Security model](/docs/security) lists every assumption.
 
 ## Can someone front-run my swap or steal the secret from the mempool?
 
@@ -25,7 +25,7 @@ Not by itself: in both modes it is a transparent output, so the lock, its amount
 
 ## Can I use it with real money?
 
-No. Paralock is experimental and not audited. The escrows are deployed on six public testnets, and there is no mainnet deployment. The SDK has mainnet settings (`MAINNET_POLICY`, and a durable store is required on mainnet) so its defaults are safe, but mainnet use would be at your own risk. The roadmap runs Zcash testnet end to end with a hosted maker before mainnet.
+No. Paralock is experimental and not audited by a third party. The escrows are deployed on six public testnets, and there is no mainnet deployment. The SDK has mainnet settings (`MAINNET_POLICY`, and a durable store is required on mainnet) so its defaults are safe, but mainnet use would be at your own risk. The [roadmap](/docs/roadmap) puts a hosted testnet maker and a third-party audit before mainnet.
 
 ## Which chains does it support?
 
@@ -85,8 +85,16 @@ Tempo is built for stablecoin payments. It has no native gas token: fees are pai
 
 ## Can I swap dollars for ZEC?
 
-Not yet. Today the taker always sells ZEC for stablecoins. USD to ZEC, and refunds straight to a shielded address, are on the roadmap.
+Not yet. Today the taker always sells ZEC for stablecoins. USD to ZEC, and refunds straight to a shielded address, are on the [roadmap](/docs/roadmap).
 
 ## What about Solana?
 
-It's on the roadmap: a Solana program with the same sha256 hashlock. Private mode can work there too, because Solana programs can check secp256k1 signatures (`secp256k1_recover`), so no cross-curve proofs are needed. The roadmap also includes a request-for-quote network where many makers compete, and a Zcash payment method for MPP so agents can pay HTTP 402 APIs from shielded ZEC.
+It's on the [roadmap](/docs/roadmap): a Solana program with the same sha256 hashlock. Private mode can work there too, because Solana programs can check secp256k1 signatures (`secp256k1_recover`), so no cross-curve proofs are needed. The roadmap also includes a request-for-quote network where many makers compete, and a Zcash payment method for MPP so agents can pay HTTP 402 APIs from shielded ZEC.
+
+## Is there a Rust SDK?
+
+It is being built. The protocol core ([`paralock-core`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-core)) and the EVM layer ([`paralock-evm`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-evm)) are in the repository, byte-for-byte compatible with the TypeScript packages on the shared test vectors, but not yet on crates.io. The `paralock` SDK crate, with the maker and taker engines, is in progress, and bindings for Node.js, browsers, Swift, Kotlin, Python and Go are planned on top of it. See the [roadmap](/docs/roadmap).
+
+## What's planned next?
+
+The [roadmap](/docs/roadmap) lists everything that is shipped, in progress, next and in research, each with the reason it matters.

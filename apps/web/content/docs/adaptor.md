@@ -11,7 +11,7 @@ description: "Reference for ECDSA adaptor signatures on secp256k1 with DLEQ proo
 
 Completing a signature on one chain therefore reveals the secret needed on another, with no hash or other shared value on-chain. Paralock's private (`adaptor`) mode is built on it. Pure TypeScript on `@noble/curves` and `@noble/hashes`; browser-safe.
 
-> **Warning:** Experimental and not audited. ECDSA adaptor signatures have seen far less scrutiny than Schnorr ones. Use testnets only.
+> **Warning:** Experimental and not audited by a third party. ECDSA adaptor signatures have seen far less scrutiny than Schnorr ones. Use testnets only.
 
 ## Install
 
@@ -19,7 +19,7 @@ Completing a signature on one chain therefore reveals the secret needed on anoth
 npm install @paralock/adaptor
 ```
 
-Version 0.1.1 (no API change from 0.1.0: hedged nonces and stricter checks).
+This page describes version 0.1.2 (the release before it is 0.1.1). The API hasn't changed since 0.1.0: 0.1.1 added hedged nonces and range checks, and 0.1.2 bounds nonce retries.
 
 ## The math in brief
 
@@ -86,7 +86,7 @@ const recovered = extract(pre, sig, point); // the same 32 bytes as `secret`
 | Export | Signature | Meaning |
 |---|---|---|
 | `adaptorKeyPair` | `adaptorKeyPair(): { secret: Uint8Array; point: Uint8Array }` | A fresh secret `y` (32 bytes) and its point `Y` (33-byte compressed). |
-| `preSign` | `preSign(privateKey: Bytes, digest: Bytes, adaptorPoint: Bytes): PreSignature` | Pre-signs a 32-byte digest with a DLEQ proof. A fresh hedged nonce on every call. Throws if the key is not in `[1, n)`, the digest is not 32 bytes, or the point is invalid, and if 8 nonces in a row are unusable (only a broken random number generator does that) instead of looping. |
+| `preSign` | `preSign(privateKey: Bytes, digest: Bytes, adaptorPoint: Bytes): PreSignature` | Pre-signs a 32-byte digest with a DLEQ proof. A fresh hedged nonce on every call. Throws if the key is not in `[1, n)`, the digest is not 32 bytes, or the point is invalid, and, since 0.1.2, if 8 nonces in a row are unusable (only a broken random number generator does that) instead of looping. |
 | `preVerify` | `preVerify(publicKey: Bytes, digest: Bytes, adaptorPoint: Bytes, pre: PreSignature): boolean` | True if `pre` becomes a valid signature by `publicKey` on `digest` once `y` is applied. Checks the DLEQ proof and every range. Returns `false` (never throws) on malformed input. |
 | `adapt` | `adapt(pre: PreSignature, adaptorSecret: Bytes): Signature` | Completes the pre-signature with `y`. Always returns low-S. Throws if `y` or `s'` is out of range. |
 | `extract` | `extract(pre: PreSignature, sig: Signature, adaptorPoint: Bytes): Uint8Array` | Recovers `y` (32 bytes) from the pre-signature and the published signature. Throws if `sig` doesn't belong to `pre`. |

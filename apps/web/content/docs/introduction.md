@@ -13,7 +13,55 @@ Paralock lets you swap shielded ZEC for stablecoins, or pay someone an exact dol
 
 [Where Paralock works](/docs/networks) lists every network, Zcash backend and wallet in detail.
 
-> **Warning:** Paralock is experimental and has not been audited. The escrow contracts are deployed on six public testnets only, and there is no mainnet support. In both modes the Zcash leg is a transparent output, so you shield your ZEC before and after a swap.
+> **Warning:** Paralock is experimental and has not been audited by a third party. The escrow contracts are deployed on six public testnets only, and there is no mainnet support. In both modes the Zcash leg is a transparent output, so you shield your ZEC before and after a swap.
+
+::: panel Use these docs from your AI tools
+
+- **Index:** [`/llms.txt`](/llms.txt) lists every page with a one-line summary
+- **Everything:** [`/llms-full.txt`](/llms-full.txt) has every page in one file
+- **Any page:** append `.md` to its URL, or ask for it with `Accept: text/markdown`
+- **Skill:** `npx skills add bitfalt/Paralock` teaches a coding agent the SDK and its safety rules
+- **MCP server:** `https://paralock.xyz/mcp` is read-only and keyless, with `list_docs`, `read_doc`, `search_docs` and `get_deployments`
+
+::: tabs
+
+```sh title="Claude Code"
+claude mcp add --transport http paralock https://paralock.xyz/mcp
+```
+
+```sh title="Codex"
+codex mcp add paralock --url https://paralock.xyz/mcp
+```
+
+```json title="Cursor" file=".cursor/mcp.json"
+{
+  "mcpServers": {
+    "paralock": { "url": "https://paralock.xyz/mcp" }
+  }
+}
+```
+
+```json title="VS Code" file=".mcp.json"
+{
+  "mcpServers": {
+    "paralock": { "type": "http", "url": "https://paralock.xyz/mcp" }
+  }
+}
+```
+
+```sh title="Gemini CLI"
+gemini mcp add --transport http --scope user paralock https://paralock.xyz/mcp
+```
+
+```sh title="Pi"
+pi mcp add paralock --url https://paralock.xyz/mcp
+```
+
+:::
+
+Claude Desktop and claude.ai, OpenCode, Windsurf (now Devin Desktop), Zed, Cline and the details for each: [For AI agents](/docs/ai-agents#connect-the-mcp-server).
+
+:::
 
 ## Two locks, one key
 
@@ -43,37 +91,62 @@ The SDK is a public good under the MIT license. The business model is running th
 
 ## What's in the box
 
-| Component | What it is | Status |
-|---|---|---|
-| [`@paralock/sdk`](/docs/sdk) | `createTaker` and `createMaker`, both swap modes, crash-safe persistence, recovery, quote validation, maker limits, an HTTP maker API | Shipped (0.2.0) |
-| [`@paralock/zcash`](/docs/zcash) | Zcash HTLCs and 2-of-2 locks, v5 transactions, ZIP 244 signing, ZIP 317 fees, a Zebra RPC client. Browser-safe | Shipped (0.2.0) |
-| [`@paralock/adaptor`](/docs/adaptor) | ECDSA adaptor signatures on secp256k1 with DLEQ proofs. Browser-safe | Experimental (0.1.1) |
-| [`@paralock/evm`](/docs/evm) | viem clients for both escrows and a verified network registry | Shipped (0.2.0) |
-| [`@paralock/lightwalletd`](/docs/lightwalletd) | A Zcash backend over a lightwalletd or Zaino server, so you don't run a full node | Shipped (0.1.0) |
-| [Contracts](/docs/contracts) | `ParalockHTLC` and `ParalockAdaptorEscrow`, deployed on Tempo Moderato, Base Sepolia, Sepolia, Arbitrum Sepolia, Robinhood Chain Testnet and HyperEVM Testnet | Shipped (testnets only) |
-| [CLI](/docs/cli) | `paralock doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund`: a one-command local devnet with Zcash regtest and up to six EVM chains | Shipped |
-| Examples | `quickstart`, `payroll`, `sell-a-secret` on the devnet, and `testnet` on public testnets | Shipped |
-| Web app | Pay with payment links, and Swap, at `/app` | Shipped |
-| Agent docs | A skill, `llms.txt`, Markdown pages and an MCP server | Shipped |
+| Component | What it is | Version | Status |
+|---|---|---|---|
+| [`@paralock/sdk`](/docs/sdk) | `createTaker` and `createMaker`, both swap modes, crash-safe persistence, recovery, quote validation, maker limits, an HTTP maker API | 0.3.0 | Shipped |
+| [`@paralock/zcash`](/docs/zcash) | Zcash HTLCs and 2-of-2 locks, v5 transactions, ZIP 244 signing, ZIP 317 fees, a Zebra RPC client. Browser-safe | 0.3.0 | Shipped |
+| [`@paralock/adaptor`](/docs/adaptor) | ECDSA adaptor signatures on secp256k1 with DLEQ proofs. Browser-safe | 0.1.2 | Experimental |
+| [`@paralock/evm`](/docs/evm) | viem clients for both escrows and a verified network registry | 0.3.0 | Shipped |
+| [`@paralock/lightwalletd`](/docs/lightwalletd) | A Zcash backend over a lightwalletd or Zaino server, so you don't run a full node | 0.1.1 | Shipped |
+| [`paralock` CLI](/docs/cli) | `npx paralock`: `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund`. A one-command local devnet with Zcash regtest and up to six EVM chains | 0.3.0 | Shipped |
+| [Contracts](/docs/contracts) | `ParalockHTLC` and `ParalockAdaptorEscrow`, deployed and source-verified on Tempo Moderato, Base Sepolia, Sepolia, Arbitrum Sepolia, Robinhood Chain Testnet and HyperEVM Testnet | | Testnets only |
+| [Protocol spec](https://github.com/bitfalt/Paralock/blob/main/spec/PROTOCOL.md) | The wire protocol, both flows and the safety rules, with cross-language test vectors in `spec/vectors` | v1.1 | Draft |
+| Examples | `quickstart`, `payroll`, `sell-a-secret` on the devnet, and `testnet` on public testnets | | Shipped |
+| Web app | Pay with payment links, and Swap, at `/app` | | Shipped |
+| Agent docs | A skill, `llms.txt`, Markdown pages and an MCP server | | Shipped |
 
-All five packages are on npm, ESM-only and need Node.js 20 or newer. `@paralock/zcash`, `@paralock/adaptor` and `@paralock/evm` also run in browsers.
+The versions are the repository's: 0.3.0 is the release that follows 0.2.0 on npm, and features this site marks "in 0.3.0" need it. The packages are ESM-only and need Node.js 20 or newer. `@paralock/zcash`, `@paralock/adaptor` and `@paralock/evm` also run in browsers.
 
 ```sh
-npm install @paralock/sdk   # pulls in @paralock/zcash, @paralock/evm and @paralock/adaptor
+npm install @paralock/sdk     # also installs @paralock/zcash, /evm and /adaptor
+npx paralock dev              # a local devnet and a maker
+npx paralock swap --zec 1     # your first swap on it
+```
+
+### Rust
+
+A Rust port of the same protocol is under way. Two crates are in the repository, not yet on crates.io:
+
+- [`paralock-core`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-core): the protocol core. Zcash scripts, v5 transactions and ZIP 244 signing, adaptor signatures, escrow ids and digests, and the wire messages with both parties' checks. Pure and synchronous (no I/O), and byte-for-byte equal to the TypeScript packages on the shared vectors in `spec/vectors`.
+- [`paralock-evm`](https://github.com/bitfalt/Paralock/tree/main/crates/paralock-evm): alloy clients for both escrows, with Tempo fee-token transactions and the network registry.
+
+The `paralock` SDK crate (maker and taker engines, stores, the maker HTTP API) and a Rust `paralock` binary are in progress; see the [roadmap](/docs/roadmap). Until the crates are published, depend on the repository:
+
+```toml
+[dependencies]
+paralock-core = { git = "https://github.com/bitfalt/Paralock" }
+```
+
+```rust
+use paralock_core::keys::Secret;
+
+let secret = Secret::random(&mut paralock_core::OsRng);
+// sha256(secret): in htlc mode, both chains lock on this hash.
+let hashlock = secret.hashlock();
 ```
 
 ## Status
 
 | Feature | Status |
 |---|---|
-| htlc mode, end to end on the devnet | Shipped |
+| htlc mode, end to end on the devnet and on public testnets ([first runs](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md)) | Shipped |
 | Private mode (adaptor signatures) | Experimental |
 | Privacy hygiene: shield before and after, fresh recipient, relayed claim, standard amounts, jitter | Shipped |
 | Fully shielded Zcash leg (FROST) | In research |
 | Testnet deployments on six EVM testnets | Shipped |
-| Mainnet | Not supported |
+| Mainnet | Not supported; only after an audit |
 
-Swaps currently run in one direction: the taker sells ZEC for stablecoins. Refunds pay a transparent Zcash address. The roadmap adds the reverse direction, refunds straight to a shielded address, Solana, a network of competing makers, and a hosted testnet maker before any mainnet launch.
+Swaps currently run in one direction: the taker sells ZEC for stablecoins. Refunds pay a transparent Zcash address. The [roadmap](/docs/roadmap) lists what is shipped, in progress, next and in research, with the reason for each.
 
 ## Where to go next
 
@@ -83,3 +156,4 @@ Swaps currently run in one direction: the taker sells ZEC for stablecoins. Refun
 - [Payments and payment links](/docs/pay): pay an exact dollar amount to anyone.
 - [Swap on public testnets](/docs/testnet): a real swap between Zcash testnet and Tempo Moderato.
 - [Security model](/docs/security): what you trust, and what is still missing.
+- [Roadmap](/docs/roadmap): what ships next, and why.

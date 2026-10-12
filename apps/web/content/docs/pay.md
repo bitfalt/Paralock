@@ -63,11 +63,11 @@ At a feed price of $1,280 and the default 0.5% spread, the maker's rate is $1,27
 
 ## Pay from the CLI
 
-On the local devnet:
+On the local devnet (`pnpm paralock` in a checkout):
 
 ```sh
-pnpm paralock pay --usd 25 --to 0x90F79bf6EB2c4f870365E785982E1f101E93b906 --chain base --label "Acme Coffee"
-pnpm paralock pay --usd 42.50 --to 0x90F79bf6EB2c4f870365E785982E1f101E93b906 --chain tempo --private --relay
+npx paralock pay --usd 25 --to 0x90F79bf6EB2c4f870365E785982E1f101E93b906 --chain base --label "Acme Coffee"
+npx paralock pay --usd 42.50 --to 0x90F79bf6EB2c4f870365E785982E1f101E93b906 --chain tempo --private --relay
 ```
 
 | Flag | Meaning |
@@ -76,7 +76,7 @@ pnpm paralock pay --usd 42.50 --to 0x90F79bf6EB2c4f870365E785982E1f101E93b906 --
 | `--to <0x…>` | Recipient address (required) |
 | `--chain <chain>` | `tempo` (default), `base`, `ethereum`, `arbitrum`, `robinhood` or `hyperevm` |
 | `--label <text>` | A name for the payment |
-| `--private` | Adaptor mode |
+| `--private` | Private mode (adaptor) |
 | `--relay` | The devnet relayer submits the claim |
 | `--no-shield` | Don't unshield first or reshield change afterwards |
 
@@ -100,7 +100,7 @@ For example, `/app?pay=0x90F79bf6EB2c4f870365E785982E1f101E93b906&usd=4.50&chain
 
 The app also has a **Request a payment** section that builds these links: enter your address, the price, the chain, an optional name and whether to use private mode, then copy the link.
 
-> **Note:** The app's header shows which backend it runs. "Local devnet" means swaps go through the real SDK against your local chains (`pnpm paralock dev --web`). "Preview, simulated maker" means a simulated maker on simulated chains, where no funds move; deployments without a local devnet, such as hosted previews, run in this mode.
+> **Note:** The app's header shows which backend it runs. "Local devnet" means swaps go through the real SDK against your local chains (`pnpm paralock dev --web`, from a checkout). "Preview, simulated maker" means a simulated maker on simulated chains, where no funds move; deployments without a local devnet, such as hosted previews, run in this mode.
 
 ### Build links in code
 
@@ -159,7 +159,7 @@ console.log(toJson(receiptOf(swap))); // toJson writes bigints as decimal string
 - **`status`** is `completed` once the maker has also claimed the ZEC, or `evm_claimed` if the maker's claim wasn't seen within `timeouts.followMakerMs` (60 seconds by default). Either way, the recipient has been paid.
 - **`swap.events`** is the full timeline, with a transaction id per step.
 
-The `examples/payroll` app does all of this in a loop: it pays four contributors exact amounts on four chains from a shielded treasury, in private mode with relayed claims, refunds any failed payment and writes `receipts-<timestamp>.json`. One run paid $4,665.75 on Tempo, Base, Arbitrum and Ethereum.
+The `examples/payroll` app (in the repository) does all of this in a loop: it pays four contributors exact amounts on four chains from a shielded treasury, in private mode with relayed claims, refunds any failed payment and writes `receipts-<timestamp>.json`. One run paid $4,665.75 on Tempo, Base, Arbitrum and Ethereum.
 
 ```sh
 pnpm paralock dev --evm all

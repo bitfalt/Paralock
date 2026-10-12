@@ -52,16 +52,16 @@ A fresh address has no gas. `relayClaim: true` lets the `relayer` account config
 import { type Hex, createTaker } from "@paralock/sdk";
 
 const taker = createTaker({
-  zcash: { rpcUrl: "http://127.0.0.1:8232", network: "mainnet", key: process.env.ZEC_KEY!, returnAddress: process.env.ZEC_RETURN_ADDRESS },
+  zcash: { rpcUrl: "http://127.0.0.1:18232", network: "testnet", key: process.env.ZEC_KEY!, returnAddress: process.env.ZEC_RETURN_ADDRESS },
   evm: {
     base: {
-      rpcUrl: "https://mainnet.base.org",
-      chainId: 8453,
-      htlc: process.env.HTLC as Hex,
-      adaptorEscrow: process.env.ESCROW as Hex,
+      rpcUrl: "https://sepolia.base.org",
+      chainId: 84532, // Base Sepolia: the escrows are deployed on testnets only
+      htlc: "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+      adaptorEscrow: "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
       account: process.env.EVM_KEY as Hex,
       relayer: process.env.RELAYER_KEY as Hex, // pays the claim gas; can't redirect the funds
-      fromBlock: 1,
+      fromBlock: 48009147, // startBlock from contracts/deployments/84532.json
     },
   },
   maker: "https://maker.example",
@@ -84,10 +84,10 @@ const recipient = await taker.freshRecipient(swap.id); // { address, privateKey 
 The same options on the devnet CLI:
 
 ```sh
-pnpm paralock swap --zec 0.5 --chain base --private --fresh-recipient --relay --standard-only --jitter 10000
+npx paralock swap --zec 0.5 --chain base --private --fresh-recipient --relay --standard-only --jitter 10000
 ```
 
-The devnet saves fresh-recipient keys to `.paralock/recipients.jsonl`.
+The devnet saves fresh-recipient keys to `recipients.jsonl` in the CLI's [state directory](/docs/cli#state-directory).
 
 **What level 1 still leaks:** the HTLC is transparent, and the same hashlock appears on both chains, so anyone can pair the two legs of a swap.
 
@@ -97,7 +97,7 @@ Private mode (`mode: "adaptor"`, or `--private` in the CLI) removes every shared
 
 - **On Zcash,** the ZEC sits in a plain 2-of-2 multisig of a fresh taker key and a fresh maker key made for this quote. Spending it looks like any other multisig spend.
 - **On the EVM chain,** `ParalockAdaptorEscrow` pays the recipient when given a signature from a one-time `signer` key over `claimDigest(id)`. The escrow id is a hash of the lock's parameters, including a random salt.
-- **The secret is `y`,** the discrete logarithm of an adaptor point `Y = y·G` that only the two parties ever see. The taker's claim publishes a completed signature. Only the maker, who holds the matching pre-signature, can compute `y` from it, and then complete the taker's pre-signature on the Zcash claim. The maker's public swap view (`GET /swaps/:id`) never contains `Y`, the pre-signatures, the signer's key or the salt: the maker sends them only in answers to the taker's own requests.
+- **The secret is `y`,** the discrete logarithm of an adaptor point `Y = y·G` that only the two parties ever see. The taker's claim publishes a completed signature. Only the maker, who holds the matching pre-signature, can compute `y` from it, and then complete the taker's pre-signature on the Zcash claim. Since 0.3.0, the maker's public swap view (`GET /swaps/:id`) never contains `Y`, the pre-signatures, the signer's key or the salt: the maker sends them only in answers to the taker's own requests.
 
 [How it works](/docs/how-it-works#the-adaptor-flow) walks through the ten steps. The cryptography is in [`@paralock/adaptor`](/docs/adaptor): ECDSA adaptor signatures on secp256k1 with Chaum–Pedersen DLEQ proofs and hedged nonces.
 
@@ -110,7 +110,7 @@ Private mode (`mode: "adaptor"`, or `--private` in the CLI) removes every shared
 
 An observer who suspects a swap can still correlate amounts and time windows, but has no cryptographic link between the legs.
 
-> **Warning:** Adaptor ECDSA has had far less scrutiny than Schnorr adaptor signatures, and this code is not audited. Treat private mode as experimental.
+> **Warning:** Adaptor ECDSA has had far less scrutiny than Schnorr adaptor signatures, and this code is not audited by a third party. Treat private mode as experimental.
 
 ## Level 3: a fully shielded Zcash leg
 
@@ -121,7 +121,7 @@ Status: **In research.** Level 2 still shows a transparent multisig on Zcash. Re
 - **A cross-group DLEQ proof,** showing the same `y` is valid on Pallas (Zcash) and on secp256k1 (EVM), as BTC⇄XMR swaps do for ed25519.
 - **A time-locked refund.** A v5 transaction's `lock_time` applies to the whole transaction, so a pre-signed shielded refund can be time-locked too.
 
-The result would be an ordinary shielded transaction on Zcash, with only the EVM leg visible. Open work: a cross-curve proof implementation, Ironwood support in FROST (in progress), and wallet support for jointly controlled notes (PCZT helps).
+The result would be an ordinary shielded transaction on Zcash, with only the EVM leg visible. Open work: a cross-curve proof implementation, Ironwood support in FROST (in progress), and wallet support for jointly controlled notes (PCZT helps). The [roadmap](/docs/roadmap) tracks it.
 
 ## What observers can still see
 

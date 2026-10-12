@@ -3,7 +3,7 @@ title: Swap on public testnets
 description: Run a real swap between Zcash testnet (TAZ) and OUSD on Tempo Moderato with examples/testnet, through a public lightwalletd server.
 ---
 
-The `examples/testnet` app runs a real Paralock swap on public test networks: Zcash testnet coins (TAZ) for OUSD on Tempo Moderato. Every step is a real transaction you can open in a block explorer, and testnet coins have no value.
+The `examples/testnet` app runs a real Paralock swap on public test networks: Zcash testnet coins (TAZ) for OUSD on Tempo Moderato. Every step is a real transaction, and testnet coins have no value.
 
 | Side | Network | How the example reaches it |
 |---|---|---|
@@ -13,7 +13,18 @@ The `examples/testnet` app runs a real Paralock swap on public test networks: Zc
 
 In production the maker is a separate service behind `makerHandler`, and the taker passes its URL instead of the `Maker` object. See [Run a maker](/docs/run-a-maker). [Where Paralock works](/docs/networks) lists the other networks, Zcash backends and wallets you can combine.
 
-> **Warning:** Testnets only. The contracts are experimental and not audited, and there is no mainnet deployment. Never reuse a testnet key on a real network.
+> **Warning:** Testnets only. The contracts are experimental and not audited by a third party, and there is no mainnet deployment. Never reuse a testnet key on a real network.
+
+## The first public runs
+
+The first public testnet swaps are recorded, with every transaction, in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md):
+
+| Run | Mode | Result |
+|---|---|---|
+| 1 | htlc | 0.1 TAZ. Failed safely: the taker broadcast its funding first, the 60-second quote expired while it confirmed, and the maker refused. The taker refunded at the refund height; nothing was lost. The fix has the maker accept and reserve before any ZEC moves (in 0.3.0) |
+| 2 | htlc | 0.015 TAZ for 19.39 OUSD, completed in 3 min 39 s with a relayed claim |
+
+Both ran this example against the NU7 testnet chain through `testnet.zec.rocks:443`.
 
 ## What you need
 
@@ -44,7 +55,7 @@ Keep both keys. The taker's key signs htlc-mode refunds, so losing it can strand
 
 ### Get TAZ into the transparent address
 
-Paralock spends from a transparent address (`tm…`), but testnet faucets often pay only shielded addresses. Get TAZ into a shielded testnet wallet first, for example with zcash-devtool, connected to the same side of the testnet split as the example (see the note below), then send it from that wallet to the taker's `tm…` address. Wait for one confirmation (about 75 seconds).
+Paralock spends from a transparent address (`tm…`). The [Valar faucet](https://faucet.testnet.valargroup.dev) pays on the NU7 chain that this example uses; for the first public runs, its TAZ went to a zcash-devtool wallet and from there to the taker's `tm…` address. Whatever wallet you use must follow the same side of the testnet split (see the note below). Wait for one confirmation (about 75 seconds).
 
 > **Note:** Zcash testnet is currently split in two. `testnet.zec.rocks`, the server this example uses, follows the NU7 chain that Zakura activated (consensus branch `0x77190ad9`), while Zebra, many faucets and explorers such as zexplorer.app follow the NU6.3 chain (branch `0x37a5165b`). Paralock works on either chain, but your lightwalletd server or node must be on the same chain as your TAZ: coins received on one chain don't exist on the other. [The Zcash testnet split](/docs/networks#the-zcash-testnet-split) explains how to check which chain a server or a faucet follows.
 
@@ -53,16 +64,15 @@ Paralock spends from a transparent address (`tm…`), but testnet faucets often 
 From the repository root, after `pnpm install && pnpm build`:
 
 ```sh
-mkdir -p .paralock                                                       # the example writes its taker key here
 pnpm --filter @paralock/example-testnet start -- --zec 0.2              # swap 0.2 TAZ (htlc mode)
-pnpm --filter @paralock/example-testnet start -- --zec 0.2 --private    # adaptor mode: nothing on-chain links the legs
+pnpm --filter @paralock/example-testnet start -- --zec 0.2 --private    # private mode (adaptor): nothing on-chain links the legs
 pnpm --filter @paralock/example-testnet start -- --pay 20 --to 0x…      # pay exactly 20 OUSD to someone else
 pnpm --filter @paralock/example-testnet start -- --zec 0.2 --fresh      # receive at a fresh address made for this swap
 ```
 
-Without `--zec` or `--pay`, it swaps 0.1 TAZ. The maker uses its default limits, so a swap must be between 0.01 and 10 ZEC. A payment therefore has to be worth at least 0.01 ZEC at the current price (about $12.70 at $1,270 per ZEC); smaller amounts fail with `limit_exceeded`.
+Without `--zec` or `--pay`, it swaps 0.1 TAZ. The example lowers the maker's minimum to 0.002 TAZ (`minZecAmountZat: 200_000n`; the default is 0.01) and keeps the default maximum of 10, so a swap must be between 0.002 and 10 TAZ. A payment therefore has to be worth at least 0.002 ZEC at the current price (about $2.54 at $1,270 per ZEC); smaller amounts fail with `limit_exceeded`.
 
-The example first prints the taker's address and its confirmed TAZ balance, and stops if it is empty. Then it quotes from the live ZEC price (TAZ is priced as if it were ZEC), runs the swap, prints one line per step with an explorer link, and ends with the transactions: the Zcash lock, the Tempo lock, the Tempo claim and, once it is seen, the maker's Zcash claim. If a Zcash explorer link doesn't show your transaction, that explorer follows the other side of the testnet split.
+The example first prints the taker's address and its confirmed TAZ balance, and stops if it is empty. Then it quotes from the live ZEC price (TAZ is priced as if it were ZEC), runs the swap, prints one line per step, and ends with the transactions: the Zcash lock, the Tempo lock, the Tempo claim and, once it is seen, the maker's Zcash claim. Tempo steps link to the Moderato explorer. No public explorer indexes the NU7 chain yet, so Zcash steps print the txid: look it up through a lightwalletd server on that chain, for example with `getRawTransaction` on a `LightwalletdClient` for `testnet.zec.rocks:443`.
 
 ## The core of it
 
@@ -80,14 +90,14 @@ Both parties share one `LightwalletdClient`, which implements the same `ZcashNod
 
 Zcash testnet blocks come about every 75 seconds, so a swap takes a few minutes, most of it spent waiting for Zcash blocks:
 
-1. The taker's funding needs one block to confirm.
+1. The maker accepts the swap and reserves the OUSD before the taker broadcasts anything, so the 60-second quote only has to last a few seconds. Then the taker's funding needs one block to confirm.
 2. The maker polls every 15 seconds, sees the confirmed funding and locks OUSD. Tempo confirms in under a second.
 3. The taker verifies the lock and claims on Tempo.
 4. The maker's Zcash claim needs one more block.
 
 lightwalletd only reports mined transactions, so neither side sees a transaction until it is in a block.
 
-The example raises the taker's waits for the slower chain: up to 60 minutes for the funding to confirm (`fundingConfirmationMs`) and for the maker's lock (`makerLockMs`), and up to 20 minutes to watch the maker's ZEC claim (`followMakerMs`). It also requires 120 seconds of EVM lock left before claiming (`minClaimWindowSeconds`), instead of the default 30.
+Run 2 above took 3 min 39 s from the maker's acceptance to its Zcash claim. The example raises the taker's waits for the slower chain: up to 60 minutes for the funding to confirm (`fundingConfirmationMs`) and for the maker's lock (`makerLockMs`), and up to 20 minutes to watch the maker's ZEC claim (`followMakerMs`). It also requires 120 seconds of EVM lock left before claiming (`minClaimWindowSeconds`), instead of the default 30.
 
 ## The testnet policy
 

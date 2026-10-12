@@ -22,13 +22,16 @@ The recipient is fixed when the maker locks. Anyone can submit a claim, but the 
 
 - In `htlc` mode it is a hash time-locked contract (HTLC):
 
-  ```text
-  OP_IF
-    OP_SIZE 32 OP_EQUALVERIFY OP_SHA256 <hashlock> OP_EQUALVERIFY <makerPubkey>
-  OP_ELSE
-    <refundHeight> OP_CHECKLOCKTIMEVERIFY OP_DROP <takerPubkey>
+  ```zscript
+  OP_IF                                    # claim: the maker, with the secret
+    OP_SIZE 32 OP_EQUALVERIFY              # a 32-byte secret
+    OP_SHA256 <hashlock> OP_EQUALVERIFY    # whose sha256 is the hashlock
+    <makerPubkey>
+  OP_ELSE                                  # refund: the taker, after a timeout
+    <refundHeight> OP_CHECKLOCKTIMEVERIFY OP_DROP
+    <takerPubkey>
   OP_ENDIF
-  OP_CHECKSIG
+  OP_CHECKSIG                              # signed by the key picked above
   ```
 
   The maker can spend it with the 32-byte secret and its own signature. The taker can spend it with its own signature once the chain reaches `refundHeight`.
@@ -45,6 +48,28 @@ From `expiry` on, anyone can call `refund`, which returns the funds to the maker
 
 The swap id in this mode is the hashlock.
 
+```sequence
+title: htlc mode, message by message
+actors: Taker, Maker, Zcash, EVM chain
+== Quote ==
+Taker -> Maker: GET /quote
+Maker --> Taker: quote: amounts, rate, keys, windows; valid for 60 s
+== Commit, then fund ==
+Taker: draws the secret, builds the HTLC, signs the funding and saves both. Nothing is sent yet.
+Taker -> Maker: POST /swaps: script, funding outpoint, fundingExpiryHeight, recipient
+Maker: checks the script byte for byte, consumes the quote, reserves the stablecoins
+Maker --> Taker: the swap, accepted
+Taker -> Zcash: broadcast the funding
+== Lock ==
+Zcash --> Maker: funding has minZcashConfirmations
+Maker -> EVM chain: lock under the same hashlock, expiry T
+EVM chain --> Taker: lock found: recipient, token, amount, time left checked
+== Settle ==
+Taker -> EVM chain: claim with the secret; the recipient is paid [key]
+EVM chain --> Maker: the Claimed event publishes the secret [key]
+Maker -> Zcash: claim the ZEC with the secret [key]
+```
+
 1. **Quote.** The taker calls `taker.quote(zat, chain, "htlc")`. The maker answers with the amounts, the rate, its long-term Zcash public key, its EVM address, the lock windows (`zcashLockBlocks`, `evmLockSeconds`) and an expiry 60 seconds out. The taker validates all of it against its own configuration and limits.
 2. **Prepare.** The taker draws a random 32-byte secret, computes `hashlock = sha256(secret)`, builds the HTLC with `refundHeight = tip + zcashLockBlocks`, and signs a funding transaction that expires if it isn't mined within 40 blocks. Zcash v5 transaction ids (ZIP 244) don't commit to signatures, so the funding txid is final before anything is sent. It writes the secret and the signed funding to its store.
 3. **Accept.** Before broadcasting anything, the taker re-checks that the quote hasn't expired and sends the maker the quote id, the redeem script, the funding outpoint, the funding's expiry height (`fundingExpiryHeight`) and the recipient (`POST /swaps`). The maker checks that the script matches its HTLC template byte for byte, that it pays the maker's key, that the funding expiry is above its tip and at most `maxFundingExpiryBlocks` (45) ahead, that the window is still safe, that the refund height is at most twice the policy's window away, and that it has the inventory. Only then does it consume the quote (a refused accept leaves it usable) and reserve the stablecoins. If anything fails here, nothing was broadcast: the taker abandons the swap.
@@ -59,6 +84,34 @@ The swap id in this mode is the hashlock.
 ## The adaptor flow
 
 Private mode replaces the hash with an adaptor signature. An **adaptor signature** is a pre-signature "encrypted" to a point `Y = y·G`: anyone can check it, whoever knows `y` can complete it into a normal ECDSA signature, and whoever holds the pre-signature and later sees the completed signature can compute `y`. The secret is `y`, and it only ever travels inside signatures. The swap id in this mode is the quote id.
+
+```sequence
+title: Private mode (adaptor), message by message
+actors: Taker, Maker, Zcash, EVM chain
+== Quote ==
+Taker -> Maker: GET /quote in adaptor mode
+Maker --> Taker: quote with a fresh Zcash key for this quote
+== Commit, then fund ==
+Taker: draws y (Y = y·G) and a fresh 2-of-2 key, signs the funding and saves them. Nothing is sent yet.
+Taker -> Maker: POST /adaptor/swaps: 2-of-2 key, Y, funding txid and expiry, refund height, recipient
+Maker: checks the proposal, reserves the stablecoins, signs the taker's time-locked refund
+Maker --> Taker: refund signature, claim address, branch id, one-time signer
+Taker: verifies the refund signature and saves it. Its ZEC can always come back now.
+Taker -> Zcash: broadcast the funding
+== Lock ==
+Zcash --> Taker: funding confirmed
+Taker -> Maker: pre-signature on the maker's Zcash claim, encrypted to Y
+Maker: checks it with preVerify, waits for minZcashConfirmations
+Maker -> EVM chain: lock: recipient, signer, amount, expiry T, salt
+Taker -> Maker: resends its pre-signature
+Maker --> Taker: escrow id and the maker's EVM pre-signature, encrypted to Y
+EVM chain --> Taker: lock found: recipient, token, amount, signer, time left checked
+== Settle ==
+Taker -> EVM chain: claim with the pre-signature completed by y [key]
+EVM chain --> Maker: the Claimed event publishes the signature [key]
+Maker: extracts y and completes the taker's Zcash pre-signature with it [key]
+Maker -> Zcash: claim the 2-of-2 [key]
+```
 
 1. **Quote.** The taker calls `taker.quote(zat, chain, "adaptor")`. The maker generates a fresh Zcash key for this quote and stores it before returning the quote, so the 2-of-2 reveals nothing about which maker it is.
 2. **Prepare.** The taker draws the adaptor secret `y` and its point `Y`, a fresh per-swap multisig key, builds the 2-of-2 address and signs a funding transaction but does **not** broadcast it. Zcash v5 transaction ids (ZIP 244) don't commit to signatures, so the funding txid is final before anything is sent. The taker checks that no network upgrade activates before the refund height, then stores `y`, the multisig key and the funding.
@@ -80,10 +133,25 @@ Two deadlines govern every swap:
 - **Refund height N:** a Zcash block height, set when the taker prepares the lock (`tip + zcashLockBlocks`). From N on, the taker can take its ZEC back.
 - **Expiry T:** a Unix time, set when the maker locks (`now + evmLockSeconds`). Before T only the recipient can be paid; from T on, the maker can take its stablecoins back.
 
-```text
-Zcash  funding ----------------------------------------------------------- N: taker may refund
-EVM               maker locks ------------------- T: maker may refund
-                              taker claims here      maker must claim the ZEC before N
+```timeline
+title: The two windows of one swap
+lanes:
+  - name: Zcash
+    unit: ZEC
+    events:
+      - { at: 0, label: lock, text: "The taker funds the Zcash lock. Its refund height N (tip + zcashLockBlocks) was fixed when the taker built it." }
+      - { at: 66, label: claim, key: true, text: "The maker claims the ZEC with the now-public secret. The claim must be mined before N." }
+      - { at: 100, mark: N, label: taker may refund, text: "Refund height N: from here on, the taker can take its ZEC back." }
+  - name: EVM chain
+    unit: dollars
+    events:
+      - { at: 14, label: lock, text: "The maker locks the stablecoins, but only if at least safetyFactor × evmLockSeconds remain before N. T = now + evmLockSeconds." }
+      - { at: 40, label: claim, key: true, text: "The taker claims before T, with at least minClaimWindowSeconds to spare. The claim makes the secret public." }
+      - { at: 54, mark: T, label: maker may refund, text: "Expiry T: from here on, the maker can take its stablecoins back." }
+spans:
+  - { from: 14, to: 54, label: "EVM lock: evmLockSeconds" }
+  - { from: 14, to: 100, label: "Zcash time left when the maker locks: at least safetyFactor (2) × the EVM lock" }
+caption: "Not to scale. With MAINNET_POLICY, N is 144 blocks (about 3 h) after the taker builds its lock and the EVM lock lasts 1 h, so the maker has about an hour to lock, and at least another hour remains after T for its claim."
 ```
 
 The rule: when the maker locks, the Zcash time left before N must be at least `safetyFactor` times the EVM lock. `assertSafeWindows(policy, blocksUntilRefund, evmLockSeconds)` enforces it by checking `blocksUntilRefund × zcashBlockSeconds ≥ evmLockSeconds × safetyFactor`, and throws `ParalockError("unsafe_timeouts")` otherwise.
@@ -137,7 +205,7 @@ The taker has its own timing rule. A claim mined after T reverts, but its callda
 - **Whoever learns the secret second always has time to use it,** because of the window ordering above.
 - **Secrets are single-use.** The contracts mark every hashlock and escrow id settled forever.
 
-These guarantees assume the code is correct (it has not been audited) and that each party is online before its deadline. The [Security model](/docs/security) lists every assumption.
+These guarantees assume the code is correct (it has not been audited by a third party) and that each party is online before its deadline. The [Security model](/docs/security) lists every assumption.
 
 ## Quotes and pricing
 

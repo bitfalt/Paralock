@@ -7,7 +7,7 @@ description: "Reference for LightwalletdClient, a ZcashNode backed by a lightwal
 
 `LightwalletdClient` implements [`ZcashNode`](/docs/zcash#the-zcashnode-interface) from `@paralock/zcash`, so you can pass it anywhere the [SDK](/docs/sdk) takes a Zcash node.
 
-> **Warning:** Experimental and not audited. Use testnets only.
+> **Warning:** Experimental and not audited by a third party. Use testnets only.
 
 ## Install
 
@@ -15,7 +15,7 @@ description: "Reference for LightwalletdClient, a ZcashNode backed by a lightwal
 npm install @paralock/lightwalletd
 ```
 
-Version 0.1.0. Node.js 20 or newer only (it uses gRPC through `@grpc/grpc-js`). The service definitions ship in the package's `proto/` directory.
+This page describes version 0.1.1 (the release before it is 0.1.0). 0.1.1 parses v1 to v4 transactions to their last byte before hashing them and exports the `LightdInfo` type. Node.js 20 or newer only (it uses gRPC through `@grpc/grpc-js`). The service definitions ship in the package's `proto/` directory.
 
 ## Example
 
@@ -121,7 +121,7 @@ Plain `Error`s are thrown when the server returns a different transaction or txi
 | Export | Signature | Meaning |
 |---|---|---|
 | `txidOf` | `txidOf(data: Uint8Array \| string): string` | The txid of a raw transaction (v1 to v5), display-order hex. |
-| `decodeTx` | `decodeTx(data: Uint8Array \| string): DecodedTx` | `{ txid, version, inputs: RawInput[] }`. Parses every version to its last byte (v1 to v4 structurally, including Sprout JoinSplits and Sapling descriptions) and throws on trailing or missing data, so a txid is only computed over one whole transaction. Throws `UnsupportedVersionError` for v6 and later. |
+| `decodeTx` | `decodeTx(data: Uint8Array \| string): DecodedTx` | `{ txid, version, inputs: RawInput[] }`. Parses every version to its last byte (since 0.1.1, v1 to v4 structurally, including Sprout JoinSplits and Sapling descriptions, checked against the ZIP 143 and ZIP 243 vectors) and throws on trailing or missing data, so a txid is only computed over one whole transaction. Throws `UnsupportedVersionError` for v6 and later. |
 | `RawInput` | `{ prevTxid?: string; vout?: number; scriptSig: Uint8Array }` | A transparent input. Coinbase inputs have no `prevTxid`. |
 | `UnsupportedVersionError` | `version: number` | A transaction version this module can't decode. |
 | `shieldedDigests` | `shieldedDigests(raw: Uint8Array): ShieldedDigests` | ZIP 244 Sapling and Orchard digests of a v5 transaction's shielded part. |
@@ -144,7 +144,7 @@ Public servers run by the Zcash community:
 
 | Network | Server |
 |---|---|
-| Testnet | `testnet.zec.rocks:443` |
+| Testnet | `testnet.zec.rocks:443` (the NU7 chain; see [the testnet split](/docs/networks#the-zcash-testnet-split)) |
 | Mainnet | `zec.rocks:443`, `na.zec.rocks:443`, `eu.zec.rocks:443`, `ap.zec.rocks:443`, `sa.zec.rocks:443` |
 
 The local devnet runs lightwalletd at `http://127.0.0.1:9067` (see [CLI](/docs/cli)).

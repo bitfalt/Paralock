@@ -169,16 +169,16 @@ The refund pays the return address recorded when the swap started. `refund` acce
 
 ## From the CLI
 
-On the devnet, the CLI and the web app share the taker store `.paralock/taker`, so these commands work for swaps started from either:
+On the devnet, the CLI keeps the taker store in `taker/` inside its [state directory](/docs/cli#state-directory): `.paralock/taker` in a checkout, else under `$PARALOCK_HOME` or `~/.paralock`. In a checkout the web app shares that store, so these commands work for swaps started from either:
 
 ```sh
-pnpm paralock swaps                       # unfinished swaps: id, mode, status, amount, chain, refund height
-pnpm paralock resume <id>                 # resume(id, { claim: true }) and print progress
-pnpm paralock refund <id>                 # refund once the refund height is reached, then reshield
-pnpm paralock refund <id> --no-shield     # refund without reshielding
+npx paralock swaps                       # unfinished swaps: id, mode, status, amount, chain, refund height
+npx paralock resume <id>                 # resume(id, { claim: true }), print progress, then reshield change
+npx paralock refund <id>                 # refund once the refund height is reached, then reshield
+npx paralock refund <id> --no-shield     # refund without reshielding (resume takes --no-shield too)
 ```
 
-When a CLI swap fails after locking, the CLI refunds it automatically and prints the `paralock refund <id>` command in case the process is interrupted. The devnet maker keeps its state in `.paralock/maker`, so restarting `pnpm paralock maker` resumes its swaps.
+When a CLI swap fails after locking, the CLI refunds it automatically and prints the `paralock refund <id>` command in case the process is interrupted. The devnet maker keeps its state in `maker/` in the same directory, so restarting `npx paralock maker` resumes its swaps.
 
 ## Maker restarts
 

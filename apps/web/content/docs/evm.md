@@ -10,7 +10,7 @@ description: "Reference for the viem clients of ParalockHTLC and ParalockAdaptor
 
 Both contracts store one slot per swap, pay only the recipient fixed at lock time (anyone may submit the claim, for example a relayer), and mark ids and hashlocks settled forever. See [Contracts and deployments](/docs/contracts) for the contracts themselves and their addresses.
 
-> **Warning:** Experimental and not audited. The contracts are deployed on testnets only.
+> **Warning:** Experimental and not audited by a third party. The contracts are deployed on testnets only.
 
 ## Install
 
@@ -18,7 +18,7 @@ Both contracts store one slot per swap, pay only the recipient fixed at lock tim
 npm install @paralock/evm viem
 ```
 
-Version 0.2.0. Its only dependency is `viem`. Amounts are `bigint` token base units (the supported stablecoins have 6 decimals: 25 USDC = `25_000_000n`). Expiries are Unix seconds.
+This page describes version 0.3.0 (the release before it is 0.2.0). In 0.3.0: `approveAndLock`, `outcome`, `now`, `blockNumber`, `maxLockSeconds`, the chain-id check, pinned lock lookups, verified read-backs, coordinated sends and `deployParalockContracts` with the embedded artifacts. Its only dependency is `viem`. Amounts are `bigint` token base units (the supported stablecoins have 6 decimals: 25 USDC = `25_000_000n`). Expiries are Unix seconds.
 
 ## createEvmHtlc
 
@@ -46,10 +46,9 @@ const swap = {
   sender: htlc.walletClient!.account.address,
   recipient,
   amount: 25_000_000n, // 25 USDC
-  expiry: BigInt(Math.floor(Date.now() / 1000) + 3600), // Unix seconds, 1 h from now
+  expiry: (await htlc.now()) + 3600n, // Unix seconds in chain time, 1 h from now
 };
-await htlc.approveIfNeeded(usdc, swap.amount); // exact allowance, only if needed
-await htlc.lock(swap);
+await htlc.approveAndLock(swap); // checks the swap, approves exactly the amount if needed, then locks
 const preimage = await htlc.waitForClaimPreimage(hashlock, { timeoutMs: 3_600_000 }); // the secret, once claimed
 ```
 
@@ -60,35 +59,41 @@ const preimage = await htlc.waitForClaimPreimage(hashlock, { timeoutMs: 3_600_00
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `rpcUrl` | `string` | required | JSON-RPC endpoint. |
-| `chainId` | `number` | required | Expected chain id. Not checked here; the [SDK](/docs/sdk) checks it against the node before a swap. |
+| `chainId` | `number` | required | Expected chain id. The escrow clients check the node's `eth_chainId` against it once (then cached) before their first read or send, and throw `ChainIdMismatchError` on a mismatch. |
 | `contract` | `Address` | required | `ParalockHTLC` or `ParalockAdaptorEscrow` address. |
 | `account` | `Account \| Hex` | none | Signer: a viem `Account` or a `0x` private key. Omit it for a read-only client; sending then throws. |
 | `fromBlock` | `bigint` | `0n` | First block to scan for events: the contract's deployment block. Set it on public chains. |
-| `maxBlockRange` | `bigint` | `50_000n` | Largest block span per `eth_getLogs` request (public RPCs cap it). |
+| `maxBlockRange` | `bigint` | `50_000n` | Largest block span per `eth_getLogs` request. Scans run newest-first and stop at the first match; a span the node refuses is halved (and kept smaller) automatically. |
 | `feeToken` | `Address` | none | Tempo only: the TIP-20 that pays gas. Implies `tempo: true`. |
 | `tempo` | `boolean` | by chain id | Use Tempo's transaction format. Default: true when `feeToken` is set or `chainId` is in `TEMPO_CHAIN_IDS`. |
 | `pollingIntervalMs` | `number` | `500` | Poll interval for receipts and waiters, in milliseconds. |
 | `rpcTimeoutMs` | `number` | `10_000` | Per-request RPC timeout, in milliseconds. |
 | `rpcRetryCount` | `number` | `3` | Retries per RPC request on network errors and 5xx or 429 responses, with exponential backoff. |
 | `receiptTimeoutMs` | `number` | `180_000` | How long to wait for a sent transaction to be mined before throwing, in milliseconds. |
+| `maxLockSeconds` | `number` | `10_000_000` | The furthest a new lock's expiry may be ahead of the chain's time, in seconds. `lock` refuses anything later (for example an expiry in milliseconds) before approving or sending. |
 
 ### EvmHtlc
 
 | Member | Signature | Behavior |
 |---|---|---|
 | `address`, `chain`, `publicClient`, `walletClient` | | The contract and the viem clients. `walletClient` is `undefined` without an `account`. |
-| `approveIfNeeded` | `approveIfNeeded(token: Address, amount: bigint): Promise<TxResult \| undefined>` | Approves exactly `amount` unless the allowance already covers it. Never unlimited. |
-| `lock` | `lock(swap: HtlcSwap): Promise<TxResult>` | Locks funds. The account must be `swap.sender` and have approved the contract. |
+| `approveAndLock` | `approveAndLock(swap: HtlcSwap): Promise<LockReceipt>` | Checks the swap as `lock` does, approves exactly `swap.amount` if needed, then locks. Serialized per account, token and contract (process-wide) until the lock is mined, so concurrent locks never overwrite each other's exact approvals. A refused lock leaves no approval behind. Resolves with `{ approval, lock }`. |
+| `approveIfNeeded` | `approveIfNeeded(token: Address, amount: bigint): Promise<TxResult \| undefined>` | Approves exactly `amount` unless the allowance already covers it. Never unlimited. Takes the same lock as `approveAndLock`. |
+| `lock` | `lock(swap: HtlcSwap): Promise<TxResult>` | Locks funds. The account must be `swap.sender` and have approved the contract. Throws `InvalidLockError` before sending unless the amount, recipient and hashlock are non-zero and `now < expiry ≤ now + maxLockSeconds` in chain time. |
 | `claim` | `claim(swap: HtlcSwap, preimage: Hex): Promise<TxResult>` | Pays `swap.recipient` by revealing the 32-byte secret. Checks `sha256(preimage)` locally first. Any account may submit it. |
 | `refund` | `refund(swap: HtlcSwap): Promise<TxResult>` | Returns the funds to `swap.sender` once `swap.expiry` has passed. Any account may submit it. |
+| `now`, `blockNumber` | `() => Promise<bigint>` | The latest block's timestamp (Unix seconds) and number. Expiries are compared against chain time, never local time. |
 | `getState` | `getState(hashlock: Hex): Promise<HtlcState>` | `{ status: "empty" \| "active" \| "settled", raw }`. |
 | `getLockedSwap` | `getLockedSwap(hashlock: Hex): Promise<HtlcSwap \| undefined>` | The swap rebuilt from its `Locked` event and checked against the on-chain commitment. |
-| `getLock` | `getLock(hashlock: Hex): Promise<LockInfo<HtlcSwap> \| undefined>` | The same, plus `blockNumber` and `transactionHash` of the lock. Confirmations = latest block − `blockNumber` + 1. |
+| `getLock` | `getLock(hashlock: Hex): Promise<LockInfo<HtlcSwap> \| undefined>` | The same, plus `blockNumber` and `transactionHash` of the lock. State and logs are read at one pinned block. Confirmations = latest block − `blockNumber` + 1. |
+| `outcome` | `outcome(hashlock: Hex): Promise<HtlcOutcome>` | Where the swap stands, read at one pinned block: `{ status: "empty" }`, `"active"`, `"refunded"`, or `{ status: "claimed", preimage }` with the preimage checked to hash to the hashlock. Throws `SettlementNotIndexedError` if settled but the event isn't served yet (retry), `InvalidResponseError` if the node returns a preimage that doesn't match. |
 | `waitForLocked` | `waitForLocked(hashlock: Hex, options?: WaitOptions): Promise<HtlcSwap>` | Resolves once a swap is locked (at once if it already is). |
-| `waitForClaimPreimage` | `waitForClaimPreimage(hashlock: Hex, options?: WaitOptions): Promise<Hex>` | Resolves with the preimage once claimed. Rejects with `SwapRefundedError` if refunded, `HtlcTimeoutError` on timeout. |
+| `waitForClaimPreimage` | `waitForClaimPreimage(hashlock: Hex, options?: WaitOptions): Promise<Hex>` | Resolves with the preimage once claimed (checked as in `outcome`). Rejects with `SwapRefundedError` if refunded, `HtlcTimeoutError` on timeout. |
 | `tokenBalance` | `tokenBalance(token: Address, owner: Address): Promise<bigint>` | ERC-20 or TIP-20 `balanceOf`. |
 
-`WaitOptions` is `{ timeoutMs?: number; signal?: AbortSignal }`. Without `timeoutMs` a waiter waits forever. `TxResult` is `{ hash: Hex; blockNumber: bigint; gasUsed: bigint }`, returned once the transaction is mined and successful.
+`WaitOptions` is `{ timeoutMs?: number; signal?: AbortSignal }`. Without `timeoutMs` a waiter waits forever. `TxResult` is `{ hash: Hex; blockNumber: bigint; gasUsed: bigint }`, returned once the transaction is mined and successful. `LockReceipt` is `{ approval: TxResult | undefined; lock: TxResult }`.
+
+Every transaction of one account through one RPC endpoint is prepared, signed and broadcast under one process-wide lane: local accounts (private keys, KMS accounts) get an explicit nonce, so concurrent swaps never reuse one. Separate processes sending from one key are not coordinated: give each its own key. Transactions sent through `walletClient` directly bypass the lane.
 
 ## createAdaptorEscrow
 
@@ -103,8 +108,8 @@ import { createAdaptorEscrow, randomSalt } from "@paralock/evm";
 
 const escrow = createAdaptorEscrow({ rpcUrl, chainId: 84532, contract: ESCROW, account, fromBlock: DEPLOY_BLOCK });
 const swap = { token: usdc, sender, recipient, signer, amount: 25_000_000n, expiry, salt: randomSalt() };
-await escrow.approveIfNeeded(usdc, swap.amount);
-const { id } = await escrow.lock(swap);
+const { lock } = await escrow.approveAndLock(swap);
+const id = lock.id;
 const digest = escrow.claimDigest(id); // what `signer` signs: raw, no EIP-191 prefix
 
 // Later, anyone submits signer's signature; the funds go to swap.recipient.
@@ -117,16 +122,19 @@ const { v, r, s } = await escrow.waitForClaimSignature(id, { timeoutMs: 60_000 }
 | Member | Signature | Behavior |
 |---|---|---|
 | `address`, `chainId`, `chain`, `publicClient`, `walletClient` | | The contract, its configured chain id and the viem clients. |
+| `approveAndLock` | `approveAndLock(swap: AdaptorSwap): Promise<LockReceipt<TxResult & { id: Hex }>>` | As on `EvmHtlc`: checks, exact approval if needed, lock; serialized per account, token and contract. |
 | `approveIfNeeded` | `approveIfNeeded(token: Address, amount: bigint): Promise<TxResult \| undefined>` | Exact allowance, only if needed. |
-| `lock` | `lock(swap: AdaptorSwap): Promise<TxResult & { id: Hex }>` | Locks funds and resolves with the swap id. Checks that the contract computes the same id. |
+| `lock` | `lock(swap: AdaptorSwap): Promise<TxResult & { id: Hex }>` | Locks funds and resolves with the swap id. Checks that the contract computes the same id. Throws `InvalidLockError` before sending on a zero signer, amount or recipient, or an expiry outside `(now, now + maxLockSeconds]`. |
 | `claim` | `claim(swap: AdaptorSwap, signature: ClaimSignatureInput): Promise<TxResult>` | Pays `swap.recipient` with `swap.signer`'s signature over `claimDigest(id)`. Normalizes the signature (`normalizeClaimSignature`) and checks it recovers to `swap.signer` before sending. Any account may submit it. |
 | `refund` | `refund(swap: AdaptorSwap): Promise<TxResult>` | Returns the funds to `swap.sender` once `swap.expiry` has passed. |
 | `idOf` | `idOf(swap: AdaptorSwap): Hex` | The swap id, computed locally (`keccak256(abi.encode(swap))`), identical to the contract's `idOf`. |
 | `claimDigest` | `claimDigest(id: Hex): Hex` | The digest the signer signs, computed locally for this chain and contract. Synchronous. |
 | `getState` | `getState(id: Hex): Promise<AdaptorState>` | `{ status: "empty" \| "active" \| "settled", raw: 0 \| 1 \| 2 }`. |
-| `getLockedSwap`, `getLock` | `(id: Hex) => Promise<AdaptorSwap \| undefined>`, `Promise<LockInfo<AdaptorSwap> \| undefined>` | The swap rebuilt from its `Locked` event and checked against its id; `getLock` adds `blockNumber` and `transactionHash`. |
+| `now`, `blockNumber` | `() => Promise<bigint>` | The latest block's timestamp and number. |
+| `getLockedSwap`, `getLock` | `(id: Hex) => Promise<AdaptorSwap \| undefined>`, `Promise<LockInfo<AdaptorSwap> \| undefined>` | The swap rebuilt from its `Locked` event and checked against its id, state and logs read at one pinned block; `getLock` adds `blockNumber` and `transactionHash`. |
+| `outcome` | `outcome(id: Hex): Promise<AdaptorOutcome>` | Like `EvmHtlc.outcome`; `claimed` carries `signature`, checked to be canonical and to recover, over this chain's `claimDigest(id)`, to the swap's signer. |
 | `waitForLocked` | `waitForLocked(id: Hex, options?: WaitOptions): Promise<AdaptorSwap>` | Resolves once locked. |
-| `waitForClaimSignature` | `waitForClaimSignature(id: Hex, options?: WaitOptions): Promise<ClaimSignature>` | Resolves with the published `{ v, r, s }` once claimed. Rejects with `SwapRefundedError` if refunded, `HtlcTimeoutError` on timeout. |
+| `waitForClaimSignature` | `waitForClaimSignature(id: Hex, options?: WaitOptions): Promise<ClaimSignature>` | Resolves with the published `{ v, r, s }` once claimed (checked as in `outcome`). Rejects with `SwapRefundedError` if refunded, `HtlcTimeoutError` on timeout. |
 | `tokenBalance` | `tokenBalance(token: Address, owner: Address): Promise<bigint>` | `balanceOf`. |
 
 ## Swap data
@@ -192,7 +200,7 @@ Stablecoins (`tokens`; all have 6 decimals):
 | Arbitrum One | `USDC` `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` |
 | Arbitrum Sepolia | `USDC` `0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d` |
 | Robinhood Chain | `USDG` `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` |
-| Robinhood Chain Testnet | none (the Paralock deployment uses a MockUSD test token, see [deployments](/docs/contracts#deployments)) |
+| Robinhood Chain Testnet | none (the Paralock deployment uses a MockUSD test token, `0xD9B278625B5946B8CD15dad6c0c776095B8D0513`, listed as `USDC` in `contracts/deployments/46630.json`; see [deployments](/docs/contracts#deployments)). The SDK's `createTaker` without `tokens` on 46630 fails with a message pointing to it: pass it in `tokens` to accept it. |
 | HyperEVM | `USDC` `0xb88339CB7199b77E23DB6E890353E22632Ba630f` |
 | HyperEVM Testnet | `USDC` `0x2B3370eE501B4a559b57D449569354196457D8Ab` |
 
@@ -237,8 +245,12 @@ const htlc = createEvmHtlc({
 | `TransactionRevertedError` | `hash` | A sent transaction was mined but reverted. |
 | `SwapRefundedError` | `id`, `hashlock` (the same value) | A claim waiter found that the swap was refunded instead. |
 | `HtlcTimeoutError` | | A waiter gave up after `timeoutMs`. Thrown by both clients. |
+| `ChainIdMismatchError` | `expected`, `actual` | The RPC node serves another chain than `chainId`. Nothing was read from it or sent to it. |
+| `InvalidLockError` | | `lock` or `approveAndLock` refused the swap before approving or sending anything: an expiry not in `(now, now + maxLockSeconds]`, a sender other than the account, or a zero amount, recipient, hashlock or signer. |
+| `InvalidResponseError` | | The node returned data that fails verification: a `Locked` event that doesn't match the on-chain state or its id, a log outside the filter, a revealed preimage that doesn't hash to the hashlock, or a claim signature that isn't canonical or isn't the swap signer's over this chain's digest. Such data is never returned. |
+| `SettlementNotIndexedError` | `id` | `outcome` found the swap settled, but the node doesn't serve its `Claimed` / `Refunded` event yet. Retry later. |
 
-Every write is simulated first (`simulateContract`), so a call that would revert throws viem's contract error, carrying the contract's custom error (for example `SwapExpired`), before any transaction is sent. Plain `Error`s are thrown for a read-only client asked to send, a preimage that doesn't match the hashlock, a claim signature that doesn't recover to `swap.signer`, and a `Locked` event that doesn't match the on-chain state.
+Every write is simulated first (`simulateContract`), so a call that would revert throws viem's contract error, carrying the contract's custom error (for example `SwapExpired`), before any transaction is sent. Plain `Error`s are thrown for a read-only client asked to send, a preimage that doesn't match the hashlock (in `claim`), a claim signature that doesn't recover to `swap.signer` (in `claim`), and a lock that is on-chain but whose `Locked` event isn't in the scanned range (check `fromBlock`).
 
 > **Warning:** A claim mined after the expiry reverts but still publishes the secret (the preimage or the signature is in the transaction's calldata). Claim with time to spare.
 

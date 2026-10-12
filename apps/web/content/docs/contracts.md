@@ -10,7 +10,7 @@ Paralock's EVM leg is two small escrow contracts. Each holds a maker's stablecoi
 
 Both work with TIP-20 stablecoins on Tempo and standard ERC-20s elsewhere. They have no owner, admin, pause switch or upgrade path. The TypeScript clients are in [@paralock/evm](/docs/evm).
 
-> **Warning:** Experimental and not audited. Deployed on testnets only. Don't lock real funds.
+> **Warning:** Experimental and not audited by a third party. Deployed on testnets only. Don't lock real funds.
 
 ## Storage model
 
