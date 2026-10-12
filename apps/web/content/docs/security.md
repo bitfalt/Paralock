@@ -39,9 +39,9 @@ The escrow contracts have no owner, admin, pause or upgrade function. Once funds
 |---|---|
 | Lock ZEC and walk away after the maker locks (the "free option"). The maker's inventory stays locked until expiry, and it pays the refund gas. The spread prices this in | Get the stablecoins without revealing the secret, or the adaptor secret, to the maker |
 | Request many quotes or proposals. Capped by `maxOpenQuotes` (1,000), `maxConcurrentSwaps` (10) and the 60-second quote lifetime | Make the maker lock against a tampered script, a different claim key or a short funding: the maker rebuilds the lock byte for byte and checks the value |
-| Reserve inventory and never fund. The maker commits before the funding is broadcast, so each reservation holds stablecoins until the declared `fundingExpiryHeight` (at most `maxFundingExpiryBlocks`, 45 blocks, ahead) plus 2 blocks, or until the window gets too short to lock, and counts against `maxConcurrentSwaps` | Get the maker to lock without a confirmed funding: it locks only once the funding has `minZcashConfirmations` |
+| Reserve inventory and never fund. The maker commits before the funding is broadcast, so each reservation holds stablecoins, and counts against `maxConcurrentSwaps`, until the declared `fundingExpiryHeight` (at most `maxFundingExpiryBlocks`, 45 blocks, ahead) plus 2 blocks. An htlc accept that declares no expiry gets the same deadline from the maker's tip, as long as the maker never sees a transaction paying the lock. A funding that is broadcast but kept unmined holds it until the window gets too short to lock, at most about twice the policy window | Get the maker to lock without a confirmed funding: it locks only once the funding has `minZcashConfirmations` |
 | Stall until its refund nears. The maker re-checks the window right before locking and abandons the swap instead | Refund its ZEC before the refund height: consensus rejects it |
-| Send an invalid pre-signature or a far-away refund height | Pass the maker's checks: pre-signatures are verified, and refund heights more than twice the policy window away are refused |
+| Send an invalid pre-signature or a far-away refund height | Pass the maker's checks: pre-signatures are verified, and refund heights more than twice the policy window away are refused in both modes. A refused commitment leaves its quote usable |
 
 ### A relayer
 
@@ -90,7 +90,7 @@ Never commit keys. Anvil's development keys are public, and `.paralock/` (the de
 - **A late claim leaks.** A claim mined after expiry reverts, but its calldata still reveals the secret. The taker refuses to claim with less than `minClaimWindowSeconds` left (30 s by default); use minutes on Ethereum L1.
 - **The free option is real.** A taker can abandon a swap after the maker locks. It costs the maker time and gas, and it is priced into the spread rather than prevented.
 - **One direction, transparent refunds.** Swaps only sell ZEC for stablecoins, and refunds pay a transparent Zcash address.
-- **Public swap lookups.** `GET /swaps/:id` on a maker returns a swap's public view to anyone who knows its id. The list endpoint is off by default.
+- **Public swap lookups.** `GET /swaps/:id` on a maker returns a swap's public view to anyone who knows its id. In private mode that view has no adaptor point, pre-signatures, signer key or salt (the taker gets them in the answer to its own pre-signature request), but it still lists both legs' transactions and the amounts, so a leaked swap id links them. The list endpoint is off by default.
 - **Default price source.** `zecUsdPrice()` reads CoinGecko. A maker depends on that feed unless it brings its own.
 
 ## Test coverage

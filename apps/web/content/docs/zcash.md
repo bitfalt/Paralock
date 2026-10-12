@@ -96,19 +96,19 @@ They take a `Utxo` (`{ txid: string; vout: number; value: bigint; scriptPubKey: 
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `branchId` | `number` | `BRANCH_ID_NU6_3` | Consensus branch id of the next block. Read it from the node (`getNextBranchId`). |
+| `branchId` | `number` | required | Consensus branch id of the next block. Read it from the node (`getNextBranchId`). There is no default: signatures commit to it, and a chain on another upgrade (e.g. a testnet on NU7) uses another id. |
 | `expiryHeight` | `number` | `0` (never expires) | Last block the transaction may be mined in. Nodes reject transactions that expire within 3 blocks of the tip. |
-| `fee` | `bigint` | ZIP 317 | Override the fee, in zatoshi. |
-| `network` | `Network` | none | When set, every address is checked against it. |
+| `fee` | `bigint` | ZIP 317 | Override the fee, in zatoshi. Must be at least 0 and below the value spent. |
+| `network` | `Network` | required | Every address is checked against it. |
 
 | Builder | Arguments (plus `TxOptions`) | Behavior |
 |---|---|---|
 | `buildHtlcFunding` | `{ htlc, amount, utxos, key, changeScriptPubKey? }` | Funds the HTLC as output 0 from P2PKH UTXOs owned by `key`. Change, when any, is output 1. |
-| `buildHtlcClaim` | `{ htlc, utxo, key, preimage, to }` | Claims with the secret. `key` must be the claim key. Pays `utxo.value` minus the fee to `to`. |
+| `buildHtlcClaim` | `{ htlc, utxo, key, preimage, to }` | Claims with the secret. `key` must be the claim key, and `sha256(preimage)` must equal the hashlock (checked before signing). Pays `utxo.value` minus the fee to `to`. |
 | `buildHtlcRefund` | `{ htlc, utxo, key, to }` | Refunds after the timeout. `key` must be the refund key. |
 | `buildP2pkhSpend` | `{ utxos, key, outputs: { address?; scriptPubKey?; value }[], changeScriptPubKey? }` | Spends **every** given UTXO into `outputs`. Change goes to `changeScriptPubKey` (default: the key's address); change below `MIN_CHANGE` goes to the fee. |
 
-Builders throw on insufficient funds, a UTXO the key doesn't own, a duplicate UTXO, an output below `DUST_LIMIT`, or an amount that doesn't cover the fee.
+Builders throw on a missing or malformed `branchId` or `network`, insufficient funds, a UTXO the key doesn't own, a duplicate UTXO, a UTXO value outside `(0, MAX_MONEY]`, an output below `DUST_LIMIT`, a negative fee override or one not below the value spent, or an amount that doesn't cover the fee.
 
 > **Note:** Paralock sets `expiryHeight` only on funding transactions (`tip + FUNDING_EXPIRY_DELTA`, 40 blocks), so a stuck funding can't confirm hours later. Claims and refunds keep `0`: they are often signed long before they are broadcast and must stay valid until mined.
 
@@ -184,8 +184,8 @@ Private (adaptor) mode locks ZEC in a plain 2-of-2 multisig: `OP_2 <pkA> <pkB> O
 | `MultisigSpend` | `{ multisig; tx; sighash; fee; prevValue }` | An unsigned spend and the ZIP 244 `SIGHASH_ALL` digest both keys sign. |
 | `buildMultisigSpend` | `buildMultisigSpend({ multisig, utxo, to, lockTime? } & TxOptions): MultisigSpend` | Spends the output to one address, minus the fee. With `lockTime` (a block height) it becomes a refund that can't be mined before that height. |
 | `signMultisigSpend` | `signMultisigSpend(spend, key: KeyPair): Uint8Array` | One key's signature: DER plus the `SIGHASH_ALL` byte. |
-| `verifyMultisigSignature` | `verifyMultisigSignature(spend, pubkey, signature): boolean` | Checks a counterparty's signature (low-S, `SIGHASH_ALL`), for example the maker's refund signature. |
-| `finalizeMultisigSpend` | `finalizeMultisigSpend(spend, signatures: Record<string, Uint8Array>, options?: { verify?: boolean }): SignedTx` | Assembles the scriptSig. `signatures` is keyed by compressed pubkey hex (lowercase, no `0x`). Both signatures are verified first unless `verify: false` (tests only). |
+| `verifyMultisigSignature` | `verifyMultisigSignature(spend, pubkey, signature): boolean` | Checks a counterparty's signature (low-S, `SIGHASH_ALL`), for example the maker's refund signature. False unless `pubkey` is one of the 2-of-2's two keys. |
+| `finalizeMultisigSpend` | `finalizeMultisigSpend(spend, signatures: Record<string, Uint8Array>): SignedTx` | Assembles the scriptSig. `signatures` is keyed by compressed pubkey hex (lowercase, no `0x`). Both signatures are always verified first. |
 | `multisigSignaturesFromScriptSig` | `multisigSignaturesFromScriptSig(scriptSig): [Uint8Array, Uint8Array]` | The two signatures of a confirmed spend, in redeem-script key order. |
 
 A signature can come from anywhere, for example one completed from an [adaptor pre-signature](/docs/adaptor) with `der(sig)` plus the sighash byte.
@@ -283,7 +283,7 @@ Inputs are sized with their final scriptSig, so pass a transaction with placehol
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `BRANCH_ID_NU6_3` | `0x37a5165b` | Consensus branch id of NU6.3 ("Ironwood"). The builders' default; prefer the node's live value. |
+| `BRANCH_ID_NU6_3` | `0x37a5165b` | Consensus branch id of NU6.3 ("Ironwood"), for reference. No builder defaults to it: pass the node's live value. |
 | `TX_VERSION_5` | `5` | Transaction version. |
 | `V5_VERSION_GROUP_ID` | `0x26a7270a` | v5 version group id. |
 | `OVERWINTERED_FLAG` | `0x80000000` | Header flag. |
@@ -385,7 +385,7 @@ try {
 
 - Public keys are checked to be valid compressed points. HTLC claim and refund keys must differ.
 - Signatures are low-S, strict DER, with RFC 6979 nonces. `finalizeMultisigSpend` verifies both signatures.
-- Pass `network` to the builders so an address from the wrong network is rejected.
+- The builders require `network`, so an address from the wrong network is rejected, and `branchId`, so nothing is signed for the wrong upgrade.
 - Read the branch id from your node and check `upgradeBefore` for pre-signed spends.
 - Redeem scripts and scriptSigs are checked against consensus and relay size limits.
 - Check counterparty scripts with `htlcFromRedeemScript` or `multisigFromRedeemScript`: both rebuild the template and compare bytes.

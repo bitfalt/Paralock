@@ -121,7 +121,7 @@ Plain `Error`s are thrown when the server returns a different transaction or txi
 | Export | Signature | Meaning |
 |---|---|---|
 | `txidOf` | `txidOf(data: Uint8Array \| string): string` | The txid of a raw transaction (v1 to v5), display-order hex. |
-| `decodeTx` | `decodeTx(data: Uint8Array \| string): DecodedTx` | `{ txid, version, inputs: RawInput[] }`. Throws `UnsupportedVersionError` for v6 and later, or on malformed data. |
+| `decodeTx` | `decodeTx(data: Uint8Array \| string): DecodedTx` | `{ txid, version, inputs: RawInput[] }`. Parses every version to its last byte (v1 to v4 structurally, including Sprout JoinSplits and Sapling descriptions) and throws on trailing or missing data, so a txid is only computed over one whole transaction. Throws `UnsupportedVersionError` for v6 and later. |
 | `RawInput` | `{ prevTxid?: string; vout?: number; scriptSig: Uint8Array }` | A transparent input. Coinbase inputs have no `prevTxid`. |
 | `UnsupportedVersionError` | `version: number` | A transaction version this module can't decode. |
 | `shieldedDigests` | `shieldedDigests(raw: Uint8Array): ShieldedDigests` | ZIP 244 Sapling and Orchard digests of a v5 transaction's shielded part. |

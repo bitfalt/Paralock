@@ -77,7 +77,8 @@ After changing a package, rebuild it (`pnpm --filter <pkg> build`). Dependents c
 
 - **TypeScript:** strict, ESM, `NodeNext`. Relative imports end in `.js`. No `any`. JSDoc on every export.
 - **Data types:** amounts are `bigint` (zatoshi, or token base units with 6 decimals). Hex values are `` `0x${string}` ``
-  (`Hex`), except Zcash txids, which are display-order hex without `0x`.
+  (`Hex`), except Zcash txids (display-order hex) and encoded adaptor pre-signatures (`takerPreSignature`,
+  `Swap.adaptor.evmPreSignature`: 324 hex characters), which are bare hex without `0x`.
 - **Crypto:** only `@noble/*` and `@scure/*`. Don't add crypto dependencies.
 - **Tests:** every new module gets vitest tests. Protocol changes need a live devnet run (see Commands). Contract
   changes need Foundry tests; regenerate ABIs with `pnpm --filter @paralock/evm generate:abi`.

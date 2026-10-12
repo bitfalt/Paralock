@@ -97,7 +97,7 @@ Private mode (`mode: "adaptor"`, or `--private` in the CLI) removes every shared
 
 - **On Zcash,** the ZEC sits in a plain 2-of-2 multisig of a fresh taker key and a fresh maker key made for this quote. Spending it looks like any other multisig spend.
 - **On the EVM chain,** `ParalockAdaptorEscrow` pays the recipient when given a signature from a one-time `signer` key over `claimDigest(id)`. The escrow id is a hash of the lock's parameters, including a random salt.
-- **The secret is `y`,** the discrete logarithm of an adaptor point `Y = y·G` that only the two parties ever see. The taker's claim publishes a completed signature. Only the maker, who holds the matching pre-signature, can compute `y` from it, and then complete the taker's pre-signature on the Zcash claim.
+- **The secret is `y`,** the discrete logarithm of an adaptor point `Y = y·G` that only the two parties ever see. The taker's claim publishes a completed signature. Only the maker, who holds the matching pre-signature, can compute `y` from it, and then complete the taker's pre-signature on the Zcash claim. The maker's public swap view (`GET /swaps/:id`) never contains `Y`, the pre-signatures, the signer's key or the salt: the maker sends them only in answers to the taker's own requests.
 
 [How it works](/docs/how-it-works#the-adaptor-flow) walks through the ten steps. The cryptography is in [`@paralock/adaptor`](/docs/adaptor): ECDSA adaptor signatures on secp256k1 with Chaum–Pedersen DLEQ proofs and hedged nonces.
 
@@ -105,7 +105,8 @@ Private mode (`mode: "adaptor"`, or `--private` in the CLI) removes every shared
 
 - the amounts and timing of the two legs (use standard amounts and jitter);
 - the fact that a 2-of-2 multisig was used on Zcash;
-- an interaction with `ParalockAdaptorEscrow` on the EVM chain.
+- an interaction with `ParalockAdaptorEscrow` on the EVM chain;
+- to whoever learns the swap id (the quote id): both legs. The maker's public view of a swap lists both chains' transactions and the amounts to anyone who asks with the id, so keep swap ids out of logs and shared links.
 
 An observer who suspects a swap can still correlate amounts and time windows, but has no cryptographic link between the legs.
 

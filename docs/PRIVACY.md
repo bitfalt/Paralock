@@ -36,7 +36,9 @@ No hash, preimage or other shared value appears on either chain. Instead:
   like any multisig spend.
 - **EVM:** the stablecoins sit in `ParalockAdaptorEscrow`, which releases to the recipient when given a signature
   from a one-time key (`signer`) over `claimDigest(id)`.
-- **The secret is `y`**, the discrete log of an adaptor point `Y = y·G` that only the two parties ever see.
+- **The secret is `y`**, the discrete log of an adaptor point `Y = y·G` that only the two parties ever see. The
+  maker's public swap view (`GET /swaps/:id`) never contains `Y`, the pre-signatures, the one-time signer's key or the
+  salt: the maker sends them only in its answers to the taker's own requests.
 
 ### Protocol
 
@@ -49,8 +51,9 @@ No hash, preimage or other shared value appears on either chain. Instead:
 3. **Taker → maker.** The taker sends an adaptor pre-signature on the maker's claim of the 2-of-2, encrypted to `Y`
    (with a DLEQ proof). The maker checks it: once `y` is known, it becomes a valid signature.
 4. **Maker.** The maker locks the stablecoins in the escrow and sends the taker an adaptor pre-signature (by the
-   one-time `signer`) on the escrow's claim digest, also encrypted to `Y`. The taker checks the lock on-chain and the
-   pre-signature.
+   one-time `signer`) on the escrow's claim digest, also encrypted to `Y`. It goes out only in the answer to the
+   taker's pre-signature request (step 3), which the taker resends until the lock is there; only the holder of the
+   taker's 2-of-2 key can get that answer. The taker checks the lock on-chain and the pre-signature.
 5. **Taker.** The taker completes that signature with `y` and claims (directly or through a relayer). The signature
    is now public, but only the maker can turn it into `y`, because only the maker has the matching pre-signature.
    - The maker computes `y = s' · s⁻¹`.
@@ -70,6 +73,11 @@ No hash, preimage or other shared value appears on either chain. Instead:
 - The amounts and timing of the two legs. Use standard amounts and jitter.
 - The fact that a 2-of-2 multisig was used on Zcash.
 - An interaction with `ParalockAdaptorEscrow` on the EVM chain.
+- **The swap id.** It is the quote's random UUID, known to the two parties. The maker's public view of a swap
+  (`GET /swaps/:id`, no authentication) lists both legs' transactions and the amounts, so whoever learns the id can
+  pair the legs from the maker's answer, without any cryptography. Keep swap ids out of logs, URLs you share and
+  support tickets. (Before SDK 0.3 that view also carried `Y` and the maker's pre-signature, from which anyone with
+  the id could compute `y` after the claim; it no longer does.)
 
 An observer who suspects a swap can still correlate amounts and time windows, but has no cryptographic link.
 

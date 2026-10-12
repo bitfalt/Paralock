@@ -229,7 +229,8 @@ See [Run a maker](/docs/run-a-maker) for operations.
 | `maxConcurrentSwaps` | `number` | `10` | Swaps in flight (proposed, funding, locking, locked or settling) at once. |
 | `maxOpenQuotes` | `number` | `1_000` | Unexpired quotes held at once. Each adaptor quote carries a fresh key. |
 | `quoteTtlSeconds` | `number` | `60` | How long a quote is honored, in seconds. A taker commits before broadcasting its funding, so this only covers a few seconds of work. |
-| `maxFundingExpiryBlocks` | `number` | `45` | Furthest a taker's `fundingExpiryHeight` may be above the tip. Bounds how long an unfunded reservation holds inventory. The SDK's taker uses 40 (`FUNDING_EXPIRY_DELTA`); the other 5 absorb a maker node that lags the taker's. |
+| `maxFundingExpiryBlocks` | `number` | `45` | Furthest a taker's `fundingExpiryHeight` may be above the tip. Bounds how long an unfunded reservation holds inventory. The SDK's taker uses 40 (`FUNDING_EXPIRY_DELTA`); the other 5 absorb a maker node that lags the taker's. An htlc accept without `fundingExpiryHeight` gets the deadline `tip + maxFundingExpiryBlocks`, which only drops a funding the maker has never seen. |
+| `minEvmLockSecondsLeft` | `number` | `30` | Seconds of EVM time the lock must still have left when the maker sends it; with less, the maker abandons the swap instead of locking (the SDK's taker won't claim with less than its `minClaimWindowSeconds`, 30 by default). |
 | `zcashFeeZat` | `bigint` | `10_000n` | ZEC the maker spends on its own claim transaction (ZIP 317 fee of a one-input, one-output spend), in zatoshi. Priced into every quote. |
 | `checkInventory` | `boolean` | `true` | Check the stablecoin balance, minus amounts reserved by other swaps, before quoting and before locking. |
 
@@ -383,11 +384,11 @@ The market-maker side of ZEC to stablecoin swaps on every configured EVM chain, 
 | `stop` | `stop(): Promise<void>` | Stops the settlement loops and waits for them to wind down. They resume on the next `start()`. |
 | `quote` | `quote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote>` | Exact-in quote. Pays `zatToUsdUnits(zecAmountZat - zcashFeeZat, rate, decimals)`, rounded down. |
 | `quoteExactOut` | `quoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote>` | Exact-out quote. Asks `usdUnitsToZat(usdAmount, rate, decimals) + zcashFeeZat`, rounded up. |
-| `accept` | `accept(request: AcceptRequest): Promise<Swap>` | htlc mode: checks the taker's HTLC against the quote (template byte for byte, claim key, window, inventory, `fundingExpiryHeight`), consumes the quote, reserves the stablecoins and starts watching the funding, which a 0.3 taker broadcasts only after this returns. Idempotent for an identical request. |
-| `proposeAdaptor` | `proposeAdaptor(proposal: AdaptorProposal): Promise<AdaptorProposalAccepted>` | Adaptor mode, step 2: checks the proposal and signs the taker's time-locked refund before the taker funds anything; consumes the quote and reserves the stablecoins. Idempotent for an identical proposal. |
-| `adaptorPreSignature` | `adaptorPreSignature(swapId: string, request: AdaptorPreSignatureRequest): Promise<Swap>` | Adaptor mode, steps 3 and 4: verifies the taker's pre-signature on the maker's claim, then in the background waits for the funding, locks stablecoins and publishes the escrow pre-signature. Idempotent. |
-| `getSwap` | `getSwap(id: string): Swap \| undefined` | Public view of a swap (synchronous). |
-| `listSwaps` | `listSwaps(): Swap[]` | Public views of every swap this maker knows. |
+| `accept` | `accept(request: AcceptRequest): Promise<Swap>` | htlc mode: checks the taker's HTLC against the quote (template byte for byte, claim key, capacity, `fundingExpiryHeight`, window, refund height at most twice `policy.zcashLockBlocks` ahead, inventory), and only then consumes the quote, reserves the stablecoins and starts watching the funding, which a 0.3 taker broadcasts only after this returns. A refused accept leaves the quote usable. Idempotent for an identical request. |
+| `proposeAdaptor` | `proposeAdaptor(proposal: AdaptorProposal): Promise<AdaptorProposalAccepted>` | Adaptor mode, step 2: checks the proposal (which must carry `fundingExpiryHeight`) and signs the taker's time-locked refund before the taker funds anything; consumes the quote and reserves the stablecoins. Idempotent for an identical proposal. |
+| `adaptorPreSignature` | `adaptorPreSignature(swapId: string, request: AdaptorPreSignatureRequest): Promise<Swap>` | Adaptor mode, steps 3 and 4: verifies the taker's pre-signature on the maker's claim, then in the background waits for the funding and locks stablecoins. Returns the taker's view of the swap, with `adaptorPoint` and `adaptor` (the escrow pre-signature once locked). Idempotent: the taker resends its stored pre-signature to poll for the lock; an invalid one is refused. |
+| `getSwap` | `getSwap(id: string): Swap \| undefined` | Public view of a swap (synchronous): without `adaptorPoint` and `adaptor`. |
+| `listSwaps` | `listSwaps(): Swap[]` | Public views of every swap this maker knows (as `getSwap`). |
 | `getStage` | `getStage(id: string): MakerStage \| undefined` | Internal stage of a swap, for operators. |
 | `zcashPubkey` | `get zcashPubkey(): Hex` | The maker's long-term Zcash public key (htlc claims). Adaptor quotes use a fresh key each. |
 | `chains` | `get chains(): EvmChain[]` | Chains this maker serves. |
@@ -402,7 +403,7 @@ Quote errors: `invalid_request` (unknown chain, bad mode, chain not served, priv
 | Stage | Meaning |
 |---|---|
 | `proposed` | Adaptor mode: waiting for the taker's pre-signature. |
-| `funding` | The stablecoins are reserved; waiting for the taker's Zcash funding to be broadcast and confirm with `policy.minZcashConfirmations`. Abandoned once the funding is still unmined more than `FUNDING_EXPIRY_MARGIN_BLOCKS` (2) past the declared `fundingExpiryHeight`, or once the window is too short to lock. |
+| `funding` | The stablecoins are reserved; waiting for the taker's Zcash funding to be broadcast and confirm with `policy.minZcashConfirmations`. Abandoned once the funding is still unmined more than `FUNDING_EXPIRY_MARGIN_BLOCKS` (2) past the declared `fundingExpiryHeight` (without one: past `tip + maxFundingExpiryBlocks` at the accept, if the maker never saw the funding), or once the window is too short to lock. |
 | `locking` | Lock parameters persisted; sending or confirming the EVM lock. |
 | `locked` | Waiting for the taker's claim or the EVM expiry. |
 | `claiming` | Claim built and persisted; broadcasting until it confirms. |
@@ -417,7 +418,7 @@ Quote errors: `invalid_request` (unknown chain, bad mode, chain not served, priv
 | Type | Fields |
 |---|---|
 | `AcceptRequest` | `quoteId: string`, `redeemScript: Hex`, `fundingTxid: string`, `fundingVout: number`, `takerEvmAddress: Hex`, `fundingExpiryHeight?: number` (the funding's last minable block; optional, absent from 0.1 and 0.2 takers) |
-| `AdaptorProposal` | `quoteId`, `takerZcashPubkey: Hex`, `adaptorPoint: Hex`, `fundingTxid`, `fundingVout`, `amountZat: string` (decimal zatoshi, must equal the quote), `refundHeight: number`, `refundAddress: string`, `takerEvmRecipient: Hex`, `fundingExpiryHeight?: number` (as in `AcceptRequest`) |
+| `AdaptorProposal` | `quoteId`, `takerZcashPubkey: Hex`, `adaptorPoint: Hex`, `fundingTxid`, `fundingVout`, `amountZat: string` (decimal zatoshi, must equal the quote), `refundHeight: number`, `refundAddress: string`, `takerEvmRecipient: Hex`, `fundingExpiryHeight?: number` (as in `AcceptRequest`; optional in the type, but a 0.3 maker refuses proposals without it, since older private-mode takers can't complete against it) |
 | `AdaptorProposalAccepted` | `swapId`, `makerRefundSignature: Hex` (DER plus sighash byte), `claimTo: string`, `branchId: number`, `signer: Hex`, `signerPubkey: Hex` |
 | `AdaptorPreSignatureRequest` | `takerPreSignature: string` (162-byte encoded pre-signature, see [@paralock/adaptor](/docs/adaptor)) |
 
@@ -464,11 +465,11 @@ The public view of a swap. It never contains secrets or private keys; those live
 | `quote` | `Quote` | The quote it was made from. |
 | `mode` | `SwapMode` | `"htlc"` or `"adaptor"`. |
 | `hashlock` | `Hex?` | htlc mode: sha256 of the secret, visible on both chains. |
-| `adaptorPoint` | `Hex?` | Adaptor mode: the adaptor point, exchanged off-chain only. |
+| `adaptorPoint` | `Hex?` | Adaptor mode: the adaptor point, exchanged off-chain only. In the taker's own view and the maker's answer to the taker's pre-signature; never in the maker's public view. |
 | `status` | `SwapStatus` | Current status. |
 | `zcash` | `ZcashLeg` | The Zcash side. |
 | `evm` | `EvmLeg` | The EVM side. |
-| `adaptor` | `AdaptorSwapData?` | Adaptor mode: protocol data both parties see (`escrowId`, `signer`, `signerPubkey`, `salt`, `evmPreSignature`). Safe to share. The pre-signature never appears on-chain; `escrowId`, `signer` and `salt` are visible in the escrow's `Locked` event. |
+| `adaptor` | `AdaptorSwapData?` | Adaptor mode: protocol data only the two parties hold (`escrowId`, `signer`, `signerPubkey`, `salt`, `evmPreSignature`). Never in the maker's public view. Don't publish it: with `adaptorPoint` and the claim on-chain, `evmPreSignature` reveals `y`. `escrowId`, `signer` and `salt` are visible in the escrow's `Locked` event. Any `Swap` lists both legs' transactions, so share swap views only with whoever may link them. |
 | `payment` | `{ recipient: Hex; label?: string }?` | Set when the stablecoins pay someone other than the taker. |
 | `events` | `SwapEvent[]` | Timeline. |
 
@@ -652,9 +653,9 @@ Routes:
 | `GET /quote?usd=<base units>&chain=<chain>&mode=<mode>` | | `Quote` (exact-out; `usd` wins over `zat`) | both |
 | `POST /swaps` | `AcceptRequest` | `Swap` | htlc |
 | `POST /adaptor/swaps` | `AdaptorProposal` | `AdaptorProposalAccepted` | adaptor |
-| `POST /adaptor/swaps/:id/presignature` | `AdaptorPreSignatureRequest` | `Swap` | adaptor |
-| `GET /swaps/:id` | | `Swap`, or `404` | both |
-| `GET /swaps` | | `Swap[]`, only with `exposeSwapList` | both |
+| `POST /adaptor/swaps/:id/presignature` | `AdaptorPreSignatureRequest` | `Swap`, the taker's view with the adaptor data | adaptor |
+| `GET /swaps/:id` | | `Swap` public view (no adaptor data), or `404` | both |
+| `GET /swaps` | | `Swap[]` public views, only with `exposeSwapList` | both |
 | `GET /health` | | `{ ok: true, chains: EvmChain[], zcashPubkey: Hex }` | |
 | `OPTIONS *` | | `204` with CORS headers | |
 

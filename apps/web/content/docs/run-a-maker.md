@@ -137,7 +137,8 @@ Keep the policy inside what takers accept by default: a Zcash window of 10 to 28
 | `maxConcurrentSwaps` | 10 | Swaps in flight at once; more get `busy` (HTTP 429) |
 | `maxOpenQuotes` | 1,000 | Unexpired quotes held at once (each private-mode quote carries a fresh key) |
 | `quoteTtlSeconds` | 60 | How long a quote is honored. Takers commit before broadcasting their funding, so this covers seconds of work, not a block |
-| `maxFundingExpiryBlocks` | 45 | Furthest a taker's `fundingExpiryHeight` may be above your tip: bounds how long an unfunded reservation holds inventory |
+| `maxFundingExpiryBlocks` | 45 | Furthest a taker's `fundingExpiryHeight` may be above your tip: bounds how long an unfunded reservation holds inventory. An htlc accept without one (older takers) gets `tip + 45` as its deadline, applied only while you have never seen its funding |
+| `minEvmLockSecondsLeft` | 30 | EVM seconds your lock must still have when you send it; with less you abandon instead of locking, since a taker couldn't claim in time |
 | `zcashFeeZat` | 10,000 | ZEC priced into each quote for your own claim (the ZIP 317 minimum) |
 | `checkInventory` | true | Check the stablecoin balance before quoting and before locking |
 
@@ -206,7 +207,7 @@ createServer(async (req, res) => {
 | `POST /swaps` | htlc mode: the taker reports its funded HTLC |
 | `POST /adaptor/swaps` | Private mode: the taker's proposal; returns your signed refund |
 | `POST /adaptor/swaps/:id/presignature` | Private mode: the taker's pre-signature on your claim |
-| `GET /swaps/:id` | One swap's public view |
+| `GET /swaps/:id` | One swap's public view: status, both legs and events, never the adaptor point, pre-signatures, signer key or salt |
 | `GET /health` | `{ ok, chains, zcashPubkey }` |
 | `GET /swaps` | Every swap, only with `exposeSwapList: true` |
 

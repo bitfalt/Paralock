@@ -86,7 +86,7 @@ const recovered = extract(pre, sig, point); // the same 32 bytes as `secret`
 | Export | Signature | Meaning |
 |---|---|---|
 | `adaptorKeyPair` | `adaptorKeyPair(): { secret: Uint8Array; point: Uint8Array }` | A fresh secret `y` (32 bytes) and its point `Y` (33-byte compressed). |
-| `preSign` | `preSign(privateKey: Bytes, digest: Bytes, adaptorPoint: Bytes): PreSignature` | Pre-signs a 32-byte digest with a DLEQ proof. A fresh hedged nonce on every call. Throws if the key is not in `[1, n)`, the digest is not 32 bytes, or the point is invalid. |
+| `preSign` | `preSign(privateKey: Bytes, digest: Bytes, adaptorPoint: Bytes): PreSignature` | Pre-signs a 32-byte digest with a DLEQ proof. A fresh hedged nonce on every call. Throws if the key is not in `[1, n)`, the digest is not 32 bytes, or the point is invalid, and if 8 nonces in a row are unusable (only a broken random number generator does that) instead of looping. |
 | `preVerify` | `preVerify(publicKey: Bytes, digest: Bytes, adaptorPoint: Bytes, pre: PreSignature): boolean` | True if `pre` becomes a valid signature by `publicKey` on `digest` once `y` is applied. Checks the DLEQ proof and every range. Returns `false` (never throws) on malformed input. |
 | `adapt` | `adapt(pre: PreSignature, adaptorSecret: Bytes): Signature` | Completes the pre-signature with `y`. Always returns low-S. Throws if `y` or `s'` is out of range. |
 | `extract` | `extract(pre: PreSignature, sig: Signature, adaptorPoint: Bytes): Uint8Array` | Recovers `y` (32 bytes) from the pre-signature and the published signature. Throws if `sig` doesn't belong to `pre`. |
