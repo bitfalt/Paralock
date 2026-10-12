@@ -84,6 +84,10 @@ describe.skipIf(!rpcUrl)("ParalockHTLC on a local Tempo chain", () => {
 
     // Settled swaps can be looked up after the fact, and cannot be claimed twice.
     expect(await maker.getLockedSwap(swap.hashlock)).toEqual(swap);
+    const lock = await maker.getLock(swap.hashlock);
+    expect(lock?.swap).toEqual(swap);
+    expect(lock?.blockNumber).toBeGreaterThan(0n);
+    expect(lock?.transactionHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(await maker.waitForClaimPreimage(swap.hashlock)).toBe(preimage);
     await expect(taker.claim(swap, preimage)).rejects.toThrow(/SwapSettled/);
 

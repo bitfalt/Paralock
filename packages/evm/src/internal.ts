@@ -16,6 +16,7 @@ export interface TxResult {
   gasUsed: bigint;
 }
 
+/** Options of the `waitFor…` helpers. */
 export interface WaitOptions {
   /** Give up after this long. Default: wait forever. */
   timeoutMs?: number;
@@ -25,6 +26,14 @@ export interface WaitOptions {
 /** A waiter gave up (`WaitOptions.timeoutMs`). Thrown by both the HTLC and the adaptor escrow clients. */
 export class HtlcTimeoutError extends Error {
   override name = "HtlcTimeoutError";
+}
+
+/** A transaction was mined but reverted. */
+export class TransactionRevertedError extends Error {
+  override name = "TransactionRevertedError";
+  constructor(readonly hash: Hex) {
+    super(`transaction ${hash} reverted`);
+  }
 }
 
 /** The swap a waiter was watching for a claim was refunded instead. */
@@ -47,9 +56,11 @@ export function clientKit(options: {
   fromBlock: bigint;
   maxBlockRange: bigint;
   pollingIntervalMs: number;
+  /** How long to wait for a sent transaction's receipt. */
+  receiptTimeoutMs: number;
   name: string;
 }) {
-  const { publicClient, walletClient, spender, fromBlock, maxBlockRange, pollingIntervalMs } = options;
+  const { publicClient, walletClient, spender, fromBlock, maxBlockRange, pollingIntervalMs, receiptTimeoutMs } = options;
 
   function wallet(): WalletClient<Transport, Chain, Account> {
     if (!walletClient) throw new Error(`this ${options.name} client is read-only: pass \`account\` to send transactions`);
@@ -57,8 +68,8 @@ export function clientKit(options: {
   }
 
   async function confirm(hash: Hex): Promise<TxResult> {
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") throw new Error(`transaction ${hash} reverted`);
+    const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: receiptTimeoutMs });
+    if (receipt.status !== "success") throw new TransactionRevertedError(hash);
     return { hash, blockNumber: receipt.blockNumber, gasUsed: receipt.gasUsed };
   }
 
@@ -117,6 +128,7 @@ export function clientKit(options: {
   return { wallet, confirm, findFirst, poll, approveIfNeeded, tokenBalance };
 }
 
+/** Resolves after `ms`, or rejects with the signal's reason when aborted. */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -131,6 +143,7 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Throws a `TypeError` unless `value` is 0x-prefixed 32-byte hex. */
 export function assertBytes32(value: Hex, name: string): void {
   if (!/^0x[0-9a-fA-F]{64}$/.test(value)) throw new TypeError(`${name} must be 32 bytes of hex, got ${value}`);
 }

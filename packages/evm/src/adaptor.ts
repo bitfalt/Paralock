@@ -2,6 +2,7 @@ import { type Address, encodeAbiParameters, type Hex, keccak256, recoverAddress,
 import { paralockAdaptorEscrowAbi } from "./abi.js";
 import { createEvmClients, type EvmClients, type EvmConnectionOptions } from "./client.js";
 import { assertBytes32, clientKit, SwapRefundedError, type TxResult, type WaitOptions } from "./internal.js";
+import type { LockInfo } from "./swap.js";
 
 /** On-chain swap parameters, mirroring `ParalockAdaptorEscrow.Swap`. */
 export interface AdaptorSwap {
@@ -24,6 +25,7 @@ export interface AdaptorSwap {
 /** Lifecycle of a swap id. Ids are never reusable once `settled`. */
 export type AdaptorStatus = "empty" | "active" | "settled";
 
+/** On-chain state of an adaptor escrow id. */
 export interface AdaptorState {
   status: AdaptorStatus;
   /** Raw on-chain value: 0 empty, 1 active, 2 settled. */
@@ -81,6 +83,7 @@ export function randomSalt(): Hex {
   return toHex(crypto.getRandomValues(new Uint8Array(32)));
 }
 
+/** Maps the contract's `Status` enum (0, 1, 2) to `AdaptorStatus`. */
 export function adaptorStatusOf(raw: number): AdaptorStatus {
   if (raw === 0) return "empty";
   if (raw === 1) return "active";
@@ -109,6 +112,7 @@ export function normalizeClaimSignature(sig: ClaimSignatureInput): ClaimSignatur
   return { v: 27 + parity, r: sig.r, s: toHex(s, { size: 32 }) };
 }
 
+/** Options of `createAdaptorEscrow`. */
 export interface CreateAdaptorEscrowOptions extends EvmConnectionOptions {
   /** ParalockAdaptorEscrow address. */
   contract: Address;
@@ -118,6 +122,7 @@ export interface CreateAdaptorEscrowOptions extends EvmConnectionOptions {
   maxBlockRange?: bigint;
 }
 
+/** Client for a deployed `ParalockAdaptorEscrow`. */
 export interface AdaptorEscrow extends EvmClients {
   readonly address: Address;
   readonly chainId: number;
@@ -138,9 +143,12 @@ export interface AdaptorEscrow extends EvmClients {
   idOf(swap: AdaptorSwap): Hex;
   /** The digest the signer signs for `id` (computed locally for this chain and contract; identical to `claimDigest`). */
   claimDigest(id: Hex): Hex;
+  /** On-chain state of a swap id. */
   getState(id: Hex): Promise<AdaptorState>;
   /** The swap locked under `id`, rebuilt from its `Locked` event, or undefined if none was ever locked. */
   getLockedSwap(id: Hex): Promise<AdaptorSwap | undefined>;
+  /** Like `getLockedSwap`, plus the block and transaction of the lock (for confirmation depth). */
+  getLock(id: Hex): Promise<LockInfo<AdaptorSwap> | undefined>;
   /** Resolve once a swap is locked under `id` (immediately if it already was). */
   waitForLocked(id: Hex, options?: WaitOptions): Promise<AdaptorSwap>;
   /**
@@ -148,6 +156,7 @@ export interface AdaptorEscrow extends EvmClients {
    * Rejects with `SwapRefundedError` if it was refunded instead, `HtlcTimeoutError` on timeout.
    */
   waitForClaimSignature(id: Hex, options?: WaitOptions): Promise<ClaimSignature>;
+  /** ERC-20 / TIP-20 `balanceOf`. */
   tokenBalance(token: Address, owner: Address): Promise<bigint>;
 }
 
@@ -165,6 +174,7 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
     fromBlock,
     maxBlockRange: options.maxBlockRange ?? 50_000n,
     pollingIntervalMs: options.pollingIntervalMs ?? 500,
+    receiptTimeoutMs: options.receiptTimeoutMs ?? 180_000,
     name: "ParalockAdaptorEscrow",
   });
 
@@ -230,6 +240,10 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
     },
 
     async getLockedSwap(id) {
+      return (await client.getLock(id))?.swap;
+    },
+
+    async getLock(id) {
       const state = await client.getState(id);
       if (state.status === "empty") return undefined;
       const log = await kit.findFirst((range) =>
@@ -239,7 +253,7 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
       const { token, sender, recipient, signer, amount, expiry, salt } = log.args;
       const swap: AdaptorSwap = { token, sender, recipient, signer, amount, expiry, salt };
       if (adaptorSwapId(swap) !== id.toLowerCase()) throw new Error(`Locked event for ${id} does not match its id`);
-      return swap;
+      return { swap, blockNumber: log.blockNumber, transactionHash: log.transactionHash };
     },
 
     waitForLocked(id, waitOptions) {

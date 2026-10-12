@@ -20,9 +20,18 @@ export interface HtlcSwap {
   expiry: bigint;
 }
 
+/** A lock read back from the chain, with where it was mined. */
+export interface LockInfo<S> {
+  swap: S;
+  /** Block the `Locked` event was emitted in. Confirmations = latest − blockNumber + 1. */
+  blockNumber: bigint;
+  transactionHash: Hex;
+}
+
 /** Lifecycle of a hashlock on the HTLC. A hashlock is never reusable once `settled`. */
 export type HtlcStatus = "empty" | "active" | "settled";
 
+/** On-chain state of a hashlock. */
 export interface HtlcState {
   status: HtlcStatus;
   /** Raw storage word: 0, the swap commitment (`commitmentOf`) while active, or `SETTLED` (1). */
@@ -31,6 +40,7 @@ export interface HtlcState {
 
 /** `ParalockHTLC.SETTLED`: the state of a claimed or refunded hashlock. */
 export const SETTLED_STATE: Hex = "0x0000000000000000000000000000000000000000000000000000000000000001";
+/** The state of a hashlock that was never used. */
 export const EMPTY_STATE: Hex = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
 const swapAbiParameter = paralockHtlcAbi.find((item) => item.type === "function" && item.name === "commitment")!
@@ -47,6 +57,7 @@ export function commitmentOf(swap: HtlcSwap): Hex {
   return keccak256(encodeAbiParameters(swapAbiParameter, [swap]));
 }
 
+/** Maps a raw `stateOf` word to `HtlcStatus`. */
 export function statusOf(raw: Hex): HtlcStatus {
   const value = BigInt(raw);
   if (value === 0n) return "empty";

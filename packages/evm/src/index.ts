@@ -59,7 +59,13 @@ export {
   type TempoConnectionOptions,
   type TempoHtlc,
 } from "./client.js";
-export { HtlcTimeoutError, SwapRefundedError, type TxResult, type WaitOptions } from "./internal.js";
+export {
+  HtlcTimeoutError,
+  SwapRefundedError,
+  TransactionRevertedError,
+  type TxResult,
+  type WaitOptions,
+} from "./internal.js";
 export { type EvmChainName, KNOWN_NETWORKS, type KnownNetwork, knownNetwork, knownNetworks } from "./networks.js";
 export {
   assertBytes32,
@@ -69,6 +75,7 @@ export {
   type HtlcState,
   type HtlcStatus,
   type HtlcSwap,
+  type LockInfo,
   SETTLED_STATE,
   statusOf,
 } from "./swap.js";

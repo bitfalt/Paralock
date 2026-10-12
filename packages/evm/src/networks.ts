@@ -20,6 +20,7 @@ import type { Address } from "viem";
 /** Chain families Paralock settles on (the SDK's `EvmChain`). */
 export type EvmChainName = "tempo" | "base" | "ethereum" | "arbitrum" | "robinhood" | "hyperevm";
 
+/** A public EVM network Paralock knows (verified against official sources). */
 export interface KnownNetwork {
   chain: EvmChainName;
   chainId: number;
@@ -44,6 +45,7 @@ const HYPE = { name: "HYPE", symbol: "HYPE", decimals: 18 } as const;
 const TEMPO_OUSD: Address = "0x20c0000000000000000000006a37DA5C996874BE";
 const TEMPO_PATH_USD: Address = "0x20c0000000000000000000000000000000000000";
 
+/** Tempo, Base, Ethereum, Arbitrum, Robinhood Chain and HyperEVM mainnets and testnets. */
 export const KNOWN_NETWORKS: readonly KnownNetwork[] = [
   // Tempo: Circle lists no USDC; USDC.e is Stargate-bridged USDC from Tempo's token list.
   {

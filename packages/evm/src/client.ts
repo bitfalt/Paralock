@@ -23,10 +23,13 @@ import {
 } from "./abi.js";
 import { evmChain } from "./chain.js";
 import { assertBytes32, clientKit, SwapRefundedError, type TxResult, type WaitOptions } from "./internal.js";
+import type { LockInfo } from "./swap.js";
 import { commitmentOf, hashlockOf, type HtlcState, type HtlcSwap, statusOf } from "./swap.js";
 
+/** How to reach an EVM chain and (optionally) which account signs. */
 export interface EvmConnectionOptions {
   rpcUrl: string;
+  /** Expected chain id. The node's actual id is not checked here; the SDK checks it before a swap. */
   chainId: number;
   /** Signer: a viem Account or a 0x-prefixed private key. Omit for a read-only client. */
   account?: Account | Hex;
@@ -43,11 +46,18 @@ export interface EvmConnectionOptions {
   tempo?: boolean;
   /** Poll interval for receipts and waiters. Default 500 ms. */
   pollingIntervalMs?: number;
+  /** Per-request RPC timeout. Default 10 s. */
+  rpcTimeoutMs?: number;
+  /** Retries per RPC request on network errors and 5xx/429 responses, with exponential backoff. Default 3. */
+  rpcRetryCount?: number;
+  /** How long to wait for a sent transaction to be mined before throwing. Default 180 s. */
+  receiptTimeoutMs?: number;
 }
 
 /** Alias of `EvmConnectionOptions` (its `@paralock/tempo` name). */
 export type TempoConnectionOptions = EvmConnectionOptions;
 
+/** Options of `createEvmHtlc`. */
 export interface CreateEvmHtlcOptions extends EvmConnectionOptions {
   /** ParalockHTLC address. */
   contract: Address;
@@ -60,6 +70,7 @@ export interface CreateEvmHtlcOptions extends EvmConnectionOptions {
 /** Alias of `CreateEvmHtlcOptions` (its `@paralock/tempo` name). */
 export type CreateTempoHtlcOptions = CreateEvmHtlcOptions;
 
+/** Client for a deployed `ParalockHTLC`. */
 export interface EvmHtlc {
   readonly address: Address;
   readonly chain: Chain;
@@ -76,9 +87,12 @@ export interface EvmHtlc {
   /** Return funds to `swap.sender` once `swap.expiry` has passed. Any account may submit it. */
   refund(swap: HtlcSwap): Promise<TxResult>;
 
+  /** On-chain state of a hashlock: empty, active (locked) or settled (claimed or refunded). */
   getState(hashlock: Hex): Promise<HtlcState>;
   /** The swap locked under `hashlock`, rebuilt from its `Locked` event, or undefined if none was ever locked. */
   getLockedSwap(hashlock: Hex): Promise<HtlcSwap | undefined>;
+  /** Like `getLockedSwap`, plus the block and transaction of the lock (for confirmation depth). */
+  getLock(hashlock: Hex): Promise<LockInfo<HtlcSwap> | undefined>;
   /** Resolve once a swap is locked under `hashlock` (immediately if it already was). */
   waitForLocked(hashlock: Hex, options?: WaitOptions): Promise<HtlcSwap>;
   /**
@@ -86,12 +100,14 @@ export interface EvmHtlc {
    * Rejects with `SwapRefundedError` if it was refunded instead.
    */
   waitForClaimPreimage(hashlock: Hex, options?: WaitOptions): Promise<Hex>;
+  /** ERC-20 / TIP-20 `balanceOf`. */
   tokenBalance(token: Address, owner: Address): Promise<bigint>;
 }
 
 /** Alias of `EvmHtlc` (its `@paralock/tempo` name). */
 export type TempoHtlc = EvmHtlc;
 
+/** viem clients bound to one chain. */
 export interface EvmClients {
   chain: Chain;
   publicClient: PublicClient<Transport, Chain>;
@@ -105,7 +121,11 @@ export type TempoClients = EvmClients;
 /** viem clients for an EVM chain: Tempo's transaction format on Tempo chains, plain EIP-1559 elsewhere. */
 export function createEvmClients(options: EvmConnectionOptions): EvmClients {
   const chain = evmChain(options.chainId, options.rpcUrl, { feeToken: options.feeToken, tempo: options.tempo });
-  const transport = http(options.rpcUrl);
+  const transport = http(options.rpcUrl, {
+    timeout: options.rpcTimeoutMs ?? 10_000,
+    retryCount: options.rpcRetryCount ?? 3,
+    retryDelay: 250,
+  });
   const pollingInterval = options.pollingIntervalMs ?? 500;
   const publicClient: PublicClient<Transport, Chain> = createPublicClient({ chain, transport, pollingInterval });
   const account = typeof options.account === "string" ? privateKeyToAccount(options.account) : options.account;
@@ -160,6 +180,7 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
     fromBlock,
     maxBlockRange: options.maxBlockRange ?? 50_000n,
     pollingIntervalMs: options.pollingIntervalMs ?? 500,
+    receiptTimeoutMs: options.receiptTimeoutMs ?? 180_000,
     name: "ParalockHTLC",
   });
 
@@ -214,6 +235,10 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
     },
 
     async getLockedSwap(hashlock) {
+      return (await client.getLock(hashlock))?.swap;
+    },
+
+    async getLock(hashlock) {
       const state = await client.getState(hashlock);
       if (state.status === "empty") return undefined;
       const log = await kit.findFirst((range) =>
@@ -225,7 +250,7 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
       if (state.status === "active" && commitmentOf(swap) !== state.raw) {
         throw new Error(`Locked event for ${hashlock} does not match the on-chain commitment`);
       }
-      return swap;
+      return { swap, blockNumber: log.blockNumber, transactionHash: log.transactionHash };
     },
 
     waitForLocked(hashlock, options) {

@@ -145,6 +145,7 @@ describe.each(networks)("ParalockAdaptorEscrow on $name", ({ rpcUrl, chainId, to
 
     // Settled swaps can be looked up after the fact, and cannot be claimed twice.
     expect(await maker.getLockedSwap(id)).toEqual(swap);
+    expect((await maker.getLock(id))?.blockNumber).toBeGreaterThan(0n);
     expect(await maker.waitForClaimSignature(id)).toEqual(await published);
     await expect(relayer.claim(swap, signature)).rejects.toThrow(/SwapSettled/);
 

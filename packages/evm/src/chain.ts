@@ -18,6 +18,7 @@ export const TEMPO_CHAIN_IDS: readonly number[] = [
   ANVIL_TEMPO_CHAIN_ID,
 ];
 
+/** True if `chainId` is in `TEMPO_CHAIN_IDS`. */
 export function isTempoChainId(chainId: number): boolean {
   return TEMPO_CHAIN_IDS.includes(chainId);
 }
@@ -41,6 +42,7 @@ export function tempoChain(chainId: number, rpcUrl: string, feeToken?: Address) 
   }).extend({ feeToken });
 }
 
+/** The chain type `tempoChain` returns (viem Tempo chain with a fee token). */
 export type TempoChain = ReturnType<typeof tempoChain>;
 
 /**
@@ -59,6 +61,7 @@ export function plainEvmChain(chainId: number, rpcUrl: string, name?: string): C
   });
 }
 
+/** Options of `evmChain`. */
 export interface EvmChainOptions {
   /** Tempo fee token (implies `tempo: true`). */
   feeToken?: Address;
