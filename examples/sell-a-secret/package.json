@@ -1,0 +1,10 @@
+{
+  "name": "@paralock/example-sell-a-secret",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sell a decryption key for ZEC: the seller gets paid only by revealing the key, using @paralock/zcash.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": { "start": "tsx src/index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@paralock/zcash": "workspace:*", "@noble/hashes": "^2.4.0" }
+}
