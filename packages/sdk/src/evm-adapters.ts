@@ -16,18 +16,21 @@ function accountOf(client: ViemBacked): Hex {
   return address;
 }
 
-function chainReads(client: ViemBacked & { tokenBalance(token: Hex, owner: Hex): Promise<bigint> }, address: Hex) {
+/** Reads shared by both escrows. `now`, `blockNumber` and `tokenBalance` check the node's chain id first (cached). */
+function chainReads(client: Pick<EvmHtlc, "publicClient" | "now" | "blockNumber" | "tokenBalance">, address: Hex) {
   return {
-    async now() {
-      return (await client.publicClient.getBlock({ blockTag: "latest" })).timestamp;
-    },
-    blockNumber: () => client.publicClient.getBlockNumber({ cacheTime: 0 }),
+    now: () => client.now(),
+    blockNumber: () => client.blockNumber(),
     rpcChainId: () => client.publicClient.getChainId(),
     tokenBalance: (token: Hex, owner?: Hex) => client.tokenBalance(token, owner ?? address),
   };
 }
 
-/** Wraps an `@paralock/evm` HTLC client (created with an `account`) for the swap engines. */
+/**
+ * Wraps an `@paralock/evm` HTLC client (created with an `account`) for the swap engines. `lock` is the client's
+ * `approveAndLock`: refused before approving if the expiry is out of bounds, and serialized with the account's other
+ * locks of the same token so concurrent swaps never overwrite each other's exact approvals.
+ */
 export function evmClientFrom(chain: EvmChain, htlc: EvmHtlc): EvmClient {
   const address = accountOf(htlc);
   return {
@@ -37,8 +40,7 @@ export function evmClientFrom(chain: EvmChain, htlc: EvmHtlc): EvmClient {
     address,
     ...chainReads(htlc, address),
     async lock(swap) {
-      await htlc.approveIfNeeded(swap.token, swap.amount);
-      return (await htlc.lock(swap)).hash;
+      return (await htlc.approveAndLock(swap)).lock.hash;
     },
     async claim(swap, preimage) {
       return (await htlc.claim(swap, preimage)).hash;
@@ -51,17 +53,8 @@ export function evmClientFrom(chain: EvmChain, htlc: EvmHtlc): EvmClient {
       const lock = await htlc.getLock(hashlock);
       return lock && { swap: lock.swap, blockNumber: lock.blockNumber, txHash: lock.transactionHash };
     },
-    async outcome(hashlock) {
-      const { status } = await htlc.getState(hashlock);
-      if (status !== "settled") return { status };
-      try {
-        return { status: "claimed", preimage: await htlc.waitForClaimPreimage(hashlock, { timeoutMs: 0 }) };
-      } catch (err) {
-        if (err instanceof SwapRefundedError) return { status: "refunded" };
-        if (err instanceof HtlcTimeoutError) throw new Error(`hashlock ${hashlock} is settled but its event isn't indexed yet`);
-        throw err;
-      }
-    },
+    // Pinned to one block, preimage checked against the hashlock; `SettlementNotIndexedError` means retry later.
+    outcome: (hashlock) => htlc.outcome(hashlock),
     async waitForClaimPreimage(hashlock, opts) {
       try {
         return await htlc.waitForClaimPreimage(hashlock, { timeoutMs: opts.timeoutMs });
@@ -73,7 +66,10 @@ export function evmClientFrom(chain: EvmChain, htlc: EvmHtlc): EvmClient {
   };
 }
 
-/** Wraps an `@paralock/evm` adaptor escrow client (created with an `account`) for the swap engines. */
+/**
+ * Wraps an `@paralock/evm` adaptor escrow client (created with an `account`) for the swap engines. `lock` is the
+ * client's `approveAndLock` (see `evmClientFrom`).
+ */
 export function adaptorClientFrom(chain: EvmChain, escrow: AdaptorEscrow): AdaptorEvmClient {
   const address = accountOf(escrow);
   return {
@@ -85,8 +81,7 @@ export function adaptorClientFrom(chain: EvmChain, escrow: AdaptorEscrow): Adapt
     idOf: (swap) => escrow.idOf(swap),
     claimDigest: async (id) => escrow.claimDigest(id),
     async lock(swap) {
-      await escrow.approveIfNeeded(swap.token, swap.amount);
-      const { hash, id } = await escrow.lock(swap);
+      const { hash, id } = (await escrow.approveAndLock(swap)).lock;
       return { hash, id };
     },
     async claim(swap, sig) {
@@ -100,18 +95,8 @@ export function adaptorClientFrom(chain: EvmChain, escrow: AdaptorEscrow): Adapt
       const lock = await escrow.getLock(id);
       return lock && { swap: lock.swap, blockNumber: lock.blockNumber, txHash: lock.transactionHash };
     },
-    async outcome(id) {
-      const { status } = await escrow.getState(id);
-      if (status !== "settled") return { status };
-      try {
-        const { v, r, s } = await escrow.waitForClaimSignature(id, { timeoutMs: 0 });
-        return { status: "claimed", signature: { v: Number(v), r, s } };
-      } catch (err) {
-        if (err instanceof SwapRefundedError) return { status: "refunded" };
-        if (err instanceof HtlcTimeoutError) throw new Error(`escrow ${id} is settled but its event isn't indexed yet`);
-        throw err;
-      }
-    },
+    // Pinned to one block, signature checked against the swap's signer; `SettlementNotIndexedError` means retry later.
+    outcome: (id) => escrow.outcome(id),
     async waitForClaimSignature(id, opts) {
       try {
         const { v, r, s } = await escrow.waitForClaimSignature(id, { timeoutMs: opts.timeoutMs });

@@ -61,7 +61,10 @@ export interface EvmChainOptions {
 
 /** A taker's EVM chain. */
 export interface TakerEvmChainOptions extends EvmChainOptions {
-  /** Stablecoins you accept here. Default: the tokens `KNOWN_NETWORKS` lists for `chainId` (none for local chains). */
+  /**
+   * Stablecoins you accept here. Default: the tokens `KNOWN_NETWORKS` lists for `chainId` (none for local chains, and
+   * none for Robinhood Chain Testnet 46630, where Paralock's deployment quotes in a MockUSD test token: pass it here).
+   */
   tokens?: readonly Hex[];
   /** Token decimals (slippage check). Default 6. */
   tokenDecimals?: number;
@@ -133,6 +136,28 @@ export interface CreateMakerOptions {
 const invalid = (message: string): never => {
   throw new ParalockError("invalid_request", message);
 };
+
+/**
+ * Testnets whose official registry entry lists no stablecoin, with the test token Paralock's own deployment there
+ * quotes in (`contracts/deployments/<chainId>.json`). Only used to explain a missing `tokens`; never accepted by default.
+ */
+const DEPLOYMENT_TEST_TOKENS: Readonly<Record<number, { name: string; address: Hex }>> = {
+  46630: { name: 'MockUSD "USDC"', address: "0xD9B278625B5946B8CD15dad6c0c776095B8D0513" },
+};
+
+/** Why `tokens` must be given for `chainId`, pointing to a deployment's test token where there is one. */
+function missingTokensMessage(chain: string, chainId: number): string {
+  const network = knownNetwork(chainId);
+  const test = DEPLOYMENT_TEST_TOKENS[chainId];
+  if (network && test) {
+    return (
+      `${chain}.tokens is required: ${network.name} (${chainId}) has no official stablecoin. Paralock's testnet ` +
+      `deployment there quotes in its ${test.name} test token at ${test.address} (contracts/deployments/${chainId}.json); ` +
+      `pass \`tokens: ["${test.address}"]\` to accept it`
+    );
+  }
+  return `${chain}.tokens is required: no known stablecoins for chain id ${chainId}`;
+}
 
 /** A Zcash `KeyPair` from a private key (hex or bytes) or an existing pair. */
 export function zcashKeyFrom(key: ZcashOptions["key"]): KeyPair {
@@ -221,7 +246,7 @@ export function createTaker(options: CreateTakerOptions): Taker {
   for (const [name, o] of Object.entries(options.evm) as [EvmChain, TakerEvmChainOptions | undefined][]) {
     if (!o) continue;
     const tokens = o.tokens ?? (Object.values(knownNetwork(o.chainId)?.tokens ?? {}) as Hex[]);
-    if (tokens.length === 0) invalid(`${name}.tokens is required: no known stablecoins for chain id ${o.chainId}`);
+    if (tokens.length === 0) invalid(missingTokensMessage(name, o.chainId));
     for (const t of tokens) if (!isEvmAddress(t)) invalid(`${name}.tokens must be addresses`);
     chains[name] = {
       ...connectEvmChain(name, o),

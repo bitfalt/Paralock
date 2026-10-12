@@ -1,10 +1,11 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createEvmHtlc } from "@paralock/evm";
+import { type AdaptorEscrow, createEvmHtlc, type EvmHtlc, SettlementNotIndexedError } from "@paralock/evm";
 import { bytesToHex, keyAddress, keyPairFromPrivate, randomKeyPair } from "@paralock/zcash";
 import { afterAll, describe, expect, it } from "vitest";
-import { evmClientFrom } from "../src/evm-adapters.js";
+import { adaptorClientFrom, evmClientFrom } from "../src/evm-adapters.js";
 import { type MakerEvmChainOptions, type TakerEvmChainOptions, connectEvmChain, createMaker, createTaker, zcashKeyFrom } from "../src/factories.js";
 import { Maker } from "../src/maker.js";
 import { Taker } from "../src/taker.js";
@@ -38,6 +39,19 @@ describe("createTaker", () => {
     expect(() =>
       createTaker({ zcash: { rpcUrl: "http://x", network: "regtest", key: KEY }, evm: { base: { ...local, tokens: [base.htlc] } }, maker: "http://m" }),
     ).not.toThrow();
+  });
+
+  it("points to the deployment's MockUSD on Robinhood Chain Testnet, which has no official stablecoin", () => {
+    const deployment = JSON.parse(readFileSync(new URL("../../../contracts/deployments/46630.json", import.meta.url), "utf8")) as {
+      tokens: { USDC: Hex };
+    };
+    const mockUsd = deployment.tokens.USDC;
+    const robinhood = { ...base, chainId: 46630 };
+    const zcash = { rpcUrl: "http://x", network: "testnet" as const, key: KEY };
+    expect(() => createTaker({ zcash, evm: { robinhood }, maker: "http://m" })).toThrow(
+      new RegExp(`Robinhood Chain Testnet \\(46630\\) has no official stablecoin.*MockUSD.*${mockUsd}.*contracts/deployments/46630\\.json`),
+    );
+    expect(createTaker({ zcash, evm: { robinhood: { ...robinhood, tokens: [mockUsd] } }, maker: "http://m" })).toBeInstanceOf(Taker);
   });
 
   it("requires a durable store on mainnet", async () => {
@@ -95,6 +109,50 @@ describe("EVM adapters", () => {
   it("require a signing account", () => {
     const readOnly = createEvmHtlc({ rpcUrl: base.rpcUrl, chainId: base.chainId, contract: base.htlc });
     expect(() => evmClientFrom("base", readOnly)).toThrow(/needs an account/);
+  });
+
+  it("lock through approveAndLock and read outcomes and time from the hardened clients", async () => {
+    const calls: string[] = [];
+    const swap = { hashlock: `0x${"11".repeat(32)}`, token: base.htlc, sender: EVM_ADDRESS, recipient: EVM_ADDRESS, amount: 1n, expiry: 2n } as const;
+    const htlc = {
+      ...createEvmHtlc({ rpcUrl: base.rpcUrl, chainId: base.chainId, contract: base.htlc, account: EVM_KEY }),
+      approveIfNeeded: async () => calls.push("approveIfNeeded"),
+      lock: async () => calls.push("lock"),
+      approveAndLock: async () => {
+        calls.push("approveAndLock");
+        return { approval: undefined, lock: { hash: `0x${"aa".repeat(32)}`, blockNumber: 1n, gasUsed: 1n } };
+      },
+      outcome: async () => {
+        throw new SettlementNotIndexedError(swap.hashlock);
+      },
+      now: async () => 42n,
+      blockNumber: async () => 7n,
+    } as unknown as EvmHtlc;
+    const client = evmClientFrom("base", htlc);
+    expect(await client.lock(swap)).toBe(`0x${"aa".repeat(32)}`);
+    expect(calls).toEqual(["approveAndLock"]);
+    await expect(client.outcome(swap.hashlock)).rejects.toBeInstanceOf(SettlementNotIndexedError);
+    expect([await client.now(), await client.blockNumber()]).toEqual([42n, 7n]);
+
+    const escrow = {
+      ...htlc,
+      chainId: base.chainId,
+      idOf: () => `0x${"22".repeat(32)}`,
+      claimDigest: () => `0x${"33".repeat(32)}`,
+      approveAndLock: async () => {
+        calls.push("adaptor approveAndLock");
+        return { approval: undefined, lock: { hash: `0x${"bb".repeat(32)}`, blockNumber: 1n, gasUsed: 1n, id: `0x${"22".repeat(32)}` } };
+      },
+      outcome: async () => ({ status: "claimed", signature: { v: 27, r: `0x${"01".repeat(32)}`, s: `0x${"02".repeat(32)}` } }),
+    } as unknown as AdaptorEscrow;
+    const adaptor = adaptorClientFrom("base", escrow);
+    const adaptorSwap = { token: base.htlc, sender: EVM_ADDRESS, recipient: EVM_ADDRESS, signer: EVM_ADDRESS, amount: 1n, expiry: 2n, salt: `0x${"44".repeat(32)}` } as const;
+    expect(await adaptor.lock(adaptorSwap)).toEqual({ hash: `0x${"bb".repeat(32)}`, id: `0x${"22".repeat(32)}` });
+    expect(calls).toEqual(["approveAndLock", "adaptor approveAndLock"]);
+    expect(await adaptor.outcome(`0x${"22".repeat(32)}`)).toEqual({
+      status: "claimed",
+      signature: { v: 27, r: `0x${"01".repeat(32)}`, s: `0x${"02".repeat(32)}` },
+    });
   });
 
   it("parses Zcash keys from hex, bytes or pairs", () => {
