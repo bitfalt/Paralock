@@ -1,6 +1,6 @@
 {
   "name": "@paralock/adaptor",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "ECDSA adaptor signatures on secp256k1 with DLEQ proofs (pre-sign, pre-verify, adapt, extract) for scriptless atomic swaps. Pure TypeScript on @noble/curves, browser-safe.",
   "keywords": [
     "adaptor-signatures",

@@ -1,6 +1,6 @@
 {
   "name": "@paralock/evm",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "viem clients for the Paralock escrows on EVM chains (Tempo, Base, Ethereum, Arbitrum, Robinhood Chain, HyperEVM): the hash-time-locked ParalockHTLC and the signature-release ParalockAdaptorEscrow, plus a verified network registry.",
   "license": "MIT",
   "type": "module",

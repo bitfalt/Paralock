@@ -1,6 +1,6 @@
 {
   "name": "@paralock/sdk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Maker and taker engines for trustless atomic swaps and payments between Zcash and stablecoins on EVM chains: factories, crash-safe persistence and recovery, quote validation, maker risk limits, and an HTTP transport.",
   "keywords": [
     "zcash",

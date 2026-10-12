@@ -1,6 +1,6 @@
 {
   "name": "@paralock/zcash",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Zcash transparent HTLCs and 2-of-2 multisig locks in pure TypeScript: v5 transactions, ZIP 244 signature hashes (checked against the official vectors), ZIP 317 fees, and a Zebra JSON-RPC client. Browser-safe.",
   "keywords": [
     "zcash",
