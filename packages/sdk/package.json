@@ -22,8 +22,10 @@
     "@noble/hashes": "^2.4.0",
     "@paralock/adaptor": "workspace:*",
     "@paralock/evm": "workspace:*",
-    "@paralock/zcash": "workspace:*",
     "@scure/bip32": "^2.4.0",
     "@scure/bip39": "^2.4.0"
+  },
+  "devDependencies": {
+    "@paralock/zcash": "workspace:*"
   }
 }
