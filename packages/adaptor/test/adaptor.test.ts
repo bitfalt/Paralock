@@ -86,4 +86,28 @@ describe("ECDSA adaptor signatures", () => {
     const back = decodePreSignature(encodePreSignature(pre));
     expect(preVerify(signer.pk, digest, adaptor.point, back)).toBe(true);
   });
+
+  it("draws a fresh nonce on every call, even for identical inputs", () => {
+    const signer = keyPair();
+    const adaptor = adaptorKeyPair();
+    const digest = sha256(randomBytes(32));
+    const a = preSign(signer.sk, digest, adaptor.point);
+    const b = preSign(signer.sk, digest, adaptor.point);
+    expect(bytesToHex(a.R)).not.toBe(bytesToHex(b.R));
+    expect(a.proof.c).not.toBe(b.proof.c);
+    expect(preVerify(signer.pk, digest, adaptor.point, b)).toBe(true);
+  });
+
+  it("rejects out-of-range keys, secrets and proof scalars", () => {
+    const signer = keyPair();
+    const adaptor = adaptorKeyPair();
+    const digest = sha256(randomBytes(32));
+    const N = secp256k1.Point.Fn.ORDER;
+    expect(() => preSign(new Uint8Array(32), digest, adaptor.point)).toThrow(/out of range/);
+    expect(() => preSign(N.toString(16).padStart(64, "0"), digest, adaptor.point)).toThrow(/out of range/);
+    const pre = preSign(signer.sk, digest, adaptor.point);
+    expect(() => adapt(pre, new Uint8Array(32))).toThrow(/out of range/);
+    expect(preVerify(signer.pk, digest, adaptor.point, { ...pre, proof: { ...pre.proof, c: pre.proof.c + N } })).toBe(false);
+    expect(preVerify(signer.pk, digest, adaptor.point, { ...pre, proof: { ...pre.proof, z: pre.proof.z + N } })).toBe(false);
+  });
 });
