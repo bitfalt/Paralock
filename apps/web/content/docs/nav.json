@@ -1,0 +1,100 @@
+{
+  "sections": [
+    {
+      "title": "Getting started",
+      "pages": [
+        {
+          "slug": "introduction",
+          "title": "Introduction"
+        },
+        {
+          "slug": "quickstart",
+          "title": "Quickstart"
+        },
+        {
+          "slug": "networks",
+          "title": "Where Paralock works"
+        },
+        {
+          "slug": "how-it-works",
+          "title": "How it works"
+        }
+      ]
+    },
+    {
+      "title": "Guides",
+      "pages": [
+        {
+          "slug": "pay",
+          "title": "Payments and payment links"
+        },
+        {
+          "slug": "testnet",
+          "title": "Swap on public testnets"
+        },
+        {
+          "slug": "run-a-maker",
+          "title": "Run a maker"
+        },
+        {
+          "slug": "privacy",
+          "title": "Privacy"
+        },
+        {
+          "slug": "recovery",
+          "title": "Persistence and recovery"
+        },
+        {
+          "slug": "ai-agents",
+          "title": "For AI agents"
+        }
+      ]
+    },
+    {
+      "title": "Reference",
+      "pages": [
+        {
+          "slug": "sdk",
+          "title": "@paralock/sdk"
+        },
+        {
+          "slug": "zcash",
+          "title": "@paralock/zcash"
+        },
+        {
+          "slug": "adaptor",
+          "title": "@paralock/adaptor"
+        },
+        {
+          "slug": "evm",
+          "title": "@paralock/evm"
+        },
+        {
+          "slug": "lightwalletd",
+          "title": "@paralock/lightwalletd"
+        },
+        {
+          "slug": "cli",
+          "title": "CLI"
+        },
+        {
+          "slug": "contracts",
+          "title": "Contracts and deployments"
+        }
+      ]
+    },
+    {
+      "title": "Trust",
+      "pages": [
+        {
+          "slug": "security",
+          "title": "Security model"
+        },
+        {
+          "slug": "faq",
+          "title": "FAQ"
+        }
+      ]
+    }
+  ]
+}
