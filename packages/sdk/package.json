@@ -1,6 +1,6 @@
 {
   "name": "@paralock/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Paralock swap SDK: trustless atomic swaps between Zcash and EVM chains (Tempo first).",
   "keywords": [
     "zcash",
@@ -52,10 +52,8 @@
     "@noble/hashes": "^2.4.0",
     "@paralock/adaptor": "workspace:*",
     "@paralock/evm": "workspace:*",
+    "@paralock/zcash": "workspace:*",
     "@scure/bip32": "^2.4.0",
     "@scure/bip39": "^2.4.0"
-  },
-  "devDependencies": {
-    "@paralock/zcash": "workspace:*"
   }
 }

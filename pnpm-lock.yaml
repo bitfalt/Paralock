@@ -114,16 +114,15 @@ importers:
       '@paralock/evm':
         specifier: workspace:*
         version: link:../evm
+      '@paralock/zcash':
+        specifier: workspace:*
+        version: link:../zcash
       '@scure/bip32':
         specifier: ^2.4.0
         version: 2.4.0
       '@scure/bip39':
         specifier: ^2.4.0
         version: 2.4.0
-    devDependencies:
-      '@paralock/zcash':
-        specifier: workspace:*
-        version: link:../zcash
 
   packages/zcash:
     dependencies:
