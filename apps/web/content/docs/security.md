@@ -56,16 +56,16 @@ A relayer can refuse or delay a claim. Then the claim has to be submitted from a
 
 ### Your infrastructure
 
-The engines believe your nodes. A malicious or broken Zcash node or EVM RPC endpoint could hide a lock or report a false one. The taker checks that each EVM RPC serves the configured chain id, but it can't detect a node that lies about chain state. Use nodes you run or trust.
+The engines believe your nodes. A malicious or broken Zcash node or EVM RPC endpoint could hide a lock or report a false one. The taker checks that each EVM RPC serves the configured chain id, and the Rust SDK also checks each escrow's deployed code (`verify_escrow_code`), but neither can detect a node that lies about chain state. Use nodes you run or trust. In the Rust SDK, `EvmChainOptions::verify_rpc_url` adds a second, independent EVM endpoint: the taker's last check before revealing the secret then needs both to report the same lock.
 
 ## What you trust
 
 | You trust | Why | How to reduce it |
 |---|---|---|
-| The code | It has not been audited by a third party, and ECDSA adaptor signatures have had far less scrutiny than Schnorr ones | Small amounts, testnets, reading the source and tests |
+| The code | It has had internal security reviews (the Rust crates before 0.1.0, with the fixes ported to the TypeScript SDK in 0.3.0) but no third-party audit, and ECDSA adaptor signatures have had far less scrutiny than Schnorr ones | Small amounts, testnets, reading the source and tests |
 | The maker's price | Only for the rate, never with your funds | `price` and `maxSlippageBps` on the taker |
 | Your own liveness | The taker must claim before expiry, with `minClaimWindowSeconds` to spare; the maker must claim the ZEC before the refund height | Durable stores, `resume` and `maker.start()` after restarts, supervised processes |
-| Your nodes | They report chain state | Run your own Zebra or Zakura node and EVM RPC |
+| Your nodes | They report chain state | Run your own Zebra or Zakura node and EVM RPC; in Rust, a second EVM endpoint with `verify_rpc_url` |
 | The chains | Bounded reorgs, and transactions included within the windows | Confirmations, the 2× safety factor |
 
 ## Key management
@@ -86,7 +86,7 @@ Never commit keys. Anvil's development keys are public, and `.paralock/` (the de
 - **The Zcash leg is transparent.** In both modes the lock, its amount and its spend are public. A fully shielded leg is in research.
 - **lightwalletd can't see the mempool.** It reports only mined transactions and has no `getTxOut`, so with `@paralock/lightwalletd` the engines notice a spend only after it is mined. The server also learns which addresses you query.
 - **Network upgrades vs pre-signed spends.** In private mode the taker's refund and the maker's claim are signed long before they are broadcast, and they commit to the current consensus branch id. A Zcash network upgrade that activates first invalidates them. Both sides refuse a private-mode swap if an upgrade activates before its refund height, but only when the backend can report upgrades: `ZcashRpc` can, lightwalletd only with servers recent enough to send `lightwalletProtocolVersion`, and backends that can't skip the check with a log line.
-- **No rate limiting is built in.** `makerHandler` caps body sizes and open quotes, but per-client limits and TLS are left to your deployment.
+- **No rate limiting in the TypeScript handler.** `makerHandler` caps body sizes and open quotes, but per-client limits and TLS are left to your deployment. The Rust server (`paralock::serve`, `maker_router`) has a request timeout, a concurrency cap and per-client rate limits on by default; TLS is still your reverse proxy's job.
 - **A late claim leaks.** A claim mined after expiry reverts, but its calldata still reveals the secret. The taker refuses to claim with less than `minClaimWindowSeconds` left (30 s by default); use minutes on Ethereum L1.
 - **The free option is real.** A taker can abandon a swap after the maker locks. It costs the maker time and gas, and it is priced into the spread rather than prevented.
 - **One direction, transparent refunds.** Swaps only sell ZEC for stablecoins, and refunds pay a transparent Zcash address.
@@ -103,14 +103,16 @@ Never commit keys. Anvil's development keys are public, and `.paralock/` (the de
 | `packages/sdk` | Both engines on fake chains in both modes; restart and resume of both parties; secrets persisted before funding; reservation before the htlc funding is broadcast; the public swap view without adaptor data; claim rebroadcast; refunds from the store; a maker refusing an underfunded 2-of-2, a delayed funding and a missing pre-signature; maker limits; stores; quote and request validation; retries; factories; HTTP handler and client; the shared protocol vectors |
 | `packages/lightwalletd` | Txid vectors and live regtest through lightwalletd |
 | `contracts` | Both escrows: happy paths, wrong secret or signer, high-s signatures, expiry edges, double claims, reuse, tampering, fuzzing, real TIP-20 tokens |
-| `crates/*` | The Rust core and EVM layer against the same `spec/vectors`, plus property tests |
+| `crates/paralock-core` | Every vector in `spec/vectors` and the official ZIP 244 vectors, property tests and fuzzing of the script templates and signatures, the security review's reproductions (`tests/audit.rs`), and cross-checks run by the TypeScript packages |
+| `crates/paralock-evm` | Both escrow clients against local anvils (plain EVM and Tempo), the send pipeline with fee bumps, code verification and the network registry |
+| `crates/paralock` | Both engines in both modes, crashes and resumes, store quarantine, claim tracking, the HTTP server against all 53 recorded exchanges in `spec/vectors/messages.json`, server limits, and the review's reproductions |
 
 The live regtest suites run only when a local node is up. End-to-end swaps have also been run on the devnet (htlc mode on Tempo; private mode on Tempo, Base and Ethereum; a fresh recipient with a relayed claim; the maker-vanishes refund in both modes; the taker-never-claims double refund) and on public testnets, recorded in [`docs/TESTNET-RUNS.md`](https://github.com/bitfalt/Paralock/blob/main/docs/TESTNET-RUNS.md).
 
 ```sh
 pnpm --filter @paralock/sdk test
 cd contracts && forge test
-cargo test -p paralock-core -p paralock-evm
+cargo test --workspace
 ```
 
 ## Reporting a vulnerability
