@@ -20,7 +20,8 @@ export async function runMaker(opts: { port: number }): Promise<void> {
   });
   server.listen(opts.port, () => {
     console.log(`Paralock maker listening on http://127.0.0.1:${opts.port}`);
-    console.log(`  Zcash claim key ${maker.zcashPubkey} · quoting ${cfg.quoteToken}`);
+    const quotes = Object.values(cfg.evm).map((n) => `${n!.quoteToken} on ${n!.chain}`).join(", ");
+    console.log(`  Zcash claim key ${maker.zcashPubkey} · quoting ${quotes} · modes htlc + private`);
   });
 
   const ticker = setInterval(() => void zcash.generate(1).catch(() => undefined), 3_000);
