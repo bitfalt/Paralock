@@ -1,0 +1,12 @@
+{
+  "adaptorEscrow": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+  "chain": "base",
+  "chainId": 84532,
+  "deployer": "0x5e3958b05401C21C75D432d501E30da773a720dC",
+  "htlc": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+  "quoteToken": "USDC",
+  "startBlock": 48009147,
+  "tokens": {
+    "USDC": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+  }
+}

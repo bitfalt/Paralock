@@ -1,0 +1,12 @@
+{
+  "adaptorEscrow": "0xf44bc4Cc4B4b6b94E4142Bb403cCeEa82AFd55B7",
+  "chain": "ethereum",
+  "chainId": 11155111,
+  "deployer": "0x5e3958b05401C21C75D432d501E30da773a720dC",
+  "htlc": "0x9a6f3F47423f590afd1Df06E2729057b10baB1a1",
+  "quoteToken": "USDC",
+  "startBlock": 11897116,
+  "tokens": {
+    "USDC": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+  }
+}

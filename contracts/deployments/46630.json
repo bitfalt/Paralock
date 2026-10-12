@@ -1,0 +1,12 @@
+{
+  "adaptorEscrow": "0xf44bc4Cc4B4b6b94E4142Bb403cCeEa82AFd55B7",
+  "chain": "robinhood",
+  "chainId": 46630,
+  "deployer": "0x5e3958b05401C21C75D432d501E30da773a720dC",
+  "htlc": "0x9a6f3F47423f590afd1Df06E2729057b10baB1a1",
+  "quoteToken": "USDC",
+  "startBlock": 133451919,
+  "tokens": {
+    "USDC": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513"
+  }
+}

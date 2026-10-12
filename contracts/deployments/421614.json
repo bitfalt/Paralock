@@ -1,0 +1,12 @@
+{
+  "adaptorEscrow": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+  "chain": "arbitrum",
+  "chainId": 421614,
+  "deployer": "0x5e3958b05401C21C75D432d501E30da773a720dC",
+  "htlc": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+  "quoteToken": "USDC",
+  "startBlock": 318328857,
+  "tokens": {
+    "USDC": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d"
+  }
+}

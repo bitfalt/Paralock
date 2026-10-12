@@ -73,6 +73,8 @@ contract Deploy is Script {
         _loadPrevious(d);
 
         // Reused contracts keep the previous (earlier) start block, so event scans still cover them.
+        // On Arbitrum chains (Arbitrum, Robinhood Chain) `block.number` is the L1 block: replace `startBlock` in the
+        // written file with the L2 block from the broadcast receipts.
         if (d.startBlock == 0) d.startBlock = block.number;
 
         vm.startBroadcast(key);
