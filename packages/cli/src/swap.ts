@@ -72,7 +72,7 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
     const swap = await taker.lockOnly(quote, { recipient: opts.pay?.to, label: opts.pay?.label });
     console.log("Refund demo: the maker never locks. Waiting for the Zcash refund height…");
     await taker.refund(swap);
-    if (opts.shield && (await reshield())) console.log("Refunded ZEC shielded back into Ironwood.");
+    if (opts.shield) await shieldBack(reshield, "Refunded ZEC shielded back into Ironwood.");
     console.log("ZEC refunded to the taker. No funds were lost.");
     return;
   }
@@ -96,7 +96,7 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
       : `\nDone: received ${fmtUsd(swap.evm.amount)} ${quote.tokenSymbol} on ${opts.chain} at ${swap.evm.recipient}; status ${swap.status}.`,
   );
   if (swap.mode === "adaptor") console.log("No hashlock appeared on either chain; the secret traveled inside the signatures.");
-  if (opts.shield && (await reshield())) console.log("Leftover change shielded back into Ironwood.");
+  if (opts.shield) await shieldBack(reshield, "Leftover change shielded back into Ironwood.");
   console.log(`The maker is shielding its ZEC back into Ironwood (ths account ${cfg.maker.thsAccount}; see ${ths.url}).`);
 }
 
@@ -118,7 +118,7 @@ export async function resumeSwap(id: string, opts: { shield: boolean }): Promise
   const { taker, reshield } = await devnetTaker(readDevnet(), { store: statePath("taker"), onUpdate: printStep });
   const swap = await taker.resume(id, { claim: true });
   console.log(`Swap ${swap.id}: ${swap.status}`);
-  if (opts.shield && (await reshield())) console.log("Change and refunds shielded back into Ironwood.");
+  if (opts.shield) await shieldBack(reshield, "Change and refunds shielded back into Ironwood.");
 }
 
 /** Refunds a saved swap's ZEC once its refund height is reached. */
@@ -126,5 +126,21 @@ export async function refundSwap(id: string, opts: { shield: boolean }): Promise
   const { taker, reshield } = await devnetTaker(readDevnet(), { store: statePath("taker"), onUpdate: printStep });
   const swap = await taker.refund(id);
   console.log(`Refunded ${(Number(swap.zcash.amountZat) / ZAT).toString()} ZEC in ${swap.zcash.refundTxid}.`);
-  if (opts.shield && (await reshield())) console.log("Refunded ZEC shielded back into Ironwood.");
+  if (opts.shield) await shieldBack(reshield, "Refunded ZEC shielded back into Ironwood.");
 }
+
+/**
+ * Shields change and refunds back into the wallet after the swap has settled. That step uses the ths wallet, which can
+ * fail transiently (e.g. while another process mines); the swap itself is already done, so a failure here is a warning,
+ * not an error: the ZEC stays at the taker's transparent swap address until it's shielded.
+ */
+async function shieldBack(reshield: () => Promise<boolean>, done: string): Promise<void> {
+  try {
+    if (await reshield()) console.log(done);
+  } catch (err) {
+    console.warn(`Warning: the swap is settled, but shielding the leftover ZEC back failed (${errorText(err)}).`);
+    console.warn("  The ZEC is safe at the taker's swap address; shield it later from the ths dashboard.");
+  }
+}
+
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 200);
