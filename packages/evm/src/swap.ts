@@ -28,6 +28,19 @@ export interface LockInfo<S> {
   transactionHash: Hex;
 }
 
+/**
+ * Where an escrow entry stands, read at one block: `claimed` carries what the claim revealed (the HTLC preimage, or
+ * the adaptor escrow's release signature), verified against the swap before it is returned.
+ */
+export type EscrowOutcome<T> =
+  | { status: "empty" }
+  | { status: "active" }
+  | { status: "refunded" }
+  | ({ status: "claimed" } & T);
+
+/** `EvmHtlc.outcome`: `claimed` carries the preimage, checked to hash to the hashlock. */
+export type HtlcOutcome = EscrowOutcome<{ preimage: Hex }>;
+
 /** Lifecycle of a hashlock on the HTLC. A hashlock is never reusable once `settled`. */
 export type HtlcStatus = "empty" | "active" | "settled";
 

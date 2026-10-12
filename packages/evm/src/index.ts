@@ -25,6 +25,7 @@ export {
 export {
   ADAPTOR_CLAIM_TYPEHASH,
   type AdaptorEscrow,
+  type AdaptorOutcome,
   type AdaptorState,
   type AdaptorStatus,
   type AdaptorSwap,
@@ -73,7 +74,13 @@ export {
   type ParalockDeployment,
 } from "./deploy.js";
 export {
+  ChainIdMismatchError,
+  DEFAULT_MAX_LOCK_SECONDS,
   HtlcTimeoutError,
+  InvalidLockError,
+  InvalidResponseError,
+  type LockReceipt,
+  SettlementNotIndexedError,
   SwapRefundedError,
   TransactionRevertedError,
   type TxResult,
@@ -84,7 +91,9 @@ export {
   assertBytes32,
   commitmentOf,
   EMPTY_STATE,
+  type EscrowOutcome,
   hashlockOf,
+  type HtlcOutcome,
   type HtlcState,
   type HtlcStatus,
   type HtlcSwap,

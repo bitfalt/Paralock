@@ -1,8 +1,29 @@
-import { type Address, encodeAbiParameters, type Hex, keccak256, recoverAddress, toHex } from "viem";
+import {
+  type Address,
+  decodeEventLog,
+  encodeAbiParameters,
+  encodeEventTopics,
+  type Hex,
+  keccak256,
+  recoverAddress,
+  toHex,
+} from "viem";
 import { paralockAdaptorEscrowAbi } from "./abi.js";
 import { createEvmClients, type EvmClients, type EvmConnectionOptions } from "./client.js";
-import { assertBytes32, clientKit, SwapRefundedError, type TxResult, type WaitOptions } from "./internal.js";
-import type { LockInfo } from "./swap.js";
+import {
+  assertBytes32,
+  clientKit,
+  DEFAULT_MAX_LOCK_SECONDS,
+  InvalidLockError,
+  InvalidResponseError,
+  type LockReceipt,
+  type ScannedLog,
+  SettlementNotIndexedError,
+  SwapRefundedError,
+  type TxResult,
+  type WaitOptions,
+} from "./internal.js";
+import type { EscrowOutcome, LockInfo } from "./swap.js";
 
 /** On-chain swap parameters, mirroring `ParalockAdaptorEscrow.Swap`. */
 export interface AdaptorSwap {
@@ -49,6 +70,12 @@ export interface ClaimSignatureInput {
   v?: number | bigint;
   yParity?: number;
 }
+
+/**
+ * `AdaptorEscrow.outcome`: `claimed` carries the published signature, checked to be canonical and to recover to the
+ * swap's signer over this chain's claim digest.
+ */
+export type AdaptorOutcome = EscrowOutcome<{ signature: ClaimSignature }>;
 
 /** `keccak256("ParalockAdaptorClaim")`, the claim digest's domain tag. */
 export const ADAPTOR_CLAIM_TYPEHASH: Hex = keccak256(toHex("ParalockAdaptorClaim"));
@@ -118,7 +145,10 @@ export interface CreateAdaptorEscrowOptions extends EvmConnectionOptions {
   contract: Address;
   /** First block to scan for escrow events: the contract's deployment block. Default 0. */
   fromBlock?: bigint;
-  /** Largest block span per `eth_getLogs` request (public RPCs cap it). Default 50 000. */
+  /**
+   * Largest block span per `eth_getLogs` request. Default 50 000. Scans run newest-first from the latest block and
+   * stop at the first match; a span the node refuses is halved (and the smaller span kept) automatically.
+   */
   maxBlockRange?: bigint;
 }
 
@@ -127,10 +157,23 @@ export interface AdaptorEscrow extends EvmClients {
   readonly address: Address;
   readonly chainId: number;
 
-  /** Approve the escrow to pull `amount` of `token` unless the allowance already covers it. */
+  /**
+   * Approve the escrow to pull exactly `amount` of `token` unless the allowance already covers it. Serialized with
+   * `approveAndLock` of the same account and token, so it never overwrites an approval a lock in flight relies on.
+   */
   approveIfNeeded(token: Address, amount: bigint): Promise<TxResult | undefined>;
-  /** Lock funds (the account must be `swap.sender` and have approved the escrow). Resolves with the swap id. */
+  /**
+   * Lock funds (the account must be `swap.sender` and have approved the escrow). Resolves with the swap id. Refused
+   * with `InvalidLockError` before anything is sent unless the amount, recipient and signer are non-zero and
+   * `now < expiry ≤ now + maxLockSeconds` in chain time.
+   */
   lock(swap: AdaptorSwap): Promise<TxResult & { id: Hex }>;
+  /**
+   * Check the swap as `lock` does, approve exactly `swap.amount` if needed, then lock. Approve → lock of one account,
+   * token and escrow is serialized process-wide until the lock is mined, so concurrent locks never overwrite each
+   * other's exact approvals. A refused lock leaves no approval behind.
+   */
+  approveAndLock(swap: AdaptorSwap): Promise<LockReceipt<TxResult & { id: Hex }>>;
   /**
    * Pay `swap.recipient` with `swap.signer`'s signature over `claimDigest(id)`. Any account may submit it. The
    * signature is normalized (`normalizeClaimSignature`) and checked against `swap.signer` before sending.
@@ -143,17 +186,31 @@ export interface AdaptorEscrow extends EvmClients {
   idOf(swap: AdaptorSwap): Hex;
   /** The digest the signer signs for `id` (computed locally for this chain and contract; identical to `claimDigest`). */
   claimDigest(id: Hex): Hex;
+  /** EVM time: the latest block's timestamp (Unix seconds). Expiries are compared against this, never local time. */
+  now(): Promise<bigint>;
+  /** The latest block number. */
+  blockNumber(): Promise<bigint>;
   /** On-chain state of a swap id. */
   getState(id: Hex): Promise<AdaptorState>;
   /** The swap locked under `id`, rebuilt from its `Locked` event, or undefined if none was ever locked. */
   getLockedSwap(id: Hex): Promise<AdaptorSwap | undefined>;
-  /** Like `getLockedSwap`, plus the block and transaction of the lock (for confirmation depth). */
+  /**
+   * Like `getLockedSwap`, plus the block and transaction of the lock (for confirmation depth). State and logs are read
+   * at one pinned block; the rebuilt swap must hash to `id`.
+   */
   getLock(id: Hex): Promise<LockInfo<AdaptorSwap> | undefined>;
+  /**
+   * Where the swap stands, without waiting, read at one pinned block: empty, active, refunded, or claimed with the
+   * published signature (checked to be canonical and to recover to the swap's signer over this chain's claim digest).
+   * Throws `SettlementNotIndexedError` if it is settled but the node does not serve the events yet (retry later),
+   * `InvalidResponseError` if the node returns a signature that does not verify.
+   */
+  outcome(id: Hex): Promise<AdaptorOutcome>;
   /** Resolve once a swap is locked under `id` (immediately if it already was). */
   waitForLocked(id: Hex, options?: WaitOptions): Promise<AdaptorSwap>;
   /**
-   * Resolve with the published claim signature once the swap is claimed (immediately if it already was).
-   * Rejects with `SwapRefundedError` if it was refunded instead, `HtlcTimeoutError` on timeout.
+   * Resolve with the published claim signature once the swap is claimed (immediately if it already was), verified as
+   * in `outcome`. Rejects with `SwapRefundedError` if it was refunded instead, `HtlcTimeoutError` on timeout.
    */
   waitForClaimSignature(id: Hex, options?: WaitOptions): Promise<ClaimSignature>;
   /** ERC-20 / TIP-20 `balanceOf`. */
@@ -170,13 +227,40 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
   const kit = clientKit({
     publicClient,
     walletClient,
-    spender: address,
+    rpcUrl: options.rpcUrl,
+    chainId,
+    contract: address,
     fromBlock,
     maxBlockRange: options.maxBlockRange ?? 50_000n,
     pollingIntervalMs: options.pollingIntervalMs ?? 500,
     receiptTimeoutMs: options.receiptTimeoutMs ?? 180_000,
+    maxLockSeconds: options.maxLockSeconds ?? DEFAULT_MAX_LOCK_SECONDS,
     name: "ParalockAdaptorEscrow",
   });
+
+  async function stateAt(id: Hex, blockNumber: bigint | undefined): Promise<AdaptorState> {
+    assertBytes32(id, "id");
+    const raw = await publicClient.readContract({ ...escrow, functionName: "statusOf", args: [id], blockNumber });
+    return { status: adaptorStatusOf(raw), raw };
+  }
+
+  async function checkLock(swap: AdaptorSwap): Promise<void> {
+    if (BigInt(swap.signer) === 0n) throw new InvalidLockError("signer is the zero address");
+    await kit.checkNewLock(swap);
+  }
+
+  async function sendLock(swap: AdaptorSwap): Promise<TxResult & { id: Hex }> {
+    const id = adaptorSwapId(swap);
+    const w = kit.wallet();
+    const { request, result } = await publicClient.simulateContract({
+      ...escrow,
+      account: w.account,
+      functionName: "lock",
+      args: [swap],
+    });
+    if (result !== id) throw new Error(`contract computed swap id ${result}, expected ${id}`);
+    return { ...(await kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })))), id };
+  }
 
   const client: AdaptorEscrow = {
     address,
@@ -186,6 +270,8 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
     walletClient,
     approveIfNeeded: kit.approveIfNeeded,
     tokenBalance: kit.tokenBalance,
+    now: kit.now,
+    blockNumber: kit.tip,
     idOf: adaptorSwapId,
 
     claimDigest(id) {
@@ -193,16 +279,16 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
     },
 
     async lock(swap) {
-      const id = adaptorSwapId(swap);
-      const w = kit.wallet();
-      const { request, result } = await publicClient.simulateContract({
-        ...escrow,
-        account: w.account,
-        functionName: "lock",
-        args: [swap],
+      await checkLock(swap);
+      return sendLock(swap);
+    },
+
+    approveAndLock(swap) {
+      return kit.withApprovalLock(swap.token, async () => {
+        await checkLock(swap); // before approving anything
+        const approval = await kit.approveUnlocked(swap.token, swap.amount);
+        return { approval, lock: await sendLock(swap) };
       });
-      if (result !== id) throw new Error(`contract computed swap id ${result}, expected ${id}`);
-      return { ...(await kit.confirm(await w.writeContract(request))), id };
     },
 
     async claim(swap, signature) {
@@ -213,30 +299,32 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
         throw new Error(`claim signature recovers to ${recovered}, not the swap's signer ${swap.signer}`);
       }
       const w = kit.wallet();
+      await kit.verifyChainId();
       const { request } = await publicClient.simulateContract({
         ...escrow,
         account: w.account,
         functionName: "claim",
         args: [swap, sig.v, sig.r, sig.s],
       });
-      return kit.confirm(await w.writeContract(request));
+      return kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })));
     },
 
     async refund(swap) {
       const w = kit.wallet();
+      await kit.verifyChainId();
       const { request } = await publicClient.simulateContract({
         ...escrow,
         account: w.account,
         functionName: "refund",
         args: [swap],
       });
-      return kit.confirm(await w.writeContract(request));
+      return kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })));
     },
 
     async getState(id) {
       assertBytes32(id, "id");
-      const raw = await publicClient.readContract({ ...escrow, functionName: "statusOf", args: [id] });
-      return { status: adaptorStatusOf(raw), raw };
+      await kit.verifyChainId();
+      return stateAt(id, undefined);
     },
 
     async getLockedSwap(id) {
@@ -244,16 +332,31 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
     },
 
     async getLock(id) {
-      const state = await client.getState(id);
+      assertBytes32(id, "id");
+      // Checks the node's chain id first: this is what a taker verifies before completing the adaptor signature.
+      const tip = await kit.tip();
+      const state = await stateAt(id, tip);
       if (state.status === "empty") return undefined;
-      const log = await kit.findFirst((range) =>
-        publicClient.getContractEvents({ ...escrow, eventName: "Locked", args: { id }, strict: true, ...range }),
-      );
-      if (!log) throw new Error(`swap ${id} is ${state.status} but no Locked event was found from block ${fromBlock}`);
-      const { token, sender, recipient, signer, amount, expiry, salt } = log.args;
-      const swap: AdaptorSwap = { token, sender, recipient, signer, amount, expiry, salt };
-      if (adaptorSwapId(swap) !== id.toLowerCase()) throw new Error(`Locked event for ${id} does not match its id`);
-      return { swap, blockNumber: log.blockNumber, transactionHash: log.transactionHash };
+      const logs = await kit.scanLogs({ events: [LOCKED], key: id, toBlock: tip, done: (found) => found.length > 0 });
+      return adaptorLockFromLogs(id, logs, state, { fromBlock, toBlock: tip });
+    },
+
+    async outcome(id) {
+      assertBytes32(id, "id");
+      const tip = await kit.tip();
+      const state = await stateAt(id, tip);
+      if (state.status !== "settled") return { status: state.status };
+      // The settlement comes after the lock, so a newest-first scan meets it first; it continues to the Locked event
+      // to check a claim signature against the swap's signer.
+      const logs = await kit.scanLogs({
+        events: [LOCKED, CLAIMED, REFUNDED],
+        key: id,
+        toBlock: tip,
+        done: (found) => found.some(isSettlement) && found.some(isLocked),
+      });
+      const outcome = await adaptorSettlementFromLogs(id, logs, state, { chainId, contract: address, fromBlock, toBlock: tip });
+      if (!outcome) throw new SettlementNotIndexedError(id);
+      return outcome;
     },
 
     waitForLocked(id, waitOptions) {
@@ -263,17 +366,16 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
     waitForClaimSignature(id, waitOptions) {
       return kit.poll(
         async () => {
-          const { status } = await client.getState(id);
-          if (status !== "settled") return undefined;
-          const claimed = await kit.findFirst((range) =>
-            publicClient.getContractEvents({ ...escrow, eventName: "Claimed", args: { id }, strict: true, ...range }),
-          );
-          if (claimed) return { v: claimed.args.v, r: claimed.args.r, s: claimed.args.s };
-          const refunded = await kit.findFirst((range) =>
-            publicClient.getContractEvents({ ...escrow, eventName: "Refunded", args: { id }, strict: true, ...range }),
-          );
-          if (refunded) throw new SwapRefundedError(id);
-          return undefined; // settled, but the node has not served the log yet
+          let outcome: AdaptorOutcome;
+          try {
+            outcome = await client.outcome(id);
+          } catch (err) {
+            if (err instanceof SettlementNotIndexedError) return undefined; // settled; the node hasn't served the log yet
+            throw err;
+          }
+          if (outcome.status === "claimed") return outcome.signature;
+          if (outcome.status === "refunded") throw new SwapRefundedError(id);
+          return undefined;
         },
         `the claim signature of ${id}`,
         waitOptions,
@@ -281,4 +383,101 @@ export function createAdaptorEscrow(options: CreateAdaptorEscrowOptions): Adapto
     },
   };
   return client;
+}
+
+const LOCKED = encodeEventTopics({ abi: paralockAdaptorEscrowAbi, eventName: "Locked" })[0];
+const CLAIMED = encodeEventTopics({ abi: paralockAdaptorEscrowAbi, eventName: "Claimed" })[0];
+const REFUNDED = encodeEventTopics({ abi: paralockAdaptorEscrowAbi, eventName: "Refunded" })[0];
+
+const isLocked = (log: ScannedLog) => log.topics[0].toLowerCase() === LOCKED.toLowerCase();
+const isSettlement = (log: ScannedLog) =>
+  log.topics[0].toLowerCase() === CLAIMED.toLowerCase() || log.topics[0].toLowerCase() === REFUNDED.toLowerCase();
+
+function decodeEscrowLog(log: ScannedLog) {
+  try {
+    return decodeEventLog({ abi: paralockAdaptorEscrowAbi, data: log.data, topics: log.topics, strict: true });
+  } catch (err) {
+    throw new InvalidResponseError(
+      `malformed ParalockAdaptorEscrow event in ${log.transactionHash}: ${(err as Error).message}`,
+    );
+  }
+}
+
+/** Rebuilds the lock under `id` from scanned logs: exactly one `Locked` event whose swap hashes to `id`. */
+export function adaptorLockFromLogs(
+  id: Hex,
+  logs: readonly ScannedLog[],
+  state: AdaptorState,
+  range: { fromBlock: bigint; toBlock: bigint },
+): LockInfo<AdaptorSwap> {
+  const locked = logs.filter(isLocked);
+  const [log] = locked;
+  if (!log) {
+    throw new Error(
+      `swap ${id} is ${state.status} but no Locked event was found in blocks ${range.fromBlock}–${range.toBlock}` +
+        " (is `fromBlock` after the contract's deployment block?)",
+    );
+  }
+  if (locked.length > 1) throw new InvalidResponseError(`more than one Locked event for ${id}`);
+  const event = decodeEscrowLog(log);
+  if (event.eventName !== "Locked") throw new InvalidResponseError(`expected a Locked event in ${log.transactionHash}`);
+  const { token, sender, recipient, signer, amount, expiry, salt } = event.args;
+  const swap: AdaptorSwap = { token, sender, recipient, signer, amount, expiry, salt };
+  if (adaptorSwapId(swap) !== id.toLowerCase()) throw new InvalidResponseError(`Locked event for ${id} does not match its id`);
+  return { swap, blockNumber: log.blockNumber, transactionHash: log.transactionHash };
+}
+
+/** True for a signature the contract accepts as is: `v` 27 or 28, `0 < r < n`, `0 < s ≤ n/2`. */
+function isCanonical(sig: ClaimSignature): boolean {
+  const r = BigInt(sig.r);
+  const s = BigInt(sig.s);
+  return (sig.v === 27 || sig.v === 28) && r > 0n && r < SECP256K1_N && s > 0n && s <= SECP256K1_N / 2n;
+}
+
+/**
+ * The settlement among scanned logs: `claimed` with a signature checked to be canonical and to recover, over the claim
+ * digest of `chainId` and `contract`, to the signer of the swap's `Locked` event; or `refunded`. Undefined if none is
+ * there yet. A signature that fails these checks, or conflicting events, are an `InvalidResponseError`, never a result.
+ */
+export async function adaptorSettlementFromLogs(
+  id: Hex,
+  logs: readonly ScannedLog[],
+  state: AdaptorState,
+  where: { chainId: number; contract: Address; fromBlock: bigint; toBlock: bigint },
+): Promise<AdaptorOutcome | undefined> {
+  let outcome: AdaptorOutcome | undefined;
+  for (const log of logs.filter(isSettlement)) {
+    const event = decodeEscrowLog(log);
+    let found: AdaptorOutcome;
+    if (event.eventName === "Claimed") {
+      const signature: ClaimSignature = { v: event.args.v, r: event.args.r, s: event.args.s };
+      if (event.args.id.toLowerCase() !== id.toLowerCase() || !isCanonical(signature)) {
+        throw new InvalidResponseError(`Claimed event for ${id} is not a canonical claim of it`);
+      }
+      found = { status: "claimed", signature };
+    } else if (event.eventName === "Refunded") {
+      if (event.args.id.toLowerCase() !== id.toLowerCase()) {
+        throw new InvalidResponseError(`Refunded event for ${event.args.id} returned for ${id}`);
+      }
+      found = { status: "refunded" };
+    } else {
+      continue;
+    }
+    if (outcome && JSON.stringify(outcome) !== JSON.stringify(found)) {
+      throw new InvalidResponseError(`conflicting settlement events for ${id}`);
+    }
+    outcome = found;
+  }
+  if (outcome?.status === "claimed") {
+    const lock = adaptorLockFromLogs(id, logs, state, where);
+    const { v, r, s } = outcome.signature;
+    const digest = adaptorClaimDigest({ chainId: where.chainId, contract: where.contract, id });
+    const recovered = await recoverAddress({ hash: digest, signature: { r, s, v: BigInt(v) } });
+    if (recovered.toLowerCase() !== lock.swap.signer.toLowerCase()) {
+      throw new InvalidResponseError(
+        `Claimed event for ${id} carries a signature by ${recovered}, not the swap's signer ${lock.swap.signer}`,
+      );
+    }
+  }
+  return outcome;
 }

@@ -5,6 +5,8 @@ import {
   type Chain,
   createPublicClient,
   createWalletClient,
+  decodeEventLog,
+  encodeEventTopics,
   getAddress,
   type Hex,
   http,
@@ -22,14 +24,36 @@ import {
   paralockHtlcBytecode,
 } from "./abi.js";
 import { evmChain } from "./chain.js";
-import { assertBytes32, clientKit, SwapRefundedError, type TxResult, type WaitOptions } from "./internal.js";
-import type { LockInfo } from "./swap.js";
-import { commitmentOf, hashlockOf, type HtlcState, type HtlcSwap, statusOf } from "./swap.js";
+import {
+  assertBytes32,
+  clientKit,
+  DEFAULT_MAX_LOCK_SECONDS,
+  InvalidLockError,
+  InvalidResponseError,
+  type LockReceipt,
+  type ScannedLog,
+  SettlementNotIndexedError,
+  SwapRefundedError,
+  type TxResult,
+  type WaitOptions,
+} from "./internal.js";
+import {
+  commitmentOf,
+  hashlockOf,
+  type HtlcOutcome,
+  type HtlcState,
+  type HtlcSwap,
+  type LockInfo,
+  statusOf,
+} from "./swap.js";
 
 /** How to reach an EVM chain and (optionally) which account signs. */
 export interface EvmConnectionOptions {
   rpcUrl: string;
-  /** Expected chain id. The node's actual id is not checked here; the SDK checks it before a swap. */
+  /**
+   * Expected chain id. The escrow clients check the node's `eth_chainId` against it once (then cached) before their
+   * first read or send, and throw `ChainIdMismatchError` on a mismatch. `createEvmClients` alone does not check it.
+   */
   chainId: number;
   /** Signer: a viem Account or a 0x-prefixed private key. Omit for a read-only client. */
   account?: Account | Hex;
@@ -52,6 +76,11 @@ export interface EvmConnectionOptions {
   rpcRetryCount?: number;
   /** How long to wait for a sent transaction to be mined before throwing. Default 180 s. */
   receiptTimeoutMs?: number;
+  /**
+   * Escrow clients: the furthest a new lock's expiry may be ahead of the chain's time, in seconds. `lock` refuses
+   * anything later (e.g. an expiry in milliseconds) before approving or sending. Default 10,000,000 (about 116 days).
+   */
+  maxLockSeconds?: number;
 }
 
 /** Alias of `EvmConnectionOptions` (its `@paralock/tempo` name). */
@@ -63,7 +92,10 @@ export interface CreateEvmHtlcOptions extends EvmConnectionOptions {
   contract: Address;
   /** First block to scan for HTLC events: the contract's deployment block. Default 0. */
   fromBlock?: bigint;
-  /** Largest block span per `eth_getLogs` request (public RPCs cap it). Default 50 000. */
+  /**
+   * Largest block span per `eth_getLogs` request. Default 50 000. Scans run newest-first from the latest block and
+   * stop at the first match; a span the node refuses is halved (and the smaller span kept) automatically.
+   */
   maxBlockRange?: bigint;
 }
 
@@ -78,26 +110,52 @@ export interface EvmHtlc {
   /** Undefined for a read-only client. */
   readonly walletClient: WalletClient<Transport, Chain, Account> | undefined;
 
-  /** Approve the HTLC to pull `amount` of `token` unless the allowance already covers it. */
+  /**
+   * Approve the HTLC to pull exactly `amount` of `token` unless the allowance already covers it. Serialized with
+   * `approveAndLock` of the same account and token, so it never overwrites an approval a lock in flight relies on.
+   */
   approveIfNeeded(token: Address, amount: bigint): Promise<TxResult | undefined>;
-  /** Lock funds (the account must be `swap.sender` and have approved the HTLC). */
+  /**
+   * Lock funds (the account must be `swap.sender` and have approved the HTLC). Refused with `InvalidLockError` before
+   * anything is sent unless the amount, recipient and hashlock are non-zero and
+   * `now < expiry ≤ now + maxLockSeconds` in chain time.
+   */
   lock(swap: HtlcSwap): Promise<TxResult>;
+  /**
+   * Check the swap as `lock` does, approve exactly `swap.amount` if needed, then lock. Approve → lock of one account,
+   * token and HTLC is serialized process-wide until the lock is mined, so concurrent locks never overwrite each
+   * other's exact approvals. A refused lock leaves no approval behind.
+   */
+  approveAndLock(swap: HtlcSwap): Promise<LockReceipt>;
   /** Pay `swap.recipient` by revealing the 32-byte preimage. Any account may submit it. */
   claim(swap: HtlcSwap, preimage: Hex): Promise<TxResult>;
   /** Return funds to `swap.sender` once `swap.expiry` has passed. Any account may submit it. */
   refund(swap: HtlcSwap): Promise<TxResult>;
 
+  /** EVM time: the latest block's timestamp (Unix seconds). Expiries are compared against this, never local time. */
+  now(): Promise<bigint>;
+  /** The latest block number. */
+  blockNumber(): Promise<bigint>;
   /** On-chain state of a hashlock: empty, active (locked) or settled (claimed or refunded). */
   getState(hashlock: Hex): Promise<HtlcState>;
   /** The swap locked under `hashlock`, rebuilt from its `Locked` event, or undefined if none was ever locked. */
   getLockedSwap(hashlock: Hex): Promise<HtlcSwap | undefined>;
-  /** Like `getLockedSwap`, plus the block and transaction of the lock (for confirmation depth). */
+  /**
+   * Like `getLockedSwap`, plus the block and transaction of the lock (for confirmation depth). State and logs are read
+   * at one pinned block; while active, the rebuilt swap must match the stored commitment.
+   */
   getLock(hashlock: Hex): Promise<LockInfo<HtlcSwap> | undefined>;
+  /**
+   * Where the swap stands, without waiting, read at one pinned block: empty, active, refunded, or claimed with the
+   * preimage (checked to hash to `hashlock`). Throws `SettlementNotIndexedError` if it is settled but the node does not
+   * serve the event yet (retry later), `InvalidResponseError` if the node returns a preimage that does not match.
+   */
+  outcome(hashlock: Hex): Promise<HtlcOutcome>;
   /** Resolve once a swap is locked under `hashlock` (immediately if it already was). */
   waitForLocked(hashlock: Hex, options?: WaitOptions): Promise<HtlcSwap>;
   /**
-   * Resolve with the preimage once the swap is claimed (immediately if it already was).
-   * Rejects with `SwapRefundedError` if it was refunded instead.
+   * Resolve with the preimage once the swap is claimed (immediately if it already was). The preimage is checked to
+   * hash to `hashlock`. Rejects with `SwapRefundedError` if it was refunded instead.
    */
   waitForClaimPreimage(hashlock: Hex, options?: WaitOptions): Promise<Hex>;
   /** ERC-20 / TIP-20 `balanceOf`. */
@@ -176,13 +234,39 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
   const kit = clientKit({
     publicClient,
     walletClient,
-    spender: address,
+    rpcUrl: options.rpcUrl,
+    chainId: options.chainId,
+    contract: address,
     fromBlock,
     maxBlockRange: options.maxBlockRange ?? 50_000n,
     pollingIntervalMs: options.pollingIntervalMs ?? 500,
     receiptTimeoutMs: options.receiptTimeoutMs ?? 180_000,
+    maxLockSeconds: options.maxLockSeconds ?? DEFAULT_MAX_LOCK_SECONDS,
     name: "ParalockHTLC",
   });
+
+  async function stateAt(hashlock: Hex, blockNumber: bigint | undefined): Promise<HtlcState> {
+    assertBytes32(hashlock, "hashlock");
+    const raw = await publicClient.readContract({ ...htlc, functionName: "stateOf", args: [hashlock], blockNumber });
+    return { status: statusOf(raw), raw };
+  }
+
+  async function checkLock(swap: HtlcSwap): Promise<void> {
+    assertBytes32(swap.hashlock, "hashlock");
+    if (BigInt(swap.hashlock) === 0n) throw new InvalidLockError("hashlock is zero");
+    await kit.checkNewLock(swap);
+  }
+
+  async function sendLock(swap: HtlcSwap): Promise<TxResult> {
+    const w = kit.wallet();
+    const { request } = await publicClient.simulateContract({
+      ...htlc,
+      account: w.account,
+      functionName: "lock",
+      args: [swap],
+    });
+    return kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })));
+  }
 
   const client: EvmHtlc = {
     address,
@@ -191,16 +275,20 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
     walletClient,
     approveIfNeeded: kit.approveIfNeeded,
     tokenBalance: kit.tokenBalance,
+    now: kit.now,
+    blockNumber: kit.tip,
 
     async lock(swap) {
-      const w = kit.wallet();
-      const { request } = await publicClient.simulateContract({
-        ...htlc,
-        account: w.account,
-        functionName: "lock",
-        args: [swap],
+      await checkLock(swap);
+      return sendLock(swap);
+    },
+
+    approveAndLock(swap) {
+      return kit.withApprovalLock(swap.token, async () => {
+        await checkLock(swap); // before approving anything
+        const approval = await kit.approveUnlocked(swap.token, swap.amount);
+        return { approval, lock: await sendLock(swap) };
       });
-      return kit.confirm(await w.writeContract(request));
     },
 
     async claim(swap, preimage) {
@@ -208,30 +296,32 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
         throw new Error(`preimage does not hash to ${swap.hashlock}`);
       }
       const w = kit.wallet();
+      await kit.verifyChainId();
       const { request } = await publicClient.simulateContract({
         ...htlc,
         account: w.account,
         functionName: "claim",
         args: [swap, preimage],
       });
-      return kit.confirm(await w.writeContract(request));
+      return kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })));
     },
 
     async refund(swap) {
       const w = kit.wallet();
+      await kit.verifyChainId();
       const { request } = await publicClient.simulateContract({
         ...htlc,
         account: w.account,
         functionName: "refund",
         args: [swap],
       });
-      return kit.confirm(await w.writeContract(request));
+      return kit.confirm(await kit.send((nonce) => w.writeContract({ ...request, nonce })));
     },
 
     async getState(hashlock) {
       assertBytes32(hashlock, "hashlock");
-      const raw = await publicClient.readContract({ ...htlc, functionName: "stateOf", args: [hashlock] });
-      return { status: statusOf(raw), raw };
+      await kit.verifyChainId();
+      return stateAt(hashlock, undefined);
     },
 
     async getLockedSwap(hashlock) {
@@ -239,45 +329,128 @@ export function createEvmHtlc(options: CreateEvmHtlcOptions): EvmHtlc {
     },
 
     async getLock(hashlock) {
-      const state = await client.getState(hashlock);
+      assertBytes32(hashlock, "hashlock");
+      const tip = await kit.tip(); // checks the node's chain id first: this is what a taker verifies before revealing
+      const state = await stateAt(hashlock, tip);
       if (state.status === "empty") return undefined;
-      const log = await kit.findFirst((range) =>
-        publicClient.getContractEvents({ ...htlc, eventName: "Locked", args: { hashlock }, strict: true, ...range }),
-      );
-      if (!log) throw new Error(`hashlock ${hashlock} is ${state.status} but no Locked event was found from block ${fromBlock}`);
-      const { sender, recipient, token, amount, expiry } = log.args;
-      const swap: HtlcSwap = { hashlock: log.args.hashlock, token, sender, recipient, amount, expiry };
-      if (state.status === "active" && commitmentOf(swap) !== state.raw) {
-        throw new Error(`Locked event for ${hashlock} does not match the on-chain commitment`);
-      }
-      return { swap, blockNumber: log.blockNumber, transactionHash: log.transactionHash };
+      const logs = await kit.scanLogs({ events: [LOCKED], key: hashlock, toBlock: tip, done: (found) => found.length > 0 });
+      return htlcLockFromLogs(hashlock, logs, state, { fromBlock, toBlock: tip });
     },
 
-    waitForLocked(hashlock, options) {
-      return kit.poll(() => client.getLockedSwap(hashlock), `a lock under ${hashlock}`, options);
+    async outcome(hashlock) {
+      assertBytes32(hashlock, "hashlock");
+      const tip = await kit.tip();
+      const state = await stateAt(hashlock, tip);
+      if (state.status !== "settled") return { status: state.status };
+      const logs = await kit.scanLogs({
+        events: [CLAIMED, REFUNDED],
+        key: hashlock,
+        toBlock: tip,
+        done: (found) => found.length > 0,
+      });
+      const outcome = htlcSettlementFromLogs(hashlock, logs);
+      if (!outcome) throw new SettlementNotIndexedError(hashlock);
+      return outcome;
     },
 
-    waitForClaimPreimage(hashlock, options) {
+    waitForLocked(hashlock, waitOptions) {
+      return kit.poll(() => client.getLockedSwap(hashlock), `a lock under ${hashlock}`, waitOptions);
+    },
+
+    waitForClaimPreimage(hashlock, waitOptions) {
       return kit.poll(
         async () => {
-          const { status } = await client.getState(hashlock);
-          if (status !== "settled") return undefined;
-          const claimed = await kit.findFirst((range) =>
-            publicClient.getContractEvents({ ...htlc, eventName: "Claimed", args: { hashlock }, strict: true, ...range }),
-          );
-          if (claimed) return claimed.args.preimage;
-          const refunded = await kit.findFirst((range) =>
-            publicClient.getContractEvents({ ...htlc, eventName: "Refunded", args: { hashlock }, strict: true, ...range }),
-          );
-          if (refunded) throw new SwapRefundedError(hashlock);
-          return undefined; // settled, but the node has not served the log yet
+          let outcome: HtlcOutcome;
+          try {
+            outcome = await client.outcome(hashlock);
+          } catch (err) {
+            if (err instanceof SettlementNotIndexedError) return undefined; // settled; the node hasn't served the log yet
+            throw err;
+          }
+          if (outcome.status === "claimed") return outcome.preimage;
+          if (outcome.status === "refunded") throw new SwapRefundedError(hashlock);
+          return undefined;
         },
         `the preimage of ${hashlock}`,
-        options,
+        waitOptions,
       );
     },
   };
   return client;
+}
+
+const LOCKED = encodeEventTopics({ abi: paralockHtlcAbi, eventName: "Locked" })[0];
+const CLAIMED = encodeEventTopics({ abi: paralockHtlcAbi, eventName: "Claimed" })[0];
+const REFUNDED = encodeEventTopics({ abi: paralockHtlcAbi, eventName: "Refunded" })[0];
+
+function decodeHtlcLog(log: ScannedLog) {
+  try {
+    return decodeEventLog({ abi: paralockHtlcAbi, data: log.data, topics: log.topics, strict: true });
+  } catch (err) {
+    throw new InvalidResponseError(`malformed ParalockHTLC event in ${log.transactionHash}: ${(err as Error).message}`);
+  }
+}
+
+/** Rebuilds the lock under `hashlock` from scanned logs, checked against the on-chain `state` read at the scan's tip. */
+export function htlcLockFromLogs(
+  hashlock: Hex,
+  logs: readonly ScannedLog[],
+  state: HtlcState,
+  range: { fromBlock: bigint; toBlock: bigint },
+): LockInfo<HtlcSwap> {
+  const locked = logs.filter((log) => log.topics[0].toLowerCase() === LOCKED.toLowerCase());
+  const [log] = locked;
+  if (!log) {
+    throw new Error(
+      `hashlock ${hashlock} is ${state.status} but no Locked event was found in blocks ${range.fromBlock}–${range.toBlock}` +
+        " (is `fromBlock` after the contract's deployment block?)",
+    );
+  }
+  if (locked.length > 1) throw new InvalidResponseError(`more than one Locked event for ${hashlock}`);
+  const event = decodeHtlcLog(log);
+  if (event.eventName !== "Locked") throw new InvalidResponseError(`expected a Locked event in ${log.transactionHash}`);
+  const { sender, recipient, token, amount, expiry } = event.args;
+  const swap: HtlcSwap = { hashlock: event.args.hashlock, token, sender, recipient, amount, expiry };
+  if (swap.hashlock.toLowerCase() !== hashlock.toLowerCase()) {
+    throw new InvalidResponseError(`Locked event for ${swap.hashlock} returned for ${hashlock}`);
+  }
+  if (state.status === "active" && commitmentOf(swap) !== state.raw.toLowerCase()) {
+    throw new InvalidResponseError(`Locked event for ${hashlock} does not match the on-chain commitment`);
+  }
+  return { swap, blockNumber: log.blockNumber, transactionHash: log.transactionHash };
+}
+
+/**
+ * The settlement among scanned logs: `claimed` with a preimage checked to hash to `hashlock`, or `refunded`;
+ * undefined if none is there yet. A preimage that does not hash to the hashlock, or conflicting events, are an
+ * `InvalidResponseError`, never a result.
+ */
+export function htlcSettlementFromLogs(hashlock: Hex, logs: readonly ScannedLog[]): HtlcOutcome | undefined {
+  let outcome: HtlcOutcome | undefined;
+  for (const log of logs) {
+    const topic = log.topics[0].toLowerCase();
+    if (topic !== CLAIMED.toLowerCase() && topic !== REFUNDED.toLowerCase()) continue;
+    const event = decodeHtlcLog(log);
+    let found: HtlcOutcome;
+    if (event.eventName === "Claimed") {
+      if (event.args.hashlock.toLowerCase() !== hashlock.toLowerCase() || hashlockOf(event.args.preimage) !== hashlock.toLowerCase()) {
+        throw new InvalidResponseError(`Claimed event for ${hashlock} carries a preimage that does not hash to it`);
+      }
+      found = { status: "claimed", preimage: event.args.preimage };
+    } else if (event.eventName === "Refunded") {
+      if (event.args.hashlock.toLowerCase() !== hashlock.toLowerCase()) {
+        throw new InvalidResponseError(`Refunded event for ${event.args.hashlock} returned for ${hashlock}`);
+      }
+      found = { status: "refunded" };
+    } else {
+      continue;
+    }
+    if (outcome && JSON.stringify(outcome) !== JSON.stringify(found)) {
+      throw new InvalidResponseError(`conflicting settlement events for ${hashlock}`);
+    }
+    outcome = found;
+  }
+  return outcome;
 }
 
 /** Alias of `createEvmHtlc` (its `@paralock/tempo` name). */
