@@ -13,21 +13,21 @@ It complements the [npm CLI](/docs/cli) rather than replacing it. `npx paralock`
 
 ```sh
 curl -fsSL https://paralock.xyz/install | sh                               # macOS and Linux, x86_64 and arm64
-curl -fsSL https://paralock.xyz/install | PARALOCK_VERSION=cli-v0.1.0 sh   # a given release
+curl -fsSL https://paralock.xyz/install | PARALOCK_VERSION=cli-v0.1.1 sh   # a given release
 cargo install paralock-cli                                                  # from source, Rust 1.95 or newer
 ```
 
 The [installer](https://paralock.xyz/install) is a short POSIX shell script; read it before you pipe it to `sh`. It:
 
 1. picks the build for your machine: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu` (Linux builds need glibc 2.35 or newer), and the native build under Rosetta;
-2. downloads `paralock-<target>.tar.gz` and `SHA256SUMS` from the [GitHub release](https://github.com/bitfalt/paralock/releases/tag/cli-v0.1.0) (the latest one, or `PARALOCK_VERSION`);
+2. downloads `paralock-<target>.tar.gz` and `SHA256SUMS` from the [GitHub release](https://github.com/bitfalt/paralock/releases/tag/cli-v0.1.1) (the latest one, or `PARALOCK_VERSION`);
 3. refuses to install unless the tarball's SHA-256 matches `SHA256SUMS`;
 4. installs the binary to `${PARALOCK_HOME:-$HOME/.paralock}/bin/paralock`, replacing an older one atomically, and prints the line to add that directory to your `PATH`.
 
 The release binaries are built by GitHub Actions from the `cli-v*` tag. Windows has no prebuilt binary and isn't tested.
 
 ```sh
-paralock version     # paralock 0.1.0 (paralock-cli, protocol v1.1; experimental, not audited)
+paralock version     # paralock 0.1.1 (paralock-cli, protocol v1.1; experimental, not audited)
 paralock --help
 ```
 
