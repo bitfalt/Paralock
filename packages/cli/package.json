@@ -1,7 +1,7 @@
 {
   "name": "@paralock/cli",
   "version": "0.1.0",
-  "description": "paralock CLI: local Zcash + Tempo devnet, maker server, and swaps from the terminal.",
+  "description": "paralock CLI: local Zcash + multi-chain EVM devnet, doctor, maker server, and swaps from the terminal.",
   "license": "MIT",
   "type": "module",
   "bin": { "paralock": "dist/main.js" },

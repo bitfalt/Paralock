@@ -1,20 +1,27 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import type { EvmChain } from "@paralock/sdk";
+import { devCommand } from "./dev.js";
 import { devnetDown, devnetStatus, devnetUp } from "./devnet.js";
+import { doctorCommand } from "./doctor.js";
 import { runMaker } from "./maker-server.js";
 import { runSwap } from "./swap.js";
 
 const HELP = `paralock: trustless swaps between shielded ZEC and dollars on EVM chains
 
 Usage:
-  paralock devnet up [--evm tempo,base,ethereum] [--ths-log <file>]
-                                          Start local Zcash (ths) + EVM chains (anvil) and deploy contracts
+  paralock doctor [--evm <chains>]        Check prerequisites (Node, pnpm, Docker, ths, Foundry, ports, builds)
+  paralock dev [--evm <chains>] [--web] [--web-port 3000] [--ths-log <file>]
+                                          Everything at once: doctor, devnet up, the maker (and the web app with
+                                          --web) in the background; reuses whatever is already running
+  paralock devnet up [--evm <chains>] [--ths-log <file>]
+                                          Start local Zcash (ths) + EVM chains (anvil) and deploy contracts;
+                                          adds to the chains of a running devnet
   paralock devnet status                  Show devnet heights and addresses
-  paralock devnet down                    Stop and delete the devnet
+  paralock devnet down                    Stop what Paralock started (ths, anvils, maker, web) and delete the devnet
   paralock maker [--port 7420]            Run the devnet market maker (all devnet chains, both modes)
   paralock swap --zec <amount> [options]  Swap ZEC for stablecoins as the devnet taker
-      --chain tempo|base|ethereum         Where to receive the stablecoins (default tempo)
+      --chain <chain>                     Where to receive the stablecoins (default tempo)
       --private                           Adaptor-signature mode: no hash on either chain
       --fresh-recipient                   Receive at a new address created for this swap
       --relay                             Let the relayer submit the claim (no gas needed)
@@ -22,20 +29,72 @@ Usage:
       --jitter <ms>                       Random delay before claiming
       --no-shield                         Don't unshield first / reshield after
       --refund-demo                       Lock ZEC and let the maker vanish; refund after the timeout
+
+<chains>: comma-separated, from tempo, base, ethereum, arbitrum, robinhood, hyperevm, or "all".
+  Default: tempo,base,ethereum. Each runs on its own anvil (ports 8545-8550, chain ids 31337-31342).
 `;
 
 async function main() {
   const [cmd, sub, ...rest] = process.argv.slice(2);
   if (cmd === "devnet") {
     const { values } = parseArgs({ args: rest, options: { "ths-log": { type: "string" }, evm: { type: "string" } } });
-    if (sub === "up") return devnetUp({ thsLog: values["ths-log"], evm: values.evm?.split(",") });
+    if (sub === "up") {
+      await devnetUp({ thsLog: values["ths-log"], evm: values.evm?.split(",") });
+      console.log("\nNext: `paralock maker` in one terminal, then `paralock swap --zec 1` in another.");
+      return;
+    }
     if (sub === "down") return devnetDown();
     if (sub === "status") return devnetStatus();
   }
   const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+  if (cmd === "doctor") {
+    const { values } = parseArgs({ args, options: { evm: { type: "string" } } });
+    return doctorCommand({ evm: values.evm });
+  }
+  if (cmd === "dev") {
+    const { values } = parseArgs({
+      args,
+      options: {
+        evm: { type: "string" },
+        "ths-log": { type: "string" },
+        web: { type: "boolean" },
+        "web-port": { type: "string" },
+      },
+    });
+    return devCommand({
+      evm: values.evm,
+      thsLog: values["ths-log"],
+      web: !!values.web || values["web-port"] !== undefined,
+      webPort: values["web-port"] ? Number(values["web-port"]) : undefined,
+    });
+  }
   if (cmd === "maker") {
     const { values } = parseArgs({ args, options: { port: { type: "string" } } });
     return runMaker({ port: Number(values.port ?? 7420) });
+  }
+  if (cmd === "pay") {
+    const { values } = parseArgs({
+      args,
+      options: {
+        usd: { type: "string" },
+        to: { type: "string" },
+        label: { type: "string" },
+        chain: { type: "string" },
+        private: { type: "boolean" },
+        relay: { type: "boolean" },
+        "no-shield": { type: "boolean" },
+      },
+    });
+    if (!values.usd || !values.to) throw new Error("--usd and --to are required");
+    return runSwap({
+      zec: "0",
+      pay: { usd: values.usd, to: values.to as `0x${string}`, label: values.label },
+      chain: (values.chain ?? "tempo") as EvmChain,
+      private: !!values.private,
+      shield: !values["no-shield"],
+      refundDemo: false,
+      privacy: { relayClaim: !!values.relay },
+    });
   }
   if (cmd === "swap") {
     const { values } = parseArgs({

@@ -21,22 +21,43 @@ export interface DevnetFile {
 }
 
 /** EVM chains a devnet can run, in start order. */
-export const EVM_CHAINS: readonly EvmChain[] = ["tempo", "base", "ethereum"];
+export const EVM_CHAINS: readonly EvmChain[] = ["tempo", "base", "ethereum", "arbitrum", "robinhood", "hyperevm"];
+
+/** Chains `devnet up` starts without `--evm`: the light common path. `--evm all` starts every chain. */
+export const DEFAULT_EVM_CHAINS: readonly EvmChain[] = ["tempo", "base", "ethereum"];
+
+export interface DevnetChainSpec {
+  port: number;
+  chainId: number;
+  /** anvil `--network` family; absent for chains anvil has no family for (plain EVM). */
+  anvilNetwork?: string;
+  /** The devnet stablecoin: the OUSD stand-in on Tempo, a MockUSD "USDC" elsewhere. */
+  quoteToken: string;
+}
 
 /** How the devnet runs each EVM chain: one anvil per chain, on distinct ports and chain ids. */
-export const DEVNET_EVM: Record<EvmChain, { port: number; chainId: number; anvilNetwork: string; quoteToken: string }> = {
+export const DEVNET_EVM: Record<EvmChain, DevnetChainSpec> = {
   tempo: { port: 8545, chainId: 31337, anvilNetwork: "tempo", quoteToken: "OUSD" },
   base: { port: 8546, chainId: 31338, anvilNetwork: "base", quoteToken: "USDC" },
   ethereum: { port: 8547, chainId: 31339, anvilNetwork: "ethereum", quoteToken: "USDC" },
+  arbitrum: { port: 8548, chainId: 31340, quoteToken: "USDC" },
+  robinhood: { port: 8549, chainId: 31341, quoteToken: "USDC" },
+  hyperevm: { port: 8550, chainId: 31342, quoteToken: "USDC" },
 };
 
-/** Parses `--evm tempo,base` (default: every chain). */
+/** Ports of the local services (besides the anvils). */
+export const SERVICE_PORTS = { zcashRpc: 18232, lightwalletd: 9067, thsDashboard: 32805, maker: 7420, web: 3000 } as const;
+
+/** Parses `--evm tempo,base` or `--evm all` (default: `DEFAULT_EVM_CHAINS`). */
 export function parseEvmChains(value: string | readonly string[] | undefined): EvmChain[] {
-  if (value === undefined) return [...EVM_CHAINS];
+  if (value === undefined) return [...DEFAULT_EVM_CHAINS];
   const names = (typeof value === "string" ? value.split(",") : value).map((n) => n.trim().toLowerCase()).filter(Boolean);
+  if (names.includes("all")) return [...EVM_CHAINS];
   const unknown = names.filter((n) => !(EVM_CHAINS as readonly string[]).includes(n));
-  if (unknown.length) throw new Error(`unknown EVM chain(s): ${unknown.join(", ")} (expected ${EVM_CHAINS.join(", ")})`);
-  if (!names.length) throw new Error(`--evm needs at least one of ${EVM_CHAINS.join(", ")}`);
+  if (unknown.length) {
+    throw new Error(`unknown EVM chain(s): ${unknown.join(", ")} (expected ${EVM_CHAINS.join(", ")} or all)`);
+  }
+  if (!names.length) throw new Error(`--evm needs at least one of ${EVM_CHAINS.join(", ")} (or all)`);
   return EVM_CHAINS.filter((c) => names.includes(c));
 }
 

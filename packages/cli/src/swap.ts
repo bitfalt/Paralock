@@ -1,6 +1,7 @@
 import {
   type EvmChain,
   type PrivacyOptions,
+  type Hex,
   type Swap,
   SwapFailedError,
   devnetTaker,
@@ -20,7 +21,10 @@ function printStep(swap: Swap) {
 }
 
 export interface SwapCommand {
+  /** ZEC to swap. Ignored when `pay` is set. */
   zec: string;
+  /** Pay someone an exact dollar amount instead of swapping for yourself. */
+  pay?: { usd: string; to: Hex; label?: string };
   chain: EvmChain;
   private: boolean;
   shield: boolean;
@@ -32,8 +36,8 @@ export interface SwapCommand {
 export async function runSwap(opts: SwapCommand): Promise<void> {
   const cfg = readDevnet();
   if (!cfg.evm[opts.chain]) throw new Error(`devnet has no ${opts.chain} chain; available: ${Object.keys(cfg.evm).join(", ")}`);
-  const zat = BigInt(Math.round(Number(opts.zec) * ZAT));
-  if (opts.privacy.standardAmountsOnly && !isStandardAmount(zat)) {
+  const zatIn = BigInt(Math.round(Number(opts.zec) * ZAT));
+  if (!opts.pay && opts.privacy.standardAmountsOnly && !isStandardAmount(zatIn)) {
     throw new Error("--standard-only allows 0.1, 0.5, 1 or 5 ZEC");
   }
   const { taker, maker, ths, prepareFunds, reshield } = await devnetTaker(cfg, {
@@ -45,16 +49,25 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
   });
 
   const mode = opts.private ? "adaptor" : "htlc";
-  const quote = await maker.quote(zat, opts.chain, mode);
-  console.log(`Quote: ${opts.zec} ZEC → ${fmtUsd(quote.usdAmount)} ${quote.tokenSymbol} on ${opts.chain} @ $${quote.rate.toFixed(2)}/ZEC`);
+  const quote = opts.pay
+    ? await maker.quoteExactOut(BigInt(Math.round(Number(opts.pay.usd) * 1e6)), opts.chain, mode)
+    : await maker.quote(zatIn, opts.chain, mode);
+  const zat = quote.zecAmountZat;
+  const zecText = (Number(zat) / ZAT).toString();
+  if (opts.pay) {
+    console.log(`Pay ${fmtUsd(quote.usdAmount)} ${quote.tokenSymbol} on ${opts.chain} to ${opts.pay.to}${opts.pay.label ? ` (${opts.pay.label})` : ""}`);
+    console.log(`  costs ${zecText} ZEC from your shielded balance @ $${quote.rate.toFixed(2)}/ZEC`);
+  } else {
+    console.log(`Quote: ${zecText} ZEC → ${fmtUsd(quote.usdAmount)} ${quote.tokenSymbol} on ${opts.chain} @ $${quote.rate.toFixed(2)}/ZEC`);
+  }
   console.log(`  Mode ${mode === "adaptor" ? "private (adaptor signatures: no hash on-chain)" : "htlc (shared sha256 hashlock)"}`);
   console.log(`  Zcash refund window ${quote.zcashLockBlocks} blocks · ${opts.chain} lock ${quote.evmLockSeconds}s`);
 
-  if (opts.shield) console.log(`Unshielding ${opts.zec} ZEC (+fees) from ths account ${cfg.taker.thsAccount}'s Ironwood balance to the swap address…`);
+  if (opts.shield) console.log(`Unshielding ${zecText} ZEC (+fees) from ths account ${cfg.taker.thsAccount}'s Ironwood balance to the swap address…`);
   await prepareFunds(zat, { fromShielded: opts.shield });
 
   if (opts.refundDemo) {
-    const swap = await taker.lockOnly(quote);
+    const swap = await taker.lockOnly(quote, { recipient: opts.pay?.to, label: opts.pay?.label });
     console.log("Refund demo: the maker never locks. Waiting for the Zcash refund height…");
     await taker.refund(swap);
     if (opts.shield && (await reshield())) console.log("Refunded ZEC shielded back into Ironwood.");
@@ -65,7 +78,7 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
   console.log("Swapping:");
   let swap: Swap;
   try {
-    swap = await taker.swap(quote, { privacy: opts.privacy });
+    swap = await taker.swap(quote, { privacy: opts.privacy, recipient: opts.pay?.to, label: opts.pay?.label });
   } catch (err) {
     if (!(err instanceof SwapFailedError)) throw err;
     console.log(`Swap failed after locking ZEC (${err.message}). Refunding once the Zcash timeout passes…`);
@@ -74,7 +87,11 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  console.log(`\nDone: received ${fmtUsd(swap.evm.amount)} ${quote.tokenSymbol} on ${opts.chain} at ${swap.evm.recipient}; status ${swap.status}.`);
+  console.log(
+    opts.pay
+      ? `\nPaid: ${swap.evm.recipient} received ${fmtUsd(swap.evm.amount)} ${quote.tokenSymbol} on ${opts.chain}; status ${swap.status}.`
+      : `\nDone: received ${fmtUsd(swap.evm.amount)} ${quote.tokenSymbol} on ${opts.chain} at ${swap.evm.recipient}; status ${swap.status}.`,
+  );
   if (swap.mode === "adaptor") console.log("No hashlock appeared on either chain; the secret traveled inside the signatures.");
   if (opts.shield && (await reshield())) console.log("Leftover change shielded back into Ironwood.");
   console.log(`The maker is shielding its ZEC back into Ironwood (ths account ${cfg.maker.thsAccount}; see ${ths.url}).`);
