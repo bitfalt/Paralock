@@ -3,9 +3,8 @@ name: Release
 # Publishes every package whose version isn't on its registry yet, in dependency order. Run it by hand after bumping
 # versions on main. Uses trusted publishing (GitHub OIDC): no npm or crates.io token is stored in the repository.
 # One-time setup per package: npmjs.com → package → Settings → Trusted publishing → GitHub Actions
-# (bitfalt/paralock, workflow release.yml, no environment; allowed actions: staging only, leave "npm publish" and
-# "npm dist-tag" unticked); crates.io → crate → Settings → Trusted Publishing (same repo/workflow).
-# npm versions are staged, not published: approve each on npmjs.com (2FA) to make it installable.
+# (bitfalt/paralock, workflow release.yml, no environment, "Allow npm publish" ticked); crates.io → crate → Settings →
+# Trusted Publishing (same repo/workflow). Both registries publish directly: run it only for reviewed versions.
 
 on:
   workflow_dispatch:
@@ -35,13 +34,11 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: npm with trusted and staged publishing support
+      - name: npm with trusted publishing support
         run: npm install -g npm@^11.17.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm build && pnpm check:deps
-      # The trusted publisher may only stage: each version waits for a maintainer to approve it with 2FA on
-      # npmjs.com (or `npm stage approve <id>`) before anyone can install it.
-      - name: Stage (dependency order, skipping published versions)
+      - name: Publish (dependency order, skipping published versions)
         run: |
           set -euo pipefail
           mkdir -p .release
@@ -54,8 +51,8 @@ jobs:
             fi
             # pnpm pack turns workspace:* into real versions; npm handles OIDC and provenance.
             tarball=$(cd "packages/$dir" && pnpm pack --pack-destination "$GITHUB_WORKSPACE/.release" | tail -1)
-            npm stage publish "$tarball" --access public --provenance
-            echo "::notice::staged $name@$version: approve it on npmjs.com"
+            npm publish "$tarball" --access public --provenance
+            echo "::notice::published $name@$version"
           done
 
   crates:

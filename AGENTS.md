@@ -113,8 +113,9 @@ After changing a package, rebuild it (`pnpm --filter <pkg> build`). Dependents c
 3. `pnpm --filter <pkg> publish --access public` from an interactive terminal (npm asks for 2FA).
 4. Approve the staged version on npmjs.com (the account uses staged publishing).
 
-Or run the `Release` workflow (Actions → Release → Run workflow): it stages every unpublished version through
-trusted publishing, and you approve each one on npmjs.com.
+Or run the `Release` workflow (Actions → Release → Run workflow, or
+`gh workflow run release.yml -f npm=true -f crates=true`): it publishes every unpublished npm version and crate through
+trusted publishing, with npm provenance.
 
 ## Gotchas
 
