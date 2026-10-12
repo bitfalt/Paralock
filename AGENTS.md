@@ -22,14 +22,19 @@ sides settle or both refund. No bridge, custodian or wrapped token.
 | `packages/lightwalletd` | `@paralock/lightwalletd`: a `ZcashNode` over lightwalletd / Zaino gRPC (no full node) | Node only. Vendored protos in `proto/` |
 | `packages/sdk` | `@paralock/sdk`: `Maker` / `Taker` engines, factories, persistence, HTTP transport, devnet wiring | Node only |
 | `packages/cli` | `paralock` CLI on npm (`npx paralock`): `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund` | Deploys from embedded artifacts; state dir rule in `packages/sdk/src/state-dir.ts` |
+| `crates/paralock-core` | Rust protocol core: scripts, v5 transactions, ZIP 244, adaptor signatures, escrow ids, wire messages, composite checks | Pure, sync, no `unsafe`, builds for wasm32. MSRV 1.85. Must match `spec/vectors` byte for byte |
+| `crates/paralock-evm` | alloy clients for both escrows, send pipeline, Tempo fee tokens, network registry, testnet deployments | MSRV 1.95 |
+| `crates/paralock` | Rust SDK: `Taker` / `Maker`, `ZcashRpc` / `Lightwalletd`, `FileStore`, axum maker server and HTTP client | Wire-compatible with `@paralock/sdk` |
+| `crates/paralock-cli` | The standalone `paralock` binary (`paralock.toml`, `--devnet`, `--json`) | Released by `cli-v*` tags; installer at `apps/web/public/install` |
 | `contracts` | Foundry: `ParalockHTLC`, `ParalockAdaptorEscrow`, `MockUSD`, `script/Deploy.s.sol` | `contracts/lib` is vendored. Testnet addresses in `contracts/deployments/<chainId>.json` |
 | `apps/web` | Next.js landing page (`/`) and app (`/app`) | Has its own `AGENTS.md` (Next.js version notes) |
-| `examples/*` | Apps built with the SDK: quickstart, payroll, sell-a-secret, testnet | `testnet` runs on public testnets; the rest on the devnet |
+| `examples/*` | Apps built with the SDK: quickstart, payroll, sell-a-secret, testnet; `examples/rust/*` for the Rust SDK | `testnet` and `rust-testnet` run on public testnets; the rest on the devnet (or offline) |
 | `docs/` | `PRIVACY.md` (privacy levels and the adaptor protocol), `SUBMISSION.md` | |
 | `skills/paralock/SKILL.md` | Skill for agents that integrate Paralock | Keep in sync with the SDK API |
 | `scripts/check-deps.mjs` | Fails if a published package imports an undeclared dependency | Run before publishing |
 
 Dependency direction: `zcash`, `adaptor` → `evm` → `sdk` → `cli`, `apps/web`, `examples`; `zcash` → `lightwalletd`.
+Rust: `paralock-core` → `paralock-evm` → `paralock` → `paralock-cli`, `examples/rust`.
 Never import upward.
 
 ## Commands
@@ -49,6 +54,8 @@ pnpm --filter @paralock/evm test           # starts its own anvils
 pnpm --filter @paralock/sdk test
 pnpm --filter @paralock/lightwalletd test   # txid vectors + live regtest through lightwalletd :9067
 cd contracts && forge test
+cargo test --workspace                     # Rust crates and examples
+cargo clippy --workspace --all-targets -- -D warnings
 pnpm check:deps                            # before any publish
 pnpm --filter web dev                      # web app (Next.js allows ONE dev server per checkout)
 ```
