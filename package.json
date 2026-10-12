@@ -1,7 +1,7 @@
 {
   "name": "paralock-monorepo",
   "private": true,
-  "description": "Trustless atomic swaps between private money and dollars. First route: shielded ZEC <-> stablecoins on Tempo.",
+  "description": "Trustless swaps and payments between shielded ZEC and stablecoins on EVM chains (Tempo, Base, Ethereum, Arbitrum, Robinhood Chain, HyperEVM). Two locks, one key, no middleman.",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.25.0",
