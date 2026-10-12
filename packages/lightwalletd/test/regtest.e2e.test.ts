@@ -27,13 +27,15 @@ const reachable = await Promise.all([lwd.getBlockCount(), rpc.getBlockCount()]).
 );
 afterAll(() => lwd.close());
 
+/** The ths faucet fails if a block lands while it writes (the devnet maker mines every 3 s): retry with the same key. */
 async function faucet(address: string, zat: bigint): Promise<void> {
-  const res = await fetch(`${THS_URL}/api/v1/faucet/address`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ address, amount_zatoshi: Number(zat), idempotency_key: bytesToHex(randomBytes(8)) }),
-  });
-  if (!res.ok) throw new Error(`faucet failed: ${res.status} ${await res.text()}`);
+  const body = JSON.stringify({ address, amount_zatoshi: Number(zat), idempotency_key: bytesToHex(randomBytes(8)) });
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${THS_URL}/api/v1/faucet/address`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    if (res.ok) return;
+    if (attempt >= 5) throw new Error(`faucet failed: ${res.status} ${await res.text()}`);
+    await new Promise((r) => setTimeout(r, 500 * attempt));
+  }
 }
 
 /** Mines a block and waits until lightwalletd has ingested it. */
