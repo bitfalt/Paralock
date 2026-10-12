@@ -1,0 +1,48 @@
+# Paralock contracts
+
+`ParalockHTLC` is the Tempo leg of a Paralock swap: a sha256 hash-time-locked escrow for TIP-20 stablecoins that pairs
+with a transparent P2SH HTLC on Zcash (same hashlock).
+
+## Design
+
+- **One storage slot per swap.** Tempo charges ~250k gas for each new storage slot (TIP-1000), so the contract stores
+  only `hashlock => keccak256(abi.encode(swap))`. Callers pass the full `Swap` back to `claim`/`refund`, and the
+  `Locked` event carries every field so watchers can rebuild it (`@paralock/tempo` does this for you).
+- **Hashlocks are single-use.** After a claim or refund the slot holds the `SETTLED` sentinel forever. The preimage is
+  public once claimed, so re-locking under it would let anyone take the funds.
+- **Memo-tagged transfers.** On TIP-20 tokens every transfer uses `transferFromWithMemo`/`transferWithMemo` with
+  `memo = hashlock`, so explorers and reconcilers can link lock, claim and refund payments to the swap. Tokens are
+  identified by Tempo's reserved TIP-20 address prefix (`0x20C0…`), so no external call is needed. Other ERC-20s use
+  plain transfers with SafeERC20-style return checks and a balance-delta check that rejects fee-on-transfer tokens.
+- **Permissionless settlement.** Anyone may submit `claim` (before `expiry`) or `refund` (from `expiry` on). Funds
+  always go to the recipient or the sender respectively, so relayers and watchtowers can settle on a party's behalf.
+- Custom errors (`SwapNotFound`, `SwapSettled`, `SwapMismatch`, `SwapExpired`, `SwapNotExpired`, …), checks-effects-
+  interactions, and bubbled token errors (e.g. TIP-20 `InsufficientAllowance`).
+
+## Usage
+
+```sh
+forge build
+forge test                                            # ERC-20 mock + in-process TIP-20 precompiles (network = "tempo")
+TEMPO_FORK_URL=http://localhost:8545 forge test       # also runs the suite against a live Tempo node's AlphaUSD
+forge script script/Deploy.s.sol --rpc-url tempo_local --broadcast           # local anvil --network tempo
+PRIVATE_KEY=0x… forge script script/Deploy.s.sol --rpc-url moderato --broadcast --tempo.fee-token PathUSD
+```
+
+`Deploy.s.sol` writes `deployments/<chainId>.json` (`htlc`, `startBlock` for log scans, token map). On a local chain
+(31337) it also creates an **OUSD stand-in** through the TIP20Factory precompile
+(`createToken("Open USD (Paralock local)", "OUSD", "USD", PathUSD, deployer, keccak256("paralock/ousd"))`), grants
+the deployer `ISSUER_ROLE` and mints 1B to dev accounts 0 and 1. Its address is deterministic in (deployer, salt), and
+re-running the script reuses it. On Moderato and mainnet the canonical OUSD
+(`0x20c0000000000000000000006a37da5c996874be`) is recorded instead.
+
+After changing the contract, regenerate the TypeScript ABI with `pnpm --filter @paralock/tempo generate:abi`.
+
+## Gas on a local Tempo chain (anvil 1.8.5 `--network tempo`, AlphaUSD)
+
+| call   | gas      | note                                                       |
+| ------ | -------- | ---------------------------------------------------------- |
+| lock   | ~305,000 | ~250k is the one new storage slot (TIP-1000)               |
+| claim  | ~56–61k  | any account's first transaction costs +250k (new nonce)    |
+| refund | ~54,500  |                                                            |
+| deploy | ~5.28M   | contract creation is priced up under TIP-1000              |

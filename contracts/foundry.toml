@@ -1,0 +1,30 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.33"
+evm_version = "prague"
+optimizer = true
+optimizer_runs = 20_000
+# Tempo precompiles (TIP-20, TIP20Factory, FeeManager) and 0x76 transactions in forge's EVM.
+network = "tempo"
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "tempo-std/=lib/tempo-std/src/",
+]
+# Deploy.s.sol writes deployments/<chainId>.json.
+fs_permissions = [{ access = "read-write", path = "./deployments" }]
+
+[fuzz]
+runs = 1024
+
+[rpc_endpoints]
+tempo_local = "http://localhost:8545"
+moderato = "https://rpc.moderato.tempo.xyz"
+
+[lint]
+# Timelocks are the point of an HTLC; second-level validator skew is irrelevant at swap timescales.
+exclude_lints = ["block-timestamp"]
+
+[fmt]
+line_length = 120
