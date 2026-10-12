@@ -1,6 +1,6 @@
 {
   "name": "paralock",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Paralock CLI: run a local Zcash regtest + multi-chain EVM devnet, a market maker, and trustless ZEC <-> stablecoin swaps and payments from the terminal. `npx paralock dev`.",
   "keywords": [
     "zcash",

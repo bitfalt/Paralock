@@ -13,7 +13,7 @@ CLI, so it trades with TypeScript makers and serves TypeScript takers, in htlc a
 
 ```sh
 curl -fsSL https://paralock.xyz/install | sh       # macOS and Linux, x86_64 and arm64: ~/.paralock/bin/paralock
-PARALOCK_VERSION=cli-v0.1.0 curl -fsSL https://paralock.xyz/install | sh   # a given release
+curl -fsSL https://paralock.xyz/install | PARALOCK_VERSION=cli-v0.1.0 sh   # a given release
 cargo install paralock-cli                          # from source (Rust 1.95+)
 ```
 

@@ -3,7 +3,7 @@ title: Rust SDK
 description: The four Rust crates on crates.io (paralock-core, paralock-evm, the paralock SDK and the paralock-cli binary), with install, feature flags, a taker, a maker embedded in axum, the trust model, interop with TypeScript and the minimum Rust version.
 ---
 
-Paralock's protocol is also published in Rust, as four crates on [crates.io](https://crates.io/crates/paralock) (version 0.1.0). With them a Rust service can embed a taker or a market maker without a Node.js process. The engines are a port of `@paralock/sdk` (protocol v1.1) and speak the same wire protocol, so a Rust taker swaps with a TypeScript maker, a TypeScript taker with a Rust maker, in both modes.
+Paralock's protocol is also published in Rust, as four crates on [crates.io](https://crates.io/crates/paralock) (version 0.1). With them a Rust service can embed a taker or a market maker without a Node.js process. The engines are a port of `@paralock/sdk` (protocol v1.1) and speak the same wire protocol, so a Rust taker swaps with a TypeScript maker, a TypeScript taker with a Rust maker, in both modes.
 
 > **Warning:** The crates are experimental. The protocol core, the EVM layer and the SDK went through internal security reviews before their first release, and every finding was fixed with a regression test, but none of the crates has been audited by a third party. The escrows run on public testnets only, and in both modes the Zcash leg is a transparent output.
 

@@ -3,7 +3,14 @@
 All notable changes to `paralock-evm`. The crate follows [Semantic Versioning](https://semver.org); while it is 0.x,
 minor versions may break the API.
 
-## 0.1.0 (unreleased)
+## [0.1.1] - 2026-10-12
+
+### Changed
+
+- The repository moved to [github.com/bitfalt/paralock](https://github.com/bitfalt/paralock) (lowercase); the old URL
+  redirects. No code changes.
+
+## [0.1.0] - 2026-10-12
 
 First release: the EVM layer of Paralock (escrow clients for `ParalockHTLC` and `ParalockAdaptorEscrow`, protocol math,
 the hardened send pipeline, Tempo fee tokens, the network registry and the local deployment helper). The entries below

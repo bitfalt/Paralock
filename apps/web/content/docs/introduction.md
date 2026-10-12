@@ -93,21 +93,21 @@ The SDK is a public good under the MIT license. The business model is running th
 
 | Component | What it is | Version | Status |
 |---|---|---|---|
-| [`@paralock/sdk`](/docs/sdk) | `createTaker` and `createMaker`, both swap modes, crash-safe persistence, recovery, quote validation, maker limits, an HTTP maker API | 0.3.0 | Shipped |
-| [`@paralock/zcash`](/docs/zcash) | Zcash HTLCs and 2-of-2 locks, v5 transactions, ZIP 244 signing, ZIP 317 fees, a Zebra RPC client. Browser-safe | 0.3.0 | Shipped |
-| [`@paralock/adaptor`](/docs/adaptor) | ECDSA adaptor signatures on secp256k1 with DLEQ proofs. Browser-safe | 0.1.2 | Experimental |
-| [`@paralock/evm`](/docs/evm) | viem clients for both escrows and a verified network registry | 0.3.0 | Shipped |
-| [`@paralock/lightwalletd`](/docs/lightwalletd) | A Zcash backend over a lightwalletd or Zaino server, so you don't run a full node | 0.1.1 | Shipped |
-| [`paralock` CLI](/docs/cli) | `npx paralock`: `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund`. A one-command local devnet with Zcash regtest and up to six EVM chains | 0.3.0 | Shipped |
-| [Rust SDK](/docs/rust) | `paralock` on crates.io: taker and maker engines, Zcash RPC and lightwalletd backends, durable stores, the maker HTTP server and client. Built on `paralock-core` (the protocol core, also for wasm32) and `paralock-evm` (alloy clients). Wire-compatible with `@paralock/sdk` | 0.1.0 | Shipped |
-| [Rust CLI](/docs/rust-cli) | `paralock-cli`: a standalone `paralock` binary for swaps, payments, recovery and a maker on any network, configured by `paralock.toml`. Prebuilt for macOS and Linux | 0.1.0 | Shipped |
+| [`@paralock/sdk`](/docs/sdk) | `createTaker` and `createMaker`, both swap modes, crash-safe persistence, recovery, quote validation, maker limits, an HTTP maker API | 0.3.2 | Shipped |
+| [`@paralock/zcash`](/docs/zcash) | Zcash HTLCs and 2-of-2 locks, v5 transactions, ZIP 244 signing, ZIP 317 fees, a Zebra RPC client. Browser-safe | 0.3.2 | Shipped |
+| [`@paralock/adaptor`](/docs/adaptor) | ECDSA adaptor signatures on secp256k1 with DLEQ proofs. Browser-safe | 0.1.4 | Experimental |
+| [`@paralock/evm`](/docs/evm) | viem clients for both escrows and a verified network registry | 0.3.2 | Shipped |
+| [`@paralock/lightwalletd`](/docs/lightwalletd) | A Zcash backend over a lightwalletd or Zaino server, so you don't run a full node | 0.1.3 | Shipped |
+| [`paralock` CLI](/docs/cli) | `npx paralock`: `doctor`, `dev`, `devnet`, `maker`, `swap`, `pay`, `swaps`, `resume`, `refund`. A one-command local devnet with Zcash regtest and up to six EVM chains | 0.3.2 | Shipped |
+| [Rust SDK](/docs/rust) | `paralock` on crates.io: taker and maker engines, Zcash RPC and lightwalletd backends, durable stores, the maker HTTP server and client. Built on `paralock-core` (the protocol core, also for wasm32) and `paralock-evm` (alloy clients). Wire-compatible with `@paralock/sdk` | 0.1.1 | Shipped |
+| [Rust CLI](/docs/rust-cli) | `paralock-cli`: a standalone `paralock` binary for swaps, payments, recovery and a maker on any network, configured by `paralock.toml`. Prebuilt for macOS and Linux | 0.1.1 | Shipped |
 | [Contracts](/docs/contracts) | `ParalockHTLC` and `ParalockAdaptorEscrow`, deployed and source-verified on Tempo Moderato, Base Sepolia, Sepolia, Arbitrum Sepolia, Robinhood Chain Testnet and HyperEVM Testnet | | Testnets only |
 | [Protocol spec](https://github.com/bitfalt/paralock/blob/main/spec/PROTOCOL.md) | The wire protocol, both flows and the safety rules, with cross-language test vectors in `spec/vectors` | v1.1 | Draft |
 | Examples | TypeScript: `quickstart`, `payroll`, `sell-a-secret` on the devnet, and `testnet` on public testnets. Rust: six in `examples/rust` | | Shipped |
 | Web app | Pay with payment links, and Swap, at `/app` | | Shipped |
 | Agent docs | A skill, `llms.txt`, Markdown pages and an MCP server | | Shipped |
 
-The npm packages are at 0.3.0, the CLI's first npm release, and features this site marks "in 0.3.0" need it. They are ESM-only and need Node.js 20 or newer; `@paralock/zcash`, `@paralock/adaptor` and `@paralock/evm` also run in browsers. The Rust crates are published on crates.io at 0.1.0.
+The npm packages are at 0.3.2 (0.3.0 was the CLI's first npm release), and features this site marks "in 0.3.0" need 0.3.0 or newer. They are ESM-only and need Node.js 20 or newer; `@paralock/zcash`, `@paralock/adaptor` and `@paralock/evm` also run in browsers. The Rust crates are published on crates.io at 0.1.1.
 
 ```sh
 npm install @paralock/sdk     # also installs @paralock/zcash, /evm and /adaptor

@@ -7,7 +7,7 @@ import { CopyButton } from "./CopyButton";
  * Four ways in: TypeScript, the CLI, the Rust SDK and the MCP server. The tabs are radio inputs styled with :has(),
  * so switching works without JavaScript; the copy buttons are the only client code.
  * Every snippet is checked against the code: the TypeScript against @paralock/sdk 0.3.0, the CLI against
- * packages/cli/src/main.ts, and the Rust program compiles against the paralock crate 0.1.0 from crates.io.
+ * packages/cli/src/main.ts, and the Rust program compiles against the paralock crate 0.1 from crates.io.
  */
 
 

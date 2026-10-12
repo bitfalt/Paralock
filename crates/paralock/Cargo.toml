@@ -38,8 +38,8 @@ evm = ["dep:paralock-evm"]
 tempo = ["paralock-evm?/tempo"]
 
 [dependencies]
-paralock-core = { path = "../paralock-core", version = "0.1.0" }
-paralock-evm = { path = "../paralock-evm", version = "0.1.0", optional = true, default-features = false }
+paralock-core = { path = "../paralock-core", version = "0.1.1" }
+paralock-evm = { path = "../paralock-evm", version = "0.1.1", optional = true, default-features = false }
 async-trait = "0.1.89"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
 serde = { workspace = true }

@@ -3,6 +3,13 @@
 All notable changes to `paralock-core` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-10-12
+
+### Changed
+
+- The repository moved to [github.com/bitfalt/paralock](https://github.com/bitfalt/paralock) (lowercase); the old URL
+  redirects. No code changes.
+
 ## [0.1.0] - 2026-10-12
 
 First release on crates.io: the protocol core of Paralock (Zcash HTLC and 2-of-2 transactions, ECDSA adaptor
