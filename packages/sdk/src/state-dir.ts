@@ -1,3 +1,4 @@
+// The turbopackIgnore comments keep bundlers (Next.js) from tracing the whole filesystem through these runtime lookups.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -10,8 +11,8 @@ const CHECKOUT_MARKERS = ["pnpm-workspace.yaml", join("contracts", "src", "Paral
  * `pnpm-workspace.yaml` and `contracts/src/ParalockHTLC.sol`. Undefined outside a checkout.
  */
 export function findParalockCheckout(start: string = process.cwd()): string | undefined {
-  for (let dir = resolve(start); ; dir = dirname(dir)) {
-    if (CHECKOUT_MARKERS.every((marker) => existsSync(join(dir, marker)))) return dir;
+  for (let dir = resolve(/*turbopackIgnore: true*/ start); ; dir = dirname(/*turbopackIgnore: true*/ dir)) {
+    if (CHECKOUT_MARKERS.every((marker) => existsSync(join(/*turbopackIgnore: true*/ dir, marker)))) return dir;
     if (dir === dirname(dir)) return undefined;
   }
 }
@@ -34,7 +35,7 @@ export interface StateDirOptions {
 export function paralockStateDir(options: StateDirOptions = {}): string {
   const cwd = options.cwd ?? process.cwd();
   const checkout = findParalockCheckout(cwd);
-  if (checkout) return join(checkout, ".paralock");
+  if (checkout) return join(/*turbopackIgnore: true*/ checkout, ".paralock");
   const home = (options.env ?? process.env).PARALOCK_HOME?.trim();
-  return home ? resolve(cwd, home) : join(homedir(), ".paralock");
+  return home ? resolve(/*turbopackIgnore: true*/ cwd, home) : join(/*turbopackIgnore: true*/ homedir(), ".paralock");
 }
