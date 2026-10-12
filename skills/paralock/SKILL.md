@@ -27,7 +27,8 @@ npm install @paralock/lightwalletd        # optional: use lightwalletd instead o
 ```
 
 Contract addresses for the public testnets are in the repo at `contracts/deployments/<chainId>.json`
-(`htlc`, `adaptorEscrow`, `tokens`, `startBlock`). Pass `startBlock` as `fromBlock`.
+(`htlc`, `adaptorEscrow`, `tokens`, `startBlock`). Pass `startBlock` as `fromBlock`. Robinhood Chain Testnet (46630) has
+no official stablecoin, so a taker there must pass the deployment's MockUSD (`tokens.USDC` in `46630.json`) as `tokens`.
 
 ## Taker: swap or pay
 
