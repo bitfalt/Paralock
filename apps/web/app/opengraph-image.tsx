@@ -2,13 +2,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 
-export const alt = "Paralock: keep it shielded, spend it in dollars. Pay from shielded ZEC with no custodian.";
+export const alt =
+  "Paralock: keep it shielded, spend it in dollars. Trustless swaps and payments between shielded ZEC and stablecoins, with no bridge or custodian.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const BG = "#08090a";
 const FG = "#ededea";
-const FG3 = "#7e7f7b";
+const FG2 = "#a3a49f";
+const FG3 = "#6f706c";
 const LINE = "#2a2c31";
 const ACCENT = "#e8b04b";
 
@@ -18,49 +20,75 @@ export default async function Image() {
     readFile(join(process.cwd(), "assets/FragmentMono-Regular.woff")),
   ]);
 
-  // The settlement diagram from the hero, reduced to its bones: two lanes, two held locks, the key between them.
-  const W = 1040;
+  // The hero's settlement diagram: a lock on each chain, and the key (amber) that the dollar claim hands to the ZEC lock.
+  const X0 = 190; // where the lanes start, after their labels
+  const W = 850;
+  const zecY = 24;
+  const usdY = 88;
+  const at = (f: number) => X0 + f * W;
   const lane = (y: number, a: number, b: number) => (
     <>
-      <div style={{ position: "absolute", left: 0, top: y, width: W, height: 1, background: LINE }} />
-      <div style={{ position: "absolute", left: a * W, top: y - 1, width: (b - a) * W, height: 3, background: FG }} />
-      <div style={{ position: "absolute", left: a * W - 7, top: y - 7, width: 14, height: 14, background: FG, borderRadius: 2 }} />
-      <div style={{ position: "absolute", left: b * W - 7, top: y - 7, width: 14, height: 14, background: ACCENT, borderRadius: 2 }} />
+      <div style={{ position: "absolute", left: X0, top: y, width: W, height: 1, background: LINE }} />
+      <div style={{ position: "absolute", left: at(a), top: y - 1, width: (b - a) * W, height: 3, background: FG }} />
+      <div style={{ position: "absolute", left: at(a) - 7, top: y - 7, width: 14, height: 14, background: FG, borderRadius: 2 }} />
+      <div style={{ position: "absolute", left: at(b) - 7, top: y - 7, width: 14, height: 14, background: ACCENT, borderRadius: 2 }} />
     </>
+  );
+  const tag = (x: number, y: number, text: string, color = FG3) => (
+    <span style={{ position: "absolute", left: x, top: y, fontFamily: "Fragment Mono", fontSize: 17, color }}>{text}</span>
+  );
+  const label = (y: number, name: string, token: string) => (
+    <div style={{ position: "absolute", left: 0, top: y - 22, display: "flex", flexDirection: "column" }}>
+      <span style={{ fontSize: 24, color: FG, letterSpacing: "-0.01em" }}>{name}</span>
+      <span style={{ fontFamily: "Fragment Mono", fontSize: 15, color: FG3 }}>{token}</span>
+    </div>
   );
 
   return new ImageResponse(
     (
-      <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: BG, padding: "64px 80px", fontFamily: "Instrument Sans" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <svg width="34" height="34" viewBox="0 0 20 20">
-            <path d="M5.25 9V6.6a2.85 2.85 0 0 1 5.7 0V9" fill="none" stroke={FG} strokeWidth="1.5" />
-            <path d="M9.05 9V6.6a2.85 2.85 0 0 1 5.7 0V9" fill="none" stroke={FG} strokeWidth="1.5" />
-            <rect x="3" y="9" width="14" height="9" rx="1.6" fill={FG} />
-            <circle cx="10" cy="12.6" r="1.3" fill={ACCENT} />
-            <rect x="9.45" y="12.9" width="1.1" height="2.6" rx="0.4" fill={ACCENT} />
-          </svg>
-          <span style={{ fontSize: 30, color: FG, letterSpacing: "-0.02em" }}>Paralock</span>
+      <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: BG, padding: "52px 80px 48px", fontFamily: "Instrument Sans" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <svg width="32" height="32" viewBox="0 0 20 20">
+              <path d="M5.25 9V6.6a2.85 2.85 0 0 1 5.7 0V9" fill="none" stroke={FG} strokeWidth="1.5" />
+              <path d="M9.05 9V6.6a2.85 2.85 0 0 1 5.7 0V9" fill="none" stroke={FG} strokeWidth="1.5" />
+              <rect x="3" y="9" width="14" height="9" rx="1.6" fill={FG} />
+              <circle cx="10" cy="12.6" r="1.3" fill={ACCENT} />
+              <rect x="9.45" y="12.9" width="1.1" height="2.6" rx="0.4" fill={ACCENT} />
+            </svg>
+            <span style={{ fontSize: 28, color: FG, letterSpacing: "-0.02em" }}>Paralock</span>
+          </div>
+          <span style={{ fontFamily: "Fragment Mono", fontSize: 20, color: FG3 }}>paralock.xyz</span>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 56, fontSize: 84, lineHeight: 1, letterSpacing: "-0.045em", color: FG }}>
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 40, fontSize: 72, lineHeight: 1, letterSpacing: "-0.045em", color: FG }}>
           <span>Keep it shielded.</span>
           <span>Spend it in dollars.</span>
         </div>
-
-        <div style={{ display: "flex", position: "relative", width: W, height: 110, marginTop: 52 }}>
-          {lane(22, 0.04, 0.55)}
-          {lane(88, 0.2, 0.43)}
-          <svg width={W} height="110" viewBox={`0 0 ${W} 110`} style={{ position: "absolute", left: 0, top: 0 }}>
-            <line x1={0.43 * W} y1="88" x2={0.55 * W} y2="22" stroke={ACCENT} strokeWidth="2" />
-          </svg>
-          <div style={{ position: "absolute", left: 0.62 * W, top: 70, height: 36, width: 1, borderLeft: `1px dashed ${FG3}` }} />
-          <div style={{ position: "absolute", left: 0.95 * W, top: 4, height: 36, width: 1, borderLeft: `1px dashed ${FG3}` }} />
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 20, fontSize: 26, lineHeight: 1.3, color: FG2, letterSpacing: "-0.01em" }}>
+          <span>Trustless swaps and payments between shielded ZEC and stablecoins.</span>
+          <span>Two locks, one key, no middleman.</span>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "auto", fontFamily: "Fragment Mono", fontSize: 22, color: FG3 }}>
-          <span>No bridge. No custodian. Open source.</span>
-          <span>paralock.xyz</span>
+        <div style={{ display: "flex", position: "relative", width: X0 + W, height: 120, marginTop: 30 }}>
+          {label(zecY, "Zcash", "ZEC")}
+          {label(usdY, "Dollar chain", "USDC · OUSD")}
+          {lane(zecY, 0.04, 0.62)}
+          {lane(usdY, 0.22, 0.48)}
+          <svg width={X0 + W} height="120" viewBox={`0 0 ${X0 + W} 120`} style={{ position: "absolute", left: 0, top: 0 }}>
+            <line x1={at(0.48)} y1={usdY} x2={at(0.62)} y2={zecY} stroke={ACCENT} strokeWidth="2" />
+          </svg>
+          {tag(at(0.04) - 18, zecY + 12, "lock")}
+          {tag(at(0.62) - 24, zecY + 12, "claim")}
+          {tag(at(0.22) - 18, usdY + 12, "lock")}
+          {tag(at(0.48) - 24, usdY + 12, "claim", ACCENT)}
+          {tag(at(0.64), usdY + 12, "the claim reveals the key")}
+        </div>
+
+        <div style={{ display: "flex", gap: 34, marginTop: "auto", fontFamily: "Fragment Mono", fontSize: 19, color: FG3 }}>
+          <span>Open-source TypeScript SDK</span>
+          <span>Six EVM chains</span>
+          <span>Live on public testnets</span>
         </div>
       </div>
     ),
