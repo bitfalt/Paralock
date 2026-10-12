@@ -1,0 +1,11 @@
+[package]
+name = "protogen"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tonic-prost-build = "=0.14.6"
+protox = "0.10"
+
+[workspace]
