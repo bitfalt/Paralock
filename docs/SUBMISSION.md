@@ -5,11 +5,17 @@ colosseum.com before the deadline.
 
 ## Positioning
 
-> Paralock is a non-custodial swap protocol and SDK for shielded ZEC. Two locks, one key: either both sides
-> settle or both refund, and no bridge, custodian or wrapped token ever holds the money. We run the first
-> market maker and earn the spread, the way Boltz does for Lightning.
+> Pay anyone in dollars from shielded ZEC, with no custodian in between. Paralock is the open-source SDK for
+> non-custodial ZEC settlement, and **Pay** is the first product built on it: a shop shares a payment link, you pay
+> from your private savings, and they receive exactly the dollars they asked for, atomically. Either both sides
+> settle or both refund. We run the first market maker and earn the spread, the way Boltz does for Lightning.
 
-- **Zcash track:** lead with a live ZEC → OUSD swap, then the open-source SDK and the one-command devnet.
+- **Zcash track:** lead with Pay: a payment link, shielded ZEC in, exact dollars out. Then the open-source SDK and
+  the one-command devnet.
+- **Differentiation from past swap projects** (SolAtomicSwaps, Mcortx, Fun Gerbil):
+  - they demoed a swap protocol; Paralock is a toolkit plus a product built on it (Pay);
+  - it is Zcash- and shielded-first, built on Zcash tooling that didn't exist (v5 transactions, ZIP 244, NU6.3);
+  - a business model with a payer.
 - **General pool:** lead with the business: who pays (takers, through the spread), the first integration (a Zcash
   wallet's "pay in dollars"), and why the founder can build it (a backend engineer working on ZK infrastructure).
 - **Public Good award:** the open-source TypeScript Zcash library, adaptor signatures and devnet. 3 of the last 5
@@ -19,8 +25,8 @@ colosseum.com before the deadline.
 
 **Name:** Paralock
 
-**One-liner:** Non-custodial swaps from shielded ZEC to dollars on Tempo, Base and Ethereum. Two locks, one key,
-no middleman.
+**One-liner:** Pay anyone in dollars from shielded ZEC, with no custodian: atomic, open source, on Tempo, Base,
+Ethereum and more.
 
 **Tracks:** Zcash (primary). Tempo too, if Colosseum allows more than one track; ask in Discord.
 

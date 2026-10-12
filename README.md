@@ -2,8 +2,11 @@
 
 **Two locks. One key. No middleman.**
 
-Paralock swaps shielded ZEC for dollars on EVM chains with no bridge, custodian or wrapped token. Routes: Tempo
-(OUSD), Base (USDC) and Ethereum (USDC). It is two things:
+Paralock pays dollars from shielded ZEC on EVM chains with no bridge, custodian or wrapped token. You can swap for
+yourself or **pay someone else an exact amount**, for example from a shareable payment link. Routes: Tempo (OUSD),
+Base, Ethereum, Arbitrum, Robinhood Chain and HyperEVM (USDC on the devnet).
+
+It is two things:
 
 - **A developer toolkit (public good)** for building trustless swaps with Zcash:
   - `@paralock/zcash`: Zcash HTLCs, 2-of-2 locks, v5 transactions and ZIP 244 signing, in TypeScript.
@@ -36,6 +39,23 @@ Alice has 1 ZEC and wants dollars. Bob is a maker with stablecoins.
 
 **Enforcement:** the Zcash script and the EVM contract, not a person. The code also enforces that the Zcash window
 outlasts the EVM window by at least 2×. Each side checks the other's lock before committing anything further.
+
+## Pay: the flagship product
+
+The stablecoin lock can pay **any address**, not only the person swapping:
+1. A shop or a friend shares an address and a dollar amount.
+2. The maker quotes exact-out: they receive exactly that amount, and the ZEC rounds up.
+3. You pay from shielded savings.
+
+Settlement is the same atomic swap, so the recipient never deals with ZEC and nobody custodies anything.
+
+```sh
+pnpm paralock pay --usd 25 --to 0xShop… --chain base --label "Acme Coffee"
+pnpm paralock pay --usd 42.50 --to 0xShop… --chain tempo --private --relay
+```
+
+In the web app, a payment link like `/?pay=0xShop…&usd=25&chain=base&label=Acme%20Coffee` opens the Pay flow
+prefilled.
 
 ## Two modes
 
@@ -113,12 +133,17 @@ You need Docker (or OrbStack), [Foundry](https://getfoundry.sh) ≥ 1.8, pnpm, a
 
 ```sh
 pnpm install && pnpm build
-pnpm paralock devnet up                               # Zcash regtest + Tempo, Base, Ethereum (anvil) + contracts
+pnpm paralock doctor                                  # checks Docker, ths, Foundry, ports… and prints a fix for each
+pnpm paralock dev --web                               # everything: devnet + maker + web app, reusing what's running
+
+# or step by step
+pnpm paralock devnet up [--evm all]                   # Zcash regtest + Tempo, Base, Ethereum (+ Arbitrum, Robinhood, HyperEVM)
 pnpm paralock maker                                   # terminal 1: maker for every chain, both modes
 pnpm paralock swap --zec 1                            # terminal 2: ZEC → OUSD on Tempo (htlc)
 pnpm paralock swap --zec 1 --chain base --private     # ZEC → USDC on Base, no hash on either chain
 pnpm paralock swap --zec 0.5 --fresh-recipient --relay --standard-only
 pnpm paralock swap --zec 0.5 --refund-demo            # the maker never locks; the taker refunds after the timeout
+pnpm paralock pay --usd 25 --to 0x… --chain arbitrum  # pay someone exactly $25 from shielded ZEC
 pnpm --filter web dev                                 # the web app
 ```
 
@@ -164,10 +189,21 @@ End-to-end swaps verified on the devnet:
 - the maker-vanishes refund in both modes;
 - the taker-never-claims double refund.
 
+## Packages on npm
+
+The libraries ship as `@paralock/zcash`, `@paralock/adaptor`, `@paralock/evm` and `@paralock/sdk` (dist-only, MIT).
+To publish:
+1. `npm login`.
+2. Create the `paralock` organization on npmjs.com.
+3. `pnpm -r --filter "./packages/{zcash,adaptor,evm,sdk}" publish --access public`.
+
 ## Roadmap
 
 - **Networks:** Zcash testnet and Tempo Moderato, then mainnet with real OUSD.
 - **More routes:** USD → ZEC, and refunds straight to a shielded address.
+- **Solana:** an HTLC program with the same sha256 hashlock. Private mode works there too, because Solana programs
+  can check secp256k1 signatures (`secp256k1_recover`), so no cross-curve proofs are needed.
+- **Testnets:** deploy the escrows to the public testnets in `@paralock/evm`'s verified network registry.
 - **Maker network:** a request-for-quote network where many makers compete; Paralock earns a small routing fee.
   P2P offers on top.
 - **Privacy level 3:** a fully shielded Zcash leg (FROST 2-of-2 plus Schnorr adaptor signatures).
