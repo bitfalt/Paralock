@@ -33,8 +33,8 @@ export class ThsClient {
   constructor(readonly url = "http://127.0.0.1:32805") {}
 
   /**
-   * ths wallet sync fails transiently when two processes mine at the same moment. Requests carry idempotency keys,
-   * so they are retried with the same body.
+   * ths wallet sync fails transiently when two processes mine at the same moment, and only one manual mining job runs
+   * at a time (409). Requests carry idempotency keys, so they are retried with the same body.
    */
   private request<T>(path: string, body?: unknown): Promise<T> {
     return retry(
@@ -48,7 +48,7 @@ export class ThsClient {
         if (!res.ok) throw new Error(`ths ${path}: ${res.status} ${await res.text()}`);
         return (await res.json()) as T;
       },
-      { retries: 4, minDelayMs: 1_000, shouldRetry: (err) => /synchronization failed|checkpoint changed/i.test(String(err)) },
+      { retries: 4, minDelayMs: 1_000, shouldRetry: (err) => /synchronization failed|checkpoint changed|mining job is already active/i.test(String(err)) },
     );
   }
 
