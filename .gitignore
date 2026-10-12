@@ -19,3 +19,6 @@ contracts/deployments/31339.json
 contracts/deployments/31340.json
 contracts/deployments/31341.json
 contracts/deployments/31342.json
+
+# Example outputs
+examples/*/receipts-*.json

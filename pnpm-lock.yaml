@@ -58,6 +58,21 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  examples/payroll:
+    dependencies:
+      '@paralock/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+
+  examples/sell-a-secret:
+    dependencies:
+      '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@paralock/zcash':
+        specifier: workspace:*
+        version: link:../../packages/zcash
+
   packages/adaptor:
     dependencies:
       '@noble/curves':
