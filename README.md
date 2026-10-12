@@ -124,7 +124,8 @@ swaps (eigenwallet).
 | [`packages/evm`](packages/evm) | `@paralock/evm`: viem clients for both escrows on Tempo or any EVM chain. |
 | [`packages/sdk`](packages/sdk) | `@paralock/sdk`: `Maker` and `Taker` engines for both modes, timeout policy, privacy options, maker HTTP API, devnet wiring. |
 | [`packages/cli`](packages/cli) | The `paralock` CLI: devnet, maker server, swaps. |
-| [`apps/web`](apps/web) | The swap app. |
+| [`apps/web`](apps/web) | The web app: Pay (payment links) and Swap. |
+| [`examples`](examples) | Apps built with Paralock: private payroll, selling a secret for ZEC. |
 
 ## Quickstart (local devnet)
 
@@ -154,6 +155,20 @@ Devnet roles:
   it into the lock. The ths dashboard shows a stale balance for it, because ths can't see spends it didn't make.
 - **ths account 5:** the maker. It shields the ZEC it claims.
 - **EVM:** anvil dev account 0 is the maker, 1 the taker, and 2 the relayer.
+
+## Examples: what you can build with it
+
+| Example | Built on | What it shows |
+|---|---|---|
+| [`examples/payroll`](examples/payroll) | `@paralock/sdk` | **Private payroll.** Pay a team exact dollar amounts on their own chains from a shielded ZEC treasury. Private mode, relayed claims, receipts. One run paid $4,665.75 to four contributors on Tempo, Base, Arbitrum and Ethereum. |
+| [`examples/sell-a-secret`](examples/sell-a-secret) | `@paralock/zcash` only | **Fair exchange of digital goods.** The seller gets paid only by revealing the decryption key on-chain, and the buyer reads it from the claim transaction. No escrow agent. |
+| [`apps/web`](apps/web) | `@paralock/sdk` | **Pay with shielded ZEC.** A payment-link checkout plus a swap app. |
+
+```sh
+pnpm paralock dev --evm all
+pnpm --filter @paralock/example-payroll start
+pnpm --filter @paralock/example-sell-a-secret start
+```
 
 ## Using the Zcash library on its own
 
