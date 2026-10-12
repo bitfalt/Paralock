@@ -1,6 +1,7 @@
 import { createAdaptorEscrow, createEvmHtlc } from "@paralock/evm";
 import {
   DEVNET_POLICY,
+  EVM_CHAIN_NAMES,
   type DevnetFile,
   DevnetSwapRunner,
   type EvmChain,
@@ -15,7 +16,7 @@ import type { ChainTips, Hex, QuoteView, SwapView } from "../types";
 
 const SPREAD_BPS = 50;
 const ZCASH_FEE_ZAT = 10_000n;
-const CHAIN_NAMES: Record<EvmChain, string> = { tempo: "Tempo", base: "Base", ethereum: "Ethereum" };
+const CHAIN_NAMES = EVM_CHAIN_NAMES;
 
 export type Scenario = "cooperative" | "maker_silent" | "taker_misses_claim";
 
@@ -68,14 +69,37 @@ export class DevnetBackend {
     };
   }
 
-  async startSwap(quoteId: string, opts: { shield: boolean; scenario?: Scenario; privacy?: PrivacyOptions }): Promise<SwapView> {
+  async getQuoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<QuoteView> {
+    if (usdAmount < 10_000n) throw new ParalockError(422, "amount_too_small", "Minimum payment is $0.01.");
+    if (usdAmount > 5_000_000_000n) throw new ParalockError(422, "amount_too_large", "The devnet maker pays up to $5,000 per swap.");
+    if (!this.cfg.evm[chain]) throw new ParalockError(422, "chain_unavailable", `This devnet doesn't run ${CHAIN_NAMES[chain]}.`);
+    let quote;
+    try {
+      quote = await this.runner.quoteExactOut(usdAmount, chain, mode);
+    } catch (err) {
+      throw new ParalockError(503, "maker_unavailable", `The maker is not reachable. Is \`paralock maker\` running? (${String(err)})`);
+    }
+    if (quote.zecAmountZat > 400_000_000n) throw new ParalockError(422, "amount_too_large", "That payment needs more than 4 ZEC; the devnet maker fills up to 4 ZEC.");
+    return {
+      ...quote,
+      pricing: { midRate: quote.rate / (1 - SPREAD_BPS / 10_000), spreadBps: SPREAD_BPS, zcashFeeZat: ZCASH_FEE_ZAT },
+      network: { zcashNetwork: this.cfg.zcash.network, zcashBlockSeconds: DEVNET_POLICY.zcashBlockSeconds },
+    };
+  }
+
+  async startSwap(
+    quoteId: string,
+    opts: { shield: boolean; scenario?: Scenario; privacy?: PrivacyOptions; recipient?: Hex; label?: string },
+  ): Promise<SwapView> {
     let swap: Swap;
     try {
       swap = this.runner.start(quoteId, {
         shield: opts.shield,
         makerOffline: opts.scenario === "maker_silent",
         skipClaim: opts.scenario === "taker_misses_claim",
-        privacy: opts.privacy,
+        privacy: opts.recipient ? { ...opts.privacy, freshRecipient: false } : opts.privacy,
+        recipient: opts.recipient,
+        label: opts.label,
       });
     } catch (err) {
       throw new ParalockError(410, "quote_expired", err instanceof Error ? err.message : String(err));
