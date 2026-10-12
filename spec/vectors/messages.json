@@ -486,7 +486,7 @@
       }
     },
     {
-      "description": "Refund height only 50 blocks away: unsafe windows (and quote 2 is consumed)",
+      "description": "Refund height only 50 blocks away: unsafe windows (quote 2 is not consumed)",
       "request": {
         "method": "POST",
         "path": "/swaps",
@@ -502,13 +502,13 @@
       "response": {
         "status": 422,
         "body": {
-          "error": "unsafe timeouts: Zcash refund in ~3750s must exceed 2x the EVM lock (3600s)",
+          "error": "unsafe timeouts: Zcash refund in ~3750s must be at least 2x the EVM lock (3600s)",
           "code": "unsafe_timeouts"
         }
       }
     },
     {
-      "description": "Quote 2 again with a safe HTLC: the failed accept already consumed it",
+      "description": "(v1.1) Quote 2 again with a safe HTLC: accepted, since a refused accept leaves its quote usable",
       "request": {
         "method": "POST",
         "path": "/swaps",
@@ -522,15 +522,52 @@
         }
       },
       "response": {
-        "status": 410,
+        "status": 200,
         "body": {
-          "error": "unknown or already used quote",
-          "code": "quote_expired"
+          "id": "0x9cf2388188e270be99954482023bf8e2c81fed6cec57b19e70c3f9ce00d0d481",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000002",
+            "direction": "ZEC_TO_USD",
+            "mode": "htlc",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "50261257",
+            "usdAmount": "25000000",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060,
+            "exactOut": true
+          },
+          "mode": "htlc",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2BFBizpZNMdndnEqA7ZkWzfzAVHA65siX2",
+            "redeemScript": "0x6382012088a8209cf2388188e270be99954482023bf8e2c81fed6cec57b19e70c3f9ce00d0d481882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+            "refundHeight": 3000144,
+            "amountZat": "50261257",
+            "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "25000000",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "hashlock": "0x9cf2388188e270be99954482023bf8e2c81fed6cec57b19e70c3f9ce00d0d481"
         }
       }
     },
     {
-      "description": "HTLC whose claim key is not the maker's",
+      "description": "HTLC whose claim key is not the maker's (quote 5 is not consumed)",
       "request": {
         "method": "POST",
         "path": "/swaps",
@@ -681,7 +718,7 @@
       }
     },
     {
-      "description": "htlc quote used for a far refund height",
+      "description": "htlc quote used for the refund-height bound",
       "request": {
         "method": "GET",
         "path": "/quote?zat=40000000"
@@ -708,7 +745,7 @@
       }
     },
     {
-      "description": "htlc accept without fundingExpiryHeight and a refund 100,000 blocks away: accepted (no upper bound in htlc mode)",
+      "description": "(v1.1) htlc accept without fundingExpiryHeight and a refund 100,000 blocks away: rejected, refund height too far (quote 7 is not consumed)",
       "request": {
         "method": "POST",
         "path": "/swaps",
@@ -721,9 +758,52 @@
         }
       },
       "response": {
+        "status": 400,
+        "body": {
+          "error": "refund height is too far away",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "(v1.1) htlc accept with a refund 289 blocks away (2 × zcashLockBlocks + 1): rejected",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000007",
+          "redeemScript": "0x6382012088a820737d5d92bd3100801cf5ab7c6fce97171f0968f79993466b248477a70714e725882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703e1c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "f529879d1757fea8011aa6b4e9a52abdab27eaed5888fe2ea32ffc6cc0de71d1",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "refund height is too far away",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "(v1.1) v1.0-style htlc accept (no fundingExpiryHeight) with a refund exactly 288 blocks away: accepted with quote 7",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000007",
+          "redeemScript": "0x6382012088a82052f40a8bea79a7612e2ebc729a4908a80ad7a4e6c37b5ef59be1d63170e494fe882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703e0c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "13eaa15ef633ff8cf9443f598b1b7bf4dc5a53075e8e47c04b4e9ac46b3f25f3",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087"
+        }
+      },
+      "response": {
         "status": 200,
         "body": {
-          "id": "0x68655b36fc18b06e360d991296d81118a7850922c3f97ac4b619f1473d5a56ca",
+          "id": "0x52f40a8bea79a7612e2ebc729a4908a80ad7a4e6c37b5ef59be1d63170e494fe",
           "quote": {
             "id": "00000000-0000-4000-8000-000000000007",
             "direction": "ZEC_TO_USD",
@@ -744,11 +824,11 @@
           "mode": "htlc",
           "status": "quoted",
           "zcash": {
-            "htlcAddress": "t2BiyXmptCC3fZ8CfaHio1WuWE3Ekxt4tzC",
-            "redeemScript": "0x6382012088a82068655b36fc18b06e360d991296d81118a7850922c3f97ac4b619f1473d5a56ca882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703604d2fb17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
-            "refundHeight": 3100000,
+            "htlcAddress": "t2M8ER72uaZJ5bSm7ZpumL8rrR8tg3LTNyk",
+            "redeemScript": "0x6382012088a82052f40a8bea79a7612e2ebc729a4908a80ad7a4e6c37b5ef59be1d63170e494fe882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703e0c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+            "refundHeight": 3000288,
             "amountZat": "40000000",
-            "fundingTxid": "cf58ca2aa2e6b4758e85da726453dcabff1c8e41abcb71bc0a1aadb169dd1a3a",
+            "fundingTxid": "13eaa15ef633ff8cf9443f598b1b7bf4dc5a53075e8e47c04b4e9ac46b3f25f3",
             "fundingVout": 0
           },
           "evm": {
@@ -760,7 +840,7 @@
             "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
           },
           "events": [],
-          "hashlock": "0x68655b36fc18b06e360d991296d81118a7850922c3f97ac4b619f1473d5a56ca"
+          "hashlock": "0x52f40a8bea79a7612e2ebc729a4908a80ad7a4e6c37b5ef59be1d63170e494fe"
         }
       }
     },
@@ -872,6 +952,31 @@
         "status": 400,
         "body": {
           "error": "lock amount must equal the quoted amount",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "(v1.1) Proposal without fundingExpiryHeight (a v1.0 private-mode taker, which could never claim): rejected, quote 4 stays usable",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000004",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "20000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "fundingExpiryHeight is required in private mode (update the taker to @paralock/sdk 0.3 or later)",
           "code": "invalid_request"
         }
       }
@@ -1003,7 +1108,7 @@
       }
     },
     {
-      "description": "Pre-signature sent again (0x-prefixed, upper case): same swap (idempotent)",
+      "description": "Pre-signature sent again (0x-prefixed, upper case): same swap, the taker's view with the adaptor data (idempotent)",
       "request": {
         "method": "POST",
         "path": "/adaptor/swaps/00000000-0000-4000-8000-000000000003/presignature",
@@ -1060,6 +1165,23 @@
       }
     },
     {
+      "description": "(v1.1) The tampered pre-signature after one is stored: rejected (the taker's view needs a valid pre-signature)",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps/00000000-0000-4000-8000-000000000003/presignature",
+        "body": {
+          "takerPreSignature": "032ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b371b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "invalid pre-signature for the maker's claim",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
       "description": "Pre-signature for an unknown swap",
       "request": {
         "method": "POST",
@@ -1090,6 +1212,63 @@
         "body": {
           "error": "takerPreSignature must be a 162-byte hex pre-signature",
           "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "(v1.1) Another valid pre-signature (fresh nonce): the taker's view; the maker keeps the first one",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps/00000000-0000-4000-8000-000000000003/presignature",
+        "body": {
+          "takerPreSignature": "038b373269a2a8b54f6e36b7a361b397dfc3acfbdb4677235aede7e3eca0a63ead031821b1f661444d3057f9c84c9b66675748adce5a6c5cda50d2e1674b7211ba228da2ddb3174e4546f9575e020a5a12165e94215988fbf8843b8377e41f6d557bd059713da5456720c9ace797445c0e72eb341e1585d7c5ac2983a0bb82a72133f445fdf1e9d78fe42727422e9d21ca15807c0173ede164806ff9316edded6ef8"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000003",
+            "direction": "ZEC_TO_USD",
+            "mode": "adaptor",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "50000000",
+            "usdAmount": "24870025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x02f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "adaptor",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2JEw4GjCAZHUjnvqCYXb8qZLVfmufE4G6u",
+            "redeemScript": "0x522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b52ae",
+            "refundHeight": 3000144,
+            "amountZat": "50000000",
+            "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "24870025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "adaptor": {
+            "signer": "0x4babedc848ab85013eea6619fe0b65ada82c641f",
+            "signerPubkey": "0x038c9c6407e56df297878d47c1db65d2491925e5ca1801e823dccae7b0185ad374"
+          }
         }
       }
     },
@@ -1144,7 +1323,7 @@
       }
     },
     {
-      "description": "The adaptor swap by id (the quote id), upper case",
+      "description": "(v1.1) The adaptor swap by id (the quote id, upper case): the public view, without adaptorPoint or adaptor data",
       "request": {
         "method": "GET",
         "path": "/swaps/00000000-0000-4000-8000-000000000003"
@@ -1188,12 +1367,7 @@
             "amount": "24870025",
             "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
           },
-          "events": [],
-          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
-          "adaptor": {
-            "signer": "0x4babedc848ab85013eea6619fe0b65ada82c641f",
-            "signerPubkey": "0x038c9c6407e56df297878d47c1db65d2491925e5ca1801e823dccae7b0185ad374"
-          }
+          "events": []
         }
       }
     },

@@ -50,6 +50,7 @@
       "maxOpenQuotes": 1000,
       "quoteTtlSeconds": 60,
       "maxFundingExpiryBlocks": 45,
+      "minEvmLockSecondsLeft": 30,
       "zcashFeeZat": "10000",
       "checkInventory": true
     },
@@ -84,7 +85,7 @@
       "safe": false,
       "error": {
         "code": "unsafe_timeouts",
-        "message": "unsafe timeouts: Zcash refund in ~7125s must exceed 2x the EVM lock (3600s)"
+        "message": "unsafe timeouts: Zcash refund in ~7125s must be at least 2x the EVM lock (3600s)"
       }
     },
     {
@@ -95,7 +96,7 @@
       "safe": false,
       "error": {
         "code": "unsafe_timeouts",
-        "message": "unsafe timeouts: Zcash refund in ~0s must exceed 2x the EVM lock (3600s)"
+        "message": "unsafe timeouts: Zcash refund in ~0s must be at least 2x the EVM lock (3600s)"
       }
     },
     {
@@ -106,7 +107,7 @@
       "safe": false,
       "error": {
         "code": "unsafe_timeouts",
-        "message": "unsafe timeouts: Zcash refund in ~-375s must exceed 2x the EVM lock (3600s)"
+        "message": "unsafe timeouts: Zcash refund in ~-375s must be at least 2x the EVM lock (3600s)"
       }
     },
     {
@@ -138,7 +139,7 @@
       "safe": false,
       "error": {
         "code": "unsafe_timeouts",
-        "message": "unsafe timeouts: Zcash refund in ~87s must exceed 2x the EVM lock (45s)"
+        "message": "unsafe timeouts: Zcash refund in ~87s must be at least 2x the EVM lock (45s)"
       }
     }
   ],
@@ -248,7 +249,7 @@
       "valid": false,
       "error": {
         "code": "unsafe_timeouts",
-        "message": "unsafe timeouts: Zcash refund in ~7125s must exceed 2x the EVM lock (3600s)"
+        "message": "unsafe timeouts: Zcash refund in ~7125s must be at least 2x the EVM lock (3600s)"
       }
     }
   ],

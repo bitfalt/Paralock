@@ -1,5 +1,5 @@
 {
-  "description": "v5 transaction parsing (header and transparent bundle) and ZIP 244 txids. Txids are shown in display order (the byte-reversed BLAKE2b output, as RPCs print them); txidInternalOrder is the raw digest. For official vectors with shielded bundles the txid comes from the official file (the TypeScript code does not compute shielded digests).",
+  "description": "v5 transaction parsing (header and transparent bundle) and ZIP 244 txids. Txids are shown in display order (the byte-reversed BLAKE2b output, as RPCs print them); txidInternalOrder is the raw digest. For official vectors with shielded bundles the txid comes from the official file (the TypeScript code does not compute shielded digests). Every CompactSize must be canonical (shortest form); the bytes after the transparent bundle are not parsed (shieldedRaw), and a transaction is transparent-only only if they are exactly 00 00 00.",
   "valid": [
     {
       "description": "HTLC funding, 1 input, HTLC + change",
@@ -773,6 +773,21 @@
       "description": "input count with a 64-bit CompactSize (0xff)",
       "hex": "050000800a27a7265b16a53700000000e8c62d00ff0000000000000000",
       "error": "compactSize > 32 bits not supported"
+    },
+    {
+      "description": "input count 1 as a non-canonical 3-byte CompactSize (fd 01 00)",
+      "hex": "050000800a27a7265b16a53700000000e8c62d00fd0100b6dcfd27c1030c3e7ce98296c365805b37bf967fd1ea96ea962a0fa1e120dc46010000006b4830450221009946b1e7e52b386a6a12f870e37b07be0b7523206778125c7ca2097c84fb8ba40220264863d7967878dc2a266d7ee1519daa04680d5d4ba0afa7b93bac1ccbb41de10121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0200e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d48770c9fa02000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+      "error": "non-canonical compactSize: 1 encoded in 3 bytes"
+    },
+    {
+      "description": "input count 1 as a non-canonical 5-byte CompactSize (fe 01 00 00 00)",
+      "hex": "050000800a27a7265b16a53700000000e8c62d00fe01000000b6dcfd27c1030c3e7ce98296c365805b37bf967fd1ea96ea962a0fa1e120dc46010000006b4830450221009946b1e7e52b386a6a12f870e37b07be0b7523206778125c7ca2097c84fb8ba40220264863d7967878dc2a266d7ee1519daa04680d5d4ba0afa7b93bac1ccbb41de10121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0200e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d48770c9fa02000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+      "error": "non-canonical compactSize: 1 encoded in 5 bytes"
+    },
+    {
+      "description": "first scriptSig length as a non-canonical 3-byte CompactSize (fd <len> 00)",
+      "hex": "050000800a27a7265b16a53700000000e8c62d0001b6dcfd27c1030c3e7ce98296c365805b37bf967fd1ea96ea962a0fa1e120dc4601000000fd6b004830450221009946b1e7e52b386a6a12f870e37b07be0b7523206778125c7ca2097c84fb8ba40220264863d7967878dc2a266d7ee1519daa04680d5d4ba0afa7b93bac1ccbb41de10121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0200e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d48770c9fa02000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+      "error": "non-canonical compactSize: 107 encoded in 3 bytes"
     },
     {
       "description": "empty",

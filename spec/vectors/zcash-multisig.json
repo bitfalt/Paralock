@@ -428,6 +428,30 @@
       "pubkey": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
       "signature": "3006020101020101",
       "valid": false
+    },
+    {
+      "description": "a valid low-S SIGHASH_ALL signature on the refund sighash by a key outside the 2-of-2: rejected",
+      "spend": "refund",
+      "pubkey": "02ca8b60c70f88282281427cf17e0a5d1140e79da1ae9ad88f67c60067c32c3c04",
+      "signature": "3045022100823f2bd3b6650006edb945bc588572601a216e0cc6e446bbd820d9bc4cbe8fca0220080f1ef3f008c282fbffa693e51fd6ad562785271664d2a88e23c2121e91a2c001",
+      "valid": false
+    }
+  ],
+  "invalidAdaptorSpends": [
+    {
+      "description": "refundHeight 0: the refund would be spendable at once",
+      "refundHeight": 0,
+      "error": "refundHeight must be a block height in [1, 500000000), got 0"
+    },
+    {
+      "description": "refundHeight 500000000: a timestamp, not a height",
+      "refundHeight": 500000000,
+      "error": "refundHeight must be a block height in [1, 500000000), got 500000000"
+    },
+    {
+      "description": "refundHeight 1.5",
+      "refundHeight": 1.5,
+      "error": "refundHeight must be a block height in [1, 500000000), got 1.5"
     }
   ]
 }

@@ -271,19 +271,19 @@ export async function runMakerExchanges(m: Modules): Promise<Exchange[]> {
       body: { ...accept1, redeemScript: "0x51" },
     });
     const h3 = htlcFor("harness/htlc-secret-3", makerKey.publicKey, tip + 50);
-    await call("Refund height only 50 blocks away: unsafe windows (and quote 2 is consumed)", {
+    await call("Refund height only 50 blocks away: unsafe windows (quote 2 is not consumed)", {
       method: "POST",
       path: "/swaps",
       body: { ...accept1, quoteId: q2.id, redeemScript: hex(h3.redeemScript) },
     });
-    await call("Quote 2 again with a safe HTLC: the failed accept already consumed it", {
+    await call("(v1.1) Quote 2 again with a safe HTLC: accepted, since a refused accept leaves its quote usable", {
       method: "POST",
       path: "/swaps",
       body: { ...accept1, quoteId: q2.id, redeemScript: hex(h2.redeemScript) },
     });
     const notMaker = zcash.keyPairFromPrivate(labelHex("harness/not-the-maker"));
     const h4 = htlcFor("harness/htlc-secret-4", notMaker.publicKey, tip + 144);
-    await call("HTLC whose claim key is not the maker's", {
+    await call("HTLC whose claim key is not the maker's (quote 5 is not consumed)", {
       method: "POST",
       path: "/swaps",
       body: { ...accept1, quoteId: q5.id, redeemScript: hex(h4.redeemScript) },
@@ -310,13 +310,28 @@ export async function runMakerExchanges(m: Modules): Promise<Exchange[]> {
       body: { ...accept5, fundingExpiryHeight: tip + 45 },
     });
 
-    const q7 = (await call("htlc quote used for a far refund height", { method: "GET", path: "/quote?zat=40000000" })).body as { id: string };
+    // (v1.1) The refund height is at most 2 × zcashLockBlocks (288) above the tip, as in adaptor mode. A v1.0 accept
+    // (no fundingExpiryHeight) is still served; the maker then drops it if it never sees the funding by
+    // tip + maxFundingExpiryBlocks + 2 (internal state, not visible in the response).
+    const q7 = (await call("htlc quote used for the refund-height bound", { method: "GET", path: "/quote?zat=40000000" })).body as { id: string };
     const h6 = htlcFor("harness/htlc-secret-6", makerKey.publicKey, tip + 100_000);
     const { fundingExpiryHeight: _omitted, ...acceptV10 } = accept1;
-    await call("htlc accept without fundingExpiryHeight and a refund 100,000 blocks away: accepted (no upper bound in htlc mode)", {
+    await call("(v1.1) htlc accept without fundingExpiryHeight and a refund 100,000 blocks away: rejected, refund height too far (quote 7 is not consumed)", {
       method: "POST",
       path: "/swaps",
       body: { ...acceptV10, quoteId: q7.id, redeemScript: hex(h6.redeemScript), fundingTxid: labelHex("harness/funding-txid-6") },
+    });
+    const h7 = htlcFor("harness/htlc-secret-7", makerKey.publicKey, tip + 289);
+    await call("(v1.1) htlc accept with a refund 289 blocks away (2 × zcashLockBlocks + 1): rejected", {
+      method: "POST",
+      path: "/swaps",
+      body: { ...accept1, quoteId: q7.id, redeemScript: hex(h7.redeemScript), fundingTxid: labelHex("harness/funding-txid-7") },
+    });
+    const h8 = htlcFor("harness/htlc-secret-8", makerKey.publicKey, tip + 288);
+    await call("(v1.1) v1.0-style htlc accept (no fundingExpiryHeight) with a refund exactly 288 blocks away: accepted with quote 7", {
+      method: "POST",
+      path: "/swaps",
+      body: { ...acceptV10, quoteId: q7.id, redeemScript: hex(h8.redeemScript), fundingTxid: labelHex("harness/funding-txid-8") },
     });
 
     // adaptor mode.
@@ -350,6 +365,12 @@ export async function runMakerExchanges(m: Modules): Promise<Exchange[]> {
       method: "POST",
       path: "/adaptor/swaps",
       body: { ...proposal, quoteId: q4.id, amountZat: "20000001" },
+    });
+    const { fundingExpiryHeight: _noExpiry, ...proposalV10 } = proposal;
+    await call("(v1.1) Proposal without fundingExpiryHeight (a v1.0 private-mode taker, which could never claim): rejected, quote 4 stays usable", {
+      method: "POST",
+      path: "/adaptor/swaps",
+      body: { ...proposalV10, quoteId: q4.id, amountZat: q4.zecAmountZat },
     });
     await call("Refund height more than 2 × zcashLockBlocks away", {
       method: "POST",
@@ -387,10 +408,15 @@ export async function runMakerExchanges(m: Modules): Promise<Exchange[]> {
       path: `/adaptor/swaps/${accepted.swapId}/presignature`,
       body: { takerPreSignature: preHex },
     });
-    await call("Pre-signature sent again (0x-prefixed, upper case): same swap (idempotent)", {
+    await call("Pre-signature sent again (0x-prefixed, upper case): same swap, the taker's view with the adaptor data (idempotent)", {
       method: "POST",
       path: `/adaptor/swaps/${accepted.swapId}/presignature`,
       body: { takerPreSignature: `0x${preHex.toUpperCase()}` },
+    });
+    await call("(v1.1) The tampered pre-signature after one is stored: rejected (the taker's view needs a valid pre-signature)", {
+      method: "POST",
+      path: `/adaptor/swaps/${accepted.swapId}/presignature`,
+      body: { takerPreSignature: tampered },
     });
     await call("Pre-signature for an unknown swap", {
       method: "POST",
@@ -402,10 +428,20 @@ export async function runMakerExchanges(m: Modules): Promise<Exchange[]> {
       path: `/adaptor/swaps/${accepted.swapId}/presignature`,
       body: { takerPreSignature: preHex.slice(2) },
     });
+    // Drawn last: it consumes deterministic randomness (a fresh pre-signature nonce).
+    const otherPre = adaptor.encodePreSignature(adaptor.preSign(multisigKey.privateKey, spends.claim.sighash, adaptorPoint));
+    await call("(v1.1) Another valid pre-signature (fresh nonce): the taker's view; the maker keeps the first one", {
+      method: "POST",
+      path: `/adaptor/swaps/${accepted.swapId}/presignature`,
+      body: { takerPreSignature: otherPre },
+    });
 
     // Reads and transport errors.
     await call("The htlc swap by id (0x ‖ hashlock), with a trailing slash", { method: "GET", path: `/swaps/0x${h1.params.hashlock}/` });
-    await call("The adaptor swap by id (the quote id), upper case", { method: "GET", path: `/swaps/${accepted.swapId.toUpperCase()}` });
+    await call("(v1.1) The adaptor swap by id (the quote id, upper case): the public view, without adaptorPoint or adaptor data", {
+      method: "GET",
+      path: `/swaps/${accepted.swapId.toUpperCase()}`,
+    });
     await call("Unknown swap id", { method: "GET", path: `/swaps/0x${"00".repeat(32)}` });
     await call("The swap list is off by default", { method: "GET", path: "/swaps" });
     await call("Unknown route", { method: "GET", path: "/v2/quote" });

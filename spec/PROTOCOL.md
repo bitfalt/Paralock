@@ -85,7 +85,8 @@ Taker                                   Maker                         Zcash     
 - `LE32(x)`, `LE64(x)`: x as 4 / 8 bytes, little-endian (LE64 is two's complement, Zcash amounts are signed).
 - `BE32(x)`: a scalar as 32 bytes, big-endian (left-padded with zeros).
 - `CompactSize(n)`: Bitcoin variable-length integer: `n < 0xfd` → 1 byte; `n ≤ 0xffff` → `0xfd ‖ LE16(n)`;
-  `n ≤ 0xffffffff` → `0xfe ‖ LE32(n)`. Writers MUST use the shortest form.
+  `n ≤ 0xffffffff` → `0xfe ‖ LE32(n)`. Writers MUST use the shortest form, and readers MUST reject any other
+  encoding (`fd 05 00`, `fe ff ff 00 00`, …), as Zcash and Bitcoin consensus do.
 - `sha256`, `sha512` (FIPS 180-4), `ripemd160`, `hash160(x) = ripemd160(sha256(x))`, `keccak256` (Ethereum's
   Keccak-256, not SHA3-256).
 - `BLAKE2b-256(P, x)`: BLAKE2b with a 32-byte digest and the 16-byte personalization `P` (no key, no salt).
@@ -137,7 +138,8 @@ double-SHA-256 checksum:
 - A P2SH address hashes the redeem script: `hash = hash160(redeemScript)`.
 - Decoders MUST reject a bad checksum, a payload other than 22 bytes, and unknown prefixes. A decoded testnet/regtest
   address reports `testnet`; regtest and testnet addresses are interchangeable.
-- When building a transaction for network *N*, every address MUST belong to *N* (mainnet vs. testnet/regtest).
+- When building a transaction for network *N*, every address MUST belong to *N* (mainnet vs. testnet/regtest). The
+  network is a required input of every builder, never optional or defaulted. **(protocol v1.1)**
 - scriptPubKeys: P2PKH `76 a9 14 <20> 88 ac` (`OP_DUP OP_HASH160 <h> OP_EQUALVERIFY OP_CHECKSIG`); P2SH
   `a9 14 <20> 87` (`OP_HASH160 <h> OP_EQUAL`).
 
@@ -247,9 +249,11 @@ Paralock builds ZIP 225 v5 transactions with empty Sapling and Orchard bundles:
 | Sapling / Orchard | 3 | `00 00 00` (no Sapling spends, no Sapling outputs, no Orchard actions) |
 
 **Consensus branch id.** The branch id is the one of the **next block**, read from the node
-(`getblockchaininfo.consensus.nextblock`, hex). Implementations MUST NOT hard-code it for signing. (The reference code
-defaults to `0x37a5165b`, NU6.3, only when no value is passed.) Signatures commit to it (§3.8), so a transaction signed
-before a network upgrade is invalid after it; see §3.13.
+(`getblockchaininfo.consensus.nextblock`, hex). Implementations MUST NOT hard-code or default it for signing: it is a
+required input of every builder, and must be a non-zero 32-bit value. **(protocol v1.1)** (The reference builders had
+a `0x37a5165b`, NU6.3, default; it is gone, and the constant is exported for reference only. A chain on another
+upgrade, such as a testnet on NU7, uses another id, and a wrong id silently produces invalid signatures.) Signatures
+commit to it (§3.8), so a transaction signed before a network upgrade is invalid after it; see §3.13.
 
 **lock_time, sequence and expiry, as built:**
 
@@ -308,7 +312,9 @@ sighash = BLAKE2b("ZcashTxHash_" ‖ LE32(branchId), header_digest ‖ transpare
 
 The six hash types are `SIGHASH_ALL = 0x01`, `SIGHASH_NONE = 0x02`, `SIGHASH_SINGLE = 0x03` and each `| 0x80`
 (`ANYONECANPAY`). **Paralock signs and accepts only `SIGHASH_ALL` (0x01).** Implementations MUST reject any other
-hash type in a counterparty signature (v5 consensus accepts only the six canonical values).
+hash type in a counterparty signature, and MUST NOT compute a digest for a value outside the six (v5 consensus
+accepts only these; masking, e.g. with `0x1f`, would hash invalid types). The reference `transparentSighash` throws on
+any other value (vectors: `zcash-sighash.json` → `invalidHashTypes`).
 
 Vectors: `zcash-sighash.json` (all six types on Paralock transactions), `zcash-tx-parse.json` (digests and txids),
 `spec/vectors/official/zip_0244.json` (official).
@@ -350,7 +356,13 @@ outputs costs `5000 × max(2, k)`.
 6. Sign every input with `SIGHASH_ALL` (prevouts = the UTXOs) and set its scriptSig to `pushData(sig) ‖ pushData(pubkey)`.
 
 **Lock spends** (claim/refund of an HTLC or 2-of-2): one input, one output to the destination,
-`fee = conventional_fee(placeholder)`, `value = utxo.value − fee`, which MUST be ≥ 1,000 zat.
+`fee = conventional_fee(placeholder)`, `value = utxo.value − fee`, which MUST be ≥ 1,000 zat. The spent output's
+value MUST satisfy `0 < utxo.value ≤ MAX_MONEY`. An HTLC claim MUST check `sha256(preimage) = hashlock` (and that
+the preimage is 32 bytes) before signing. **(protocol v1.1)**
+
+**Fee overrides.** An implementation MAY let the caller override the conventional fee (the reference builders take
+`fee`). An override MUST be ≥ 0 and strictly below the total value spent, otherwise the builder MUST refuse
+**(protocol v1.1)**. The vectors use the conventional fee throughout.
 
 The maker prices its own claim fee into every quote (`zcashFeeZat`, default 10,000, §8). Nodes enforce ZIP 317
 (transactions paying less than the conventional fee may not be relayed or mined).
@@ -377,9 +389,11 @@ The maker prices its own claim fee into every quote (`zcashFeeZat`, default 10,0
   bytes). Every signed transaction in the vectors is therefore reproducible byte for byte, and conforming
   implementations SHOULD use RFC 6979 (HMAC-SHA256, no extra entropy) so their signatures match. Any valid low-S
   signature is accepted by the counterparty and by consensus; only vector reproduction depends on determinism.
-- **Verifying a counterparty signature** (e.g. the maker's refund signature): the last byte MUST be `0x01`, the rest
-  MUST be strict DER with `s ≤ n/2`, total length ≥ 9 bytes, and it MUST verify under the expected public key over
-  the expected spend's sighash. Vectors: `zcash-multisig.json` → `signatureChecks`.
+- **Verifying a counterparty signature** (e.g. the maker's refund signature): the public key MUST be one of the
+  2-of-2's two keys **(protocol v1.1)**, the last byte MUST be `0x01`, the rest MUST be strict DER with `s ≤ n/2`,
+  total length ≥ 9 bytes, and it MUST verify under that key over the expected spend's sighash. Assembling a 2-of-2
+  spend MUST verify both signatures first (the reference `finalizeMultisigSpend` has no way to skip it). Vectors:
+  `zcash-multisig.json` → `signatureChecks`.
 - Adaptor-mode signatures are ordinary ECDSA signatures obtained by completing a pre-signature (§5); their nonce is
   random, so they are not RFC 6979 signatures, but they verify identically.
 
@@ -395,7 +409,9 @@ claim    = lock spend to claimTo,       lock_time = 0,            sequence 0xfff
 ```
 
 `branchId` is the value in `AdaptorProposalAccepted.branchId`. The taker MUST check it equals its own node's next
-branch id before funding.
+branch id before funding. `refundHeight` MUST be a lock-time block height, `1 ≤ refundHeight < 500,000,000`: with 0
+the refund would be valid at once **(protocol v1.1)**; `adaptorSpends` refuses anything else (vectors:
+`zcash-multisig.json` → `invalidAdaptorSpends`).
 
 ### 3.13 Network upgrades
 
@@ -407,9 +423,21 @@ upgrades skip the check (logged). htlc-mode spends are signed when they are used
 ### 3.14 Parsing transactions
 
 A parser reads the v5 header and transparent bundle as in §3.7 and MUST reject other versions, a clear
-`fOverwintered` bit, a wrong version group id, truncated data and 64-bit CompactSizes. A transaction is
-**transparent-only** if the bytes after the transparent bundle are exactly `00 00 00`; only then can the txid be
-computed with the empty shielded digests. Vectors: `zcash-tx-parse.json`.
+`fOverwintered` bit, a wrong version group id, truncated data, 64-bit CompactSizes and non-canonical CompactSizes
+(§2.1) in the input and output counts and the script lengths. It need not check the branch id, `lock_time`, expiry,
+output values or scripts (the reference parser returns them as read).
+
+The bytes after the transparent bundle (the Sapling and Orchard bundles) are not parsed: the reference parser returns
+them opaque (`shieldedRaw`), possibly malformed. A transaction is **transparent-only** if they are exactly
+`00 00 00`; only then can the txid be computed with the empty shielded digests. No protocol decision may depend on
+the shielded bytes beyond that exact comparison; a client that needs the txid of a shielded transaction (such as
+`@paralock/lightwalletd`) parses them fully. Vectors: `zcash-tx-parse.json`.
+
+A client that computes the txid of a pre-v5 transaction (double SHA-256 of its serialization, v1–v4) MUST first
+parse the whole transaction (transparent bundle, lock time, expiry, Sapling descriptions, JoinSplits, keys and
+signatures, with canonical CompactSizes, the right `fOverwintered` bit and version group id) and reject any trailing
+or missing byte, so the hash covers exactly one transaction. **(protocol v1.1)** The reference `decodeTx` in
+`@paralock/lightwalletd` does this; Paralock's own transactions are v5.
 
 ---
 
@@ -510,14 +538,18 @@ same adaptor point `Y = y·G`, whose discrete log `y` only the taker knows.
 
 ```
 hedged(tag, secret, ctx₁, …, ctxₖ) =
-    loop: ρ ← 32 fresh bytes from a CSPRNG
+    repeat at most MAX_NONCE_ATTEMPTS (8) times:
+          ρ ← 32 fresh bytes from a CSPRNG
           k = int(sha512(tag ‖ BE32(secret) ‖ ctx₁ ‖ … ‖ ctxₖ ‖ ρ)) mod n
           if k ≠ 0: return k
+    fail ("the random number generator is broken")
 ```
 
 Fresh randomness makes every nonce unique; mixing in the secret and the context means a broken or repeated RNG output
 still cannot give two different messages the same nonce. Implementations MUST draw fresh randomness for every
-pre-signature (invariant 7). Each vector in `adaptor.json` records its two draws (`nonceRandomness[0]` → `k`,
+pre-signature (invariant 7). **(protocol v1.1)** The retry loops here and in §5.3 MUST be bounded: a draw fails with
+probability about 2⁻²⁵⁶, so repeated failures mean the RNG (or hash) is broken, and pre-signing must fail rather than
+loop forever. The reference implementation gives up after 8 draws. Each vector in `adaptor.json` records its two draws (`nonceRandomness[0]` → `k`,
 `[1]` → `t`) so that an implementation with an injectable RNG reproduces the pre-signature exactly.
 
 ### 5.3 Pre-sign
@@ -526,7 +558,7 @@ pre-signature (invariant 7). Each vector in `adaptor.json` records its two draws
 preSign(x, d, Y):
   require 32-byte x with 1 ≤ int(x) < n; 32-byte d; Y a valid point
   m = int(d) mod n
-  loop:
+  repeat at most MAX_NONCE_ATTEMPTS (8) times:
     k  = hedged(NONCE_TAG, x, BE32(m), ser33(Y))
     R  = k·Y;  r = R.x mod n
     s' = k⁻¹ · (m + r·x) mod n
@@ -534,6 +566,7 @@ preSign(x, d, Y):
     R' = k·G
     (c, z) = dleqProve(k, A = R', Y, B = R)
     return (R, R', s', c, z)
+  fail ("the random number generator is broken")
 
 dleqProve(k, A, Y, B):                         // log_G(A) = log_Y(B) = k
   t  = hedged(DLEQ_NONCE_TAG, k, ser33(A), ser33(Y), ser33(B))
@@ -629,9 +662,9 @@ Vectors `adaptor.json` include a case where `adapt` negates `s` and one where it
 | GET | `/quote?usd=U[&chain=C][&mode=M]` | — | `Quote` with `exactOut: true` | same |
 | POST | `/swaps` | `AcceptRequest` | `Swap` | 400, 409 `conflict`, 410 `quote_expired`, 422 `unsafe_timeouts`, 429, 503 |
 | POST | `/adaptor/swaps` | `AdaptorProposal` | `AdaptorProposalAccepted` | 400, 409, 410, 422 `unsafe_timeouts`, 429, 503 |
-| POST | `/adaptor/swaps/{id}/presignature` | `AdaptorPreSignatureRequest` | `Swap` | 400, 404 `not_found`, 409 |
-| GET | `/swaps/{id}` | — | `Swap` | 404 |
-| GET | `/swaps` | — | `Swap[]`, **only if the operator enabled it** (it lets anyone link swaps); else 404 | 404 |
+| POST | `/adaptor/swaps/{id}/presignature` | `AdaptorPreSignatureRequest` | `Swap`, the taker's view (§6.4) | 400, 404 `not_found`, 409 |
+| GET | `/swaps/{id}` | — | `Swap`, the public view (§6.4) | 404 |
+| GET | `/swaps` | — | `Swap[]` (public views), **only if the operator enabled it** (it lets anyone link swaps); else 404 | 404 |
 | OPTIONS | any | — | 204, empty body | — |
 
 - `/quote`: `chain` defaults to `tempo`, `mode` to `htlc`. If `usd` is present it wins over `zat`. The amount MUST
@@ -699,7 +732,7 @@ A client SHOULD treat an unknown `code` as `unavailable`.
 | `fundingTxid` | string | 64 hex, **no `0x`**, display order; lower-cased by the maker |
 | `fundingVout` | number | integer 0 … 10,000 |
 | `takerEvmAddress` | Hex (20 bytes) | non-zero; the recipient of the EVM lock (the taker, a fresh address or a payee) |
-| `fundingExpiryHeight` | number | **(protocol v1.1)** optional; integer 1 … 499,999,999: the funding's `nExpiryHeight` |
+| `fundingExpiryHeight` | number | **(protocol v1.1)** optional; integer 1 … 499,999,999: the funding's `nExpiryHeight`. Without it the maker derives a deadline (§7.5) |
 
 **AdaptorProposal** (taker → maker, `POST /adaptor/swaps`):
 
@@ -714,7 +747,7 @@ A client SHOULD treat an unknown `code` as `unavailable`.
 | `refundHeight` | number | integer 1 … 499,999,999: the refund's `lock_time` |
 | `refundAddress` | string | transparent address of the maker's network |
 | `takerEvmRecipient` | Hex (20 bytes) | non-zero |
-| `fundingExpiryHeight` | number | **(protocol v1.1)** optional; integer 1 … 499,999,999 |
+| `fundingExpiryHeight` | number | **(protocol v1.1)** integer 1 … 499,999,999. Optional in the shape (`parse` vectors), but **required** by a v1.1 maker (§6.5): only v1.0 takers omit it, and they cannot complete a private swap with a v1.1 maker (§11) |
 
 **AdaptorProposalAccepted** (maker → taker):
 
@@ -729,9 +762,18 @@ A client SHOULD treat an unknown `code` as `unavailable`.
 
 **AdaptorPreSignatureRequest** (taker → maker): `{ "takerPreSignature": string }`, 324 hex characters (an optional
 `0x` and upper case are accepted and normalized away): the taker's pre-signature (§5.4) on the 2-of-2 claim sighash,
-encrypted to `Y`.
+encrypted to `Y`. The taker persists it before sending it and resends the same value to poll for the lock (§6.5,
+§9.2).
 
-**Swap** (the public view; it never contains secrets or private keys):
+**Swap** (never contains secrets or private keys). It comes in two views:
+
+- the **public view**, served by `GET /swaps/{id}` (and `GET /swaps`) to anyone who knows the id, and by the
+  `POST /swaps` answer: every field below except `adaptorPoint` and `adaptor`, which it **never** contains
+  **(protocol v1.1)**;
+- the **taker's view**, the answer to `POST /adaptor/swaps/{id}/presignature`: the public view plus `adaptorPoint`
+  and `adaptor`. Only the taker can obtain it, since it requires a valid pre-signature by the taker's 2-of-2 key.
+
+Both views list both legs' transactions, so each one links the legs by itself (§10.9).
 
 | Field | JSON type | Notes |
 |---|---|---|
@@ -742,30 +784,36 @@ encrypted to `Y`.
 | `zcash` | object | `htlcAddress` (the lock's P2SH address: HTLC or 2-of-2), `redeemScript` (Hex), `refundHeight` (number), `amountZat` (decimal string), optional `fundingTxid`, `fundingVout`, `claimTxid`, `refundTxid` (txids without `0x`) |
 | `evm` | object | `chain`, `chainId`, `contract` (Hex), `token` (Hex), `amount` (decimal string), `recipient` (Hex), optional `expiry` (number, Unix s), `lockTx`, `claimTx`, `refundTx` (Hex) |
 | `hashlock` | Hex | htlc mode only |
-| `adaptorPoint` | Hex | adaptor mode only |
-| `adaptor` | object | adaptor mode: optional `escrowId`, `signer`, `signerPubkey`, `salt` (Hex) and `evmPreSignature` (162-byte hex, no `0x`: the maker's pre-signature on `claimDigest(escrowId)`, published once the lock is on-chain) |
+| `adaptorPoint` | Hex | adaptor mode, taker's view only |
+| `adaptor` | object | adaptor mode, taker's view only: optional `escrowId`, `signer`, `signerPubkey`, `salt` (Hex) and `evmPreSignature` (162-byte hex, no `0x`: the maker's pre-signature on `claimDigest(escrowId)`, included once the lock is on-chain) |
 | `payment` | object | optional `{ recipient, label? }` (the taker's own record, for the Pay flow) |
 | `events` | array | `{ status, chain: "zcash" \| EvmChain, at (Unix ms), txid?, detail? }`; informative |
 
 ### 6.5 Request validation and maker checks
 
 The maker validates each request in this order (first failure wins). "Consumes the quote" means the quote can never
-be used again, even if a later check fails.
+be used again. **(protocol v1.1)** Both commitments consume the quote only after every other check passed, so a refused
+commitment leaves its quote usable (until it expires); the checks and the consumption run under the commitment lock
+(below), so they are atomic.
 
 **`POST /swaps`** (htlc):
 1. Shape (§6.4) → 400.
 2. `redeemScript` is the HTLC template byte for byte with on-curve keys (§3.4) → else 400.
 3. Swap id `0x ‖ hashlock`. If a swap with this id exists: same `quoteId`, `fundingTxid` and `fundingVout` → return
    it (200, idempotent); otherwise 409 "hashlock already used".
-4. **(protocol v1.1)** If `fundingExpiryHeight` is present: `tip < fundingExpiryHeight ≤ tip + maxFundingExpiryBlocks`
-   (45 by default) → else 400 (the quote is not consumed).
-5. The quote exists and is unused (else 410), is an htlc quote (else 400), and `expiresAt ≥ now` (else 410).
-   **The quote is consumed here.**
-6. The HTLC's claim key is the maker's long-term key → else 400.
-7. In-flight swaps < `maxConcurrentSwaps` → else 429.
+4. The quote exists and is unused (else 410) and is an htlc quote (else 400). It is not consumed yet.
+5. The HTLC's claim key is the maker's long-term key → else 400.
+6. In-flight swaps < `maxConcurrentSwaps` → else 429.
+7. **(protocol v1.1)** If `fundingExpiryHeight` is present: `tip < fundingExpiryHeight ≤ tip + maxFundingExpiryBlocks`
+   (45 by default) → else 400.
 8. `assertSafeWindows(policy, refundHeight − tip, quote.evmLockSeconds)` → else 422.
-9. Inventory: token balance − amounts reserved by swaps in stages proposed/funding/locking ≥ `usdAmount` → else 503.
-10. Record the swap (stage `funding`, status `quoted`), persist it, start watching for the funding → 200 `Swap`.
+9. **(protocol v1.1)** `refundHeight − tip ≤ 2 × policy.zcashLockBlocks` → else 400 "refund height is too far away"
+   (the same bound as in adaptor mode).
+10. Inventory: token balance − amounts reserved by swaps in stages proposed/funding/locking ≥ `usdAmount` → else 503.
+11. The quote is unexpired (`expiresAt ≥ now`, else 410) and **consumed**.
+12. Record the swap (stage `funding`, status `quoted`), **(protocol v1.1)** with the derived funding deadline
+    `tip + maxFundingExpiryBlocks` if `fundingExpiryHeight` is absent (§7.5); persist it, start watching for the
+    funding → 200 `Swap` (public view).
 
 **`POST /adaptor/swaps`**:
 1. Shape, with `refundAddress` checked against the maker's network → 400.
@@ -775,7 +823,8 @@ be used again, even if a later check fails.
 4. `amountZat == quote.zecAmountZat` → else 400.
 5. `takerZcashPubkey` ≠ the per-quote maker key → else 400.
 6. Capacity → 429.
-7. **(protocol v1.1)** `fundingExpiryHeight` bounds as above → 400.
+7. **(protocol v1.1)** `fundingExpiryHeight` is present (else 400: only v1.0 takers omit it, and they could fund but
+   never claim, §11) and within the bounds above → else 400.
 8. `assertSafeWindows(policy, refundHeight − tip, quote.evmLockSeconds)` → 422.
 9. `refundHeight − tip ≤ 2 × policy.zcashLockBlocks` → else 400 "refund height is too far away".
 10. No network upgrade at or before `refundHeight + 1` (§3.13) → else 422.
@@ -785,11 +834,19 @@ be used again, even if a later check fails.
     refund with the per-quote key; generate a fresh one-time EVM signer key; persist everything (stage `proposed`);
     answer `AdaptorProposalAccepted`.
 
-**`POST /adaptor/swaps/{id}/presignature`**:
-1. Shape → 400. 2. A swap with this id exists in adaptor mode → else 404. 3. If a pre-signature is already stored →
-return the swap (200; the new one is not checked). 4. Stage is `proposed` → else 409. 5. The pre-signature decodes
-(400) and `preVerify(takerZcashPubkey, claim.sighash, Y, pre)` holds (400). 6. Store it, stage `funding` → 200
-`Swap`.
+**`POST /adaptor/swaps/{id}/presignature`** **(protocol v1.1)**:
+1. Shape → 400.
+2. A swap with this id exists in adaptor mode → else 404.
+3. A pre-signature is stored and equals the request's (after normalization) → 200, the taker's view (the taker
+   repeating itself; this is how it polls for the lock).
+4. No pre-signature is stored and the stage is not `proposed` → 409.
+5. The pre-signature decodes (else 400) and `preVerify(takerZcashPubkey, claim.sighash, Y, pre)` holds (else 400).
+6. If one was already stored: 200, the taker's view (a different valid pre-signature also proves the taker's key; the
+   stored one is kept). Otherwise store it, stage `funding` → 200, the taker's view.
+
+The answer never goes to anyone who could not produce a valid pre-signature by the taker's 2-of-2 key (or repeat the
+stored one, which is never published), so the adaptor data in it stays between the two parties. (v1.0 makers answered
+step 3 for any pre-signature, without checking it.)
 
 The maker serializes commitments (`accept`, `proposeAdaptor`) so capacity and inventory checks see each other's
 reservations. **(protocol v1.1)**
@@ -799,6 +856,10 @@ reservations. **(protocol v1.1)**
 - `POST /swaps`, `POST /adaptor/swaps` and `POST …/presignature` are idempotent as described above. A taker MAY
   retry them on network errors, timeouts, 5xx and 429; the reference client retries twice with exponential backoff
   (500 ms base, 5 s cap, equal jitter) and a 30 s timeout per request.
+- A taker that crashed after sending a request and before persisting the answer re-sends the identical request on
+  resume; it never needs `GET /swaps/{id}` for data that only a `POST` answer carries. **(protocol v1.1)** In
+  particular the escrow id and the maker's escrow pre-signature reach the taker only in answers to
+  `POST …/presignature`, which it re-sends with its stored pre-signature until they appear (§9.2, step 10).
 - `GET /quote` is **not** idempotent (each call creates a quote); retrying only creates extra quotes that expire.
 - One quote backs at most one swap.
 
@@ -851,7 +912,8 @@ evaluates it:
 - on every poll while it waits for the pre-signature (adaptor) and for the funding, abandoning the swap once it fails;
 - right before locking, with the funding confirmed;
 - right before sending the lock transaction, with `evmLockSeconds = expiry − now_evm` (the time actually left), and
-  also requiring `expiry − now_evm ≥ 30` s.
+  also requiring `expiry − now_evm ≥ minEvmLockSecondsLeft` (a maker limit, default 30 s, the taker's default
+  `minClaimWindowSeconds`: a lock with less time left could not be claimed safely, so the maker abandons instead).
 
 The maker sets `expiry = now_evm + quote.evmLockSeconds` (EVM latest-block time when it prepares the lock) and
 persists the lock parameters before sending the lock. Vectors: `policy.json` → `safeWindows`, `policyChecks`.
@@ -878,13 +940,20 @@ both refund the EVM lock and claim the ZEC. On chains with slow or congested inc
 | `maxFundingExpiryBlocks` (maker limit) | 45 (`FUNDING_EXPIRY_DELTA + 5`) | The maker rejects a declared `fundingExpiryHeight` that is `≤ tip` or `> tip + 45`. |
 | `FUNDING_EXPIRY_MARGIN_BLOCKS` | 2 | A funding not mined once `tip > fundingExpiryHeight + 2` is dead: the maker abandons the reserved swap (stages `proposed` and `funding`) and releases its inventory; the taker, waiting for its funding to confirm, abandons on the same rule. |
 | `FUNDING_BROADCAST_MARGIN_BLOCKS` | 5 | The taker broadcasts the funding only while `tip + 5 ≤ expiryHeight`. |
+| Derived funding deadline (maker) | `tip + maxFundingExpiryBlocks`, tip at the accept | For an htlc accept **without** `fundingExpiryHeight` (v1.0 takers, which fund before accepting). The maker persists it with the swap and abandons the swap (releasing its inventory) once `tip > deadline + 2` if it has **never seen** the funding: neither its UTXO at the lock address nor the transaction in its node (mined or in the mempool). Once seen, the deadline no longer applies. |
 
 The maker decides "not mined" only when two independent signals agree: the outpoint `(fundingTxid, fundingVout)` is
 not among the lock address's confirmed UTXOs, **and** its node does not know the funding transaction or reports 0
 confirmations. A node transport error defers the decision to the next poll, so an error is never read as "not mined".
 The taker applies the same two signals (its node does not report the funding mined, and the lock address holds no
-such output; a node error means "unknown", never "not mined"). Without a declared expiry (v1.0 takers) the maker's
-reservation lasts until the window rule fails.
+such output; a node error means "unknown", never "not mined").
+
+**(protocol v1.1)** Without a declared expiry the funding's real expiry is unknown to the maker, so the derived
+deadline is stricter about what counts as alive: anything the maker observes of the funding (its UTXO, or a node that
+knows the transaction, even unmined) marks it seen, durably, and a seen funding is never dropped by the deadline, only
+by the window rule. A v1.0 taker accepts after its funding confirmed, so the maker normally sees it on its first poll;
+the deadline only releases reservations whose funding never shows up. A node transport error defers the decision as
+above. Adaptor proposals always carry a declared expiry (§6.5).
 
 ### 7.6 Other limits (defaults)
 
@@ -894,6 +963,8 @@ reservation lasts until the window rule fails.
 | `maxConcurrentSwaps` | maker | 10 swaps in non-terminal stages |
 | `maxOpenQuotes` | maker | 1,000 unexpired quotes |
 | `quoteTtlSeconds` | maker | 60 (`expiresAt = now + 60`) |
+| `maxFundingExpiryBlocks` | maker | 45 (§7.5) |
+| `minEvmLockSecondsLeft` | maker | 30 s of EVM time left when the maker sends its lock (§7.2) **(protocol v1.1)** |
 | `zcashFeeZat` | maker | 10,000 |
 | `maxZecAmountZat` | taker | 100,000,000,000 zat (1,000 ZEC) |
 | `minZcashLockBlocks` / `maxZcashLockBlocks` | taker | 10 / 288 |
@@ -976,11 +1047,11 @@ irreversible action (invariant 5).
 |---|---|---|---|
 | 1 | Taker | Generate a 32-byte secret `s`; `hashlock = sha256(s)`. Build the HTLC (claim = `quote.makerZcashPubkey`, refund = funding key, `refundHeight`). Build and sign the funding (output 0 = HTLC, `quote.zecAmountZat`; change to the return address; expiry `expiryHeight`). Do **not** broadcast. | Persist `s`, the funding hex/txid and the swap. |
 | 2 | Taker | **(protocol v1.1)** `POST /swaps` with `AcceptRequest` (including `fundingExpiryHeight = expiryHeight`), **before broadcasting**. The funding txid is final because v5 txids do not commit to signatures. | Check the quote has not expired (`expiresAt + 5 ≥ now`); otherwise abandon (nothing was broadcast). |
-| 3 | Maker | Checks of §6.5 (template byte for byte, its key, window, inventory, capacity, expiry bounds), consumes the quote, reserves the stablecoins, answers `Swap` (status `quoted`). | Persist the swap. |
+| 3 | Maker | Checks of §6.5 (template byte for byte, its key, capacity, expiry bounds, window, refund height at most `2 × zcashLockBlocks` ahead, inventory), then consumes the quote, reserves the stablecoins, answers `Swap` (status `quoted`). | Persist the swap (with the derived funding deadline if no expiry was declared, §7.5). |
 | 4 | Taker | Broadcast the funding. If the maker refused or the quote expired, nothing is broadcast and the swap is abandoned. | `tip + FUNDING_BROADCAST_MARGIN_BLOCKS ≤ expiryHeight`; persist that the funding was handed to a node. |
-| 5 | Maker | Wait for the funding UTXO at `(fundingTxid, fundingVout)` with `minZcashConfirmations`. Abandon if the window rule fails first, or **(v1.1)** once `tip > fundingExpiryHeight + 2` without the funding mined. | — |
+| 5 | Maker | Wait for the funding UTXO at `(fundingTxid, fundingVout)` with `minZcashConfirmations`. Abandon if the window rule fails first, or **(v1.1)** once `tip > fundingExpiryHeight + 2` without the funding mined, or, without a declared expiry, once `tip > deadline + 2` with the funding never seen (§7.5). | — |
 | 6 | Maker | Check `value ≥ quote.zecAmountZat`, the window rule with the current tip, inventory. Choose `expiry = now_evm + evmLockSeconds`; status `zcash_locked`. | Persist the lock parameters. |
-| 7 | Maker | Re-check `expiry − now_evm ≥ 30` and the window rule with the time left; `approve` if needed; `ParalockHTLC.lock(swap)` with `recipient = takerEvmAddress`, `amount = usdAmount`, `token = quote.token`. Status `evm_locked`. | — |
+| 7 | Maker | Re-check `expiry − now_evm ≥ minEvmLockSecondsLeft` (30 s) and the window rule with the time left; `approve` if needed; `ParalockHTLC.lock(swap)` with `recipient = takerEvmAddress`, `amount = usdAmount`, `token = quote.token`. Status `evm_locked`. | — |
 | 8 | Taker | Wait for funding ≥ 1 confirmation (abandon if `tip > expiryHeight + 2` unmined), then for the lock (keyed by its hashlock) with `minEvmConfirmations`; give up when the tip reaches `refundHeight`. | Verify: `recipient` = its chosen recipient, `token` = `quote.token`, `amount ≥ quote.usdAmount`, claim window (§7.3); the swap is active (rebuilt from `Locked` and matching the stored commitment). |
 | 9 | Taker | `claim(swap, s)` from its own account or a relayer. Status `evm_claimed`. | Re-check the claim window; the lock is still active. |
 | 10 | Maker | Read `preimage` from `Claimed`. Build the HTLC claim (to its payout address, branch id from its node, value = funding value − fee). | Persist the claim transaction before broadcasting. |
@@ -991,7 +1062,8 @@ irreversible action (invariant 5).
 `now_evm ≥ expiry` (anyone may call `refund`); if the taker's claim landed in the meantime, it claims the ZEC instead.
 
 **(protocol v1.0 compatibility)** v1.0 takers broadcast the funding first and send `AcceptRequest` (without
-`fundingExpiryHeight`) after it confirmed. A v1.1 maker accepts both. A v1.1 taker whose funding went out without a
+`fundingExpiryHeight`) after it confirmed. A v1.1 maker accepts both; for the latter it derives a funding deadline
+(§7.5), which never applies to a funding it has seen. A v1.1 taker whose funding went out without a
 reservation (a swap started by an older SDK, or a resumed lock-only demo) sends the accept after the funding confirms
 and **omits** `fundingExpiryHeight`: once the funding is mined the expiry no longer matters, and the maker would reject
 an expiry at or below its tip.
@@ -1001,15 +1073,15 @@ an expiry at or below its tip.
 | # | Who | Action | Before it, MUST |
 |---|---|---|---|
 | 1 | Taker | Check no network upgrade at or before `refundHeight + 1`. Generate `y` (`Y = y·G`) and a fresh 2-of-2 key. Build the 2-of-2 with `quote.makerZcashPubkey`; build and sign the funding (output 0 = 2-of-2, exactly `quote.zecAmountZat`, expiry `expiryHeight`). Do **not** broadcast. | Persist `y`, the 2-of-2 key and the funding. |
-| 2 | Taker | `POST /adaptor/swaps` with the proposal (`fundingExpiryHeight` **(protocol v1.1)**). | Quote not expired. |
-| 3 | Maker | Checks of §6.5, consumes the quote, reserves the stablecoins, signs the refund spend, creates the one-time signer; answers `AdaptorProposalAccepted`. | Persist the per-quote key, the signer key and the proposal. |
+| 2 | Taker | `POST /adaptor/swaps` with the proposal, including `fundingExpiryHeight = expiryHeight` (**(protocol v1.1)** required). | Quote not expired. |
+| 3 | Maker | Checks of §6.5, then consumes the quote, reserves the stablecoins, signs the refund spend, creates the one-time signer; answers `AdaptorProposalAccepted`. | Persist the per-quote key, the signer key and the proposal. |
 | 4 | Taker | Verify the answer: `swapId == quote.id`; `branchId` equals its own node's next branch id; `claimTo` is a valid address of its network; rebuild both spends (§3.12) and check the 2-of-2 address is its own; `makerRefundSignature` verifies (§3.11) on the refund sighash under `quote.makerZcashPubkey`; `address(signerPubkey) == signer`. | **Persist the refund signature** (from here the ZEC can always come back). |
 | 5 | Taker | Broadcast the funding (invariant 3). | `tip + 5 ≤ expiryHeight`. |
-| 6 | Taker | After ≥ 1 confirmation: pre-sign the 2-of-2 claim sighash with its 2-of-2 key, encrypted to `Y`; `POST /adaptor/swaps/{id}/presignature`. | Persist the pre-signature. |
+| 6 | Taker | After ≥ 1 confirmation: pre-sign the 2-of-2 claim sighash with its 2-of-2 key, encrypted to `Y`; `POST /adaptor/swaps/{id}/presignature`. From now on it sends this same pre-signature, never a new one. | Persist the pre-signature. |
 | 7 | Maker | `preVerify` it on its own claim sighash (§5.5); stage `funding`. Wait for the funding with `minZcashConfirmations` and **exactly** `amountZat`; re-check the window and inventory. (Abandon on the window rule, or **(v1.1)** funding expiry.) | — |
-| 8 | Maker | Choose `expiry = now_evm + evmLockSeconds` and a random 32-byte `salt`; `id = idOf(swap)` with `sender` = its escrow account, `recipient = takerEvmRecipient`, `signer`, `token = quote.token`, `amount = usdAmount`; pre-sign `claimDigest(id)` with the signer key, encrypted to `Y`. `adaptor.escrowId` and `adaptor.salt` appear in the `Swap` view. Status `zcash_locked`. | Persist the lock parameters and the pre-signature. |
-| 9 | Maker | Re-check (`≥ 30` s and the window rule with the time left); `ParalockAdaptorEscrow.lock(swap)`. Once the lock is on-chain, publish `adaptor.evmPreSignature` in the `Swap` view. Status `evm_locked`. | — |
-| 10 | Taker | Poll `GET /swaps/{id}` for `escrowId` and `evmPreSignature`; read the lock by id with `minEvmConfirmations`. | Verify recipient, token, `amount ≥ usdAmount`, `signer == accepted.signer`, `preVerify(signerPubkey, claimDigest(escrowId), Y, evmPre)` with the digest computed for **its own** chain id and escrow address, and the claim window. |
+| 8 | Maker | Choose `expiry = now_evm + evmLockSeconds` and a random 32-byte `salt`; `id = idOf(swap)` with `sender` = its escrow account, `recipient = takerEvmRecipient`, `signer`, `token = quote.token`, `amount = usdAmount`; pre-sign `claimDigest(id)` with the signer key, encrypted to `Y`. `adaptor.escrowId` and `adaptor.salt` appear in the taker's view. Status `zcash_locked`. | Persist the lock parameters and the pre-signature. |
+| 9 | Maker | Re-check (`≥ minEvmLockSecondsLeft`, 30 s, and the window rule with the time left); `ParalockAdaptorEscrow.lock(swap)`. Once the lock is on-chain, add `adaptor.evmPreSignature` to the taker's view, **never** to the public view. Status `evm_locked`. | — |
+| 10 | Taker | **(protocol v1.1)** Re-send its stored pre-signature (`POST /adaptor/swaps/{id}/presignature`, idempotent) until the answer (the taker's view) has `escrowId` and `evmPreSignature`; read the lock by id with `minEvmConfirmations`. It never needs `GET /swaps/{id}` for these (v1.0 takers polled it). | Verify recipient, token, `amount ≥ usdAmount`, `signer == accepted.signer`, `preVerify(signerPubkey, claimDigest(escrowId), Y, evmPre)` with the digest computed for **its own** chain id and escrow address, and the claim window. |
 | 11 | Taker | `(r, s) = adapt(evmPre, y)`, `v = 27 + recid`; `claim(swap, v, r, s)` directly or via a relayer. | Re-check the claim window; the lock is active. |
 | 12 | Maker | Read `(v, r, s)` from `Claimed(id, …)`; `y = extract(evmPre, (r, s), Y)`; complete the taker's Zcash pre-signature with `y` (`DER ‖ 01`), sign the claim with its per-quote key, assemble the scriptSig in key order. | Persist the claim before broadcasting. |
 | 13 | Maker | Broadcast until `minZcashConfirmations`. | — |
@@ -1077,30 +1149,32 @@ the other.
   60 s TTL bound the state; beyond it the maker answers `busy` to everyone.
 - **Commitments** (`POST /swaps`, `POST /adaptor/swaps`) consume a quote, reserve inventory and take one of
   `maxConcurrentSwaps` (10) slots **before any ZEC moves**. In htlc mode the maker cannot even check that the declared
-  funding exists. An attacker can therefore occupy all slots or all inventory for free:
-  - **(protocol v1.1)** with a declared `fundingExpiryHeight`: until the tip exceeds `fundingExpiryHeight + 2`, at most
-    48 blocks after the commitment (~1 h on mainnet);
-  - without one (v1.0 takers, or anyone who omits the optional field): until the window rule fails. In adaptor mode the
-    refund height is at most `tip + 2 × zcashLockBlocks`, so this ends after at most ~192 blocks with mainnet
-    defaults. **In htlc mode the reference maker puts no upper bound on `refundHeight − tip`**, so an `AcceptRequest`
-    without `fundingExpiryHeight` whose HTLC refunds far in the future holds a slot and its inventory reservation
-    until that far height approaches (Appendix A, item 6).
+  funding exists. An attacker can therefore occupy slots or inventory without locking anything, but **(protocol
+  v1.1)** only for a bounded time:
+  - with a declared `fundingExpiryHeight`: until the tip exceeds `fundingExpiryHeight + 2`, at most 48 blocks after the
+    commitment (~1 h on mainnet);
+  - an htlc accept without one: until the tip exceeds the derived deadline `+ 2` (§7.5), also at most 48 blocks, as
+    long as the maker never sees a transaction that pays the lock at the declared outpoint;
+  - once such a transaction exists (the attacker really broadcasts a funding but keeps it unmined, e.g. in the
+    mempool with no expiry): until the window rule fails. The refund height is at most `tip + 2 × zcashLockBlocks` in
+    both modes, so this ends after at most ~192 blocks (~4 h) with mainnet defaults. A funding that gets mined ends
+    the griefing: the maker locks, or abandons at once if the value is short.
 
-  Makers SHOULD rate-limit commitments per client, SHOULD bound `refundHeight − tip` in htlc mode as in adaptor mode,
-  SHOULD consider requiring `fundingExpiryHeight`, MAY require the taker to be authenticated or to show the signed
-  funding transaction, and SHOULD size `maxConcurrentSwaps` and inventory with this in mind.
-- An htlc commitment that fails after the quote is consumed (§6.5, step 5) leaves the quote used; the taker must ask
-  for a new one.
+  Adaptor proposals always declare an expiry (§6.5). Makers SHOULD still rate-limit commitments per client, MAY
+  require the taker to be authenticated or to show the signed funding transaction, and SHOULD size
+  `maxConcurrentSwaps` and inventory with this in mind.
+- **(protocol v1.1)** A refused commitment does not consume its quote (§6.5), so a taker can fix the request and
+  retry with the same quote while it lasts.
 
 ### 10.5 What each party must verify, step by step
 
 | Before … | Taker MUST verify | Maker MUST verify |
 |---|---|---|
-| committing (accept / proposal) | §6.7 quote checks; RPC chain ids; quote not expired; (adaptor) no upgrade before `refundHeight + 1` | §6.5: template byte for byte and its own key (htlc); quote unused, unexpired, right mode; window rule; funding-expiry bounds (v1.1); capacity; inventory; (adaptor) amount, distinct keys, refund-height bound, no upgrade |
+| committing (accept / proposal) | §6.7 quote checks; RPC chain ids; quote not expired; (adaptor) no upgrade before `refundHeight + 1` | §6.5, all before consuming the quote: template byte for byte and its own key (htlc); quote unused, unexpired, right mode; capacity; funding-expiry bounds (v1.1; required in adaptor mode); window rule; refund-height bound (both modes, v1.1); inventory; (adaptor) amount, distinct keys, no upgrade |
 | broadcasting the funding | (adaptor) §9.2 step 4 in full, refund signature persisted; (htlc v1.1) the maker answered 200; the funding can still be mined (`tip + 5 ≤ expiry`) | — |
 | accepting a pre-signature | — | `preVerify` on its own claim sighash with the taker's key and `Y` |
-| locking stablecoins | — | funding at the exact outpoint with `minZcashConfirmations`; value (htlc ≥ quote, adaptor = proposal); window rule now and with the EVM time actually left; ≥ 30 s left; inventory; lock parameters persisted |
-| revealing (claiming) | lock exists with `minEvmConfirmations`; recipient, token, amount ≥ quoted; (adaptor) signer and `preVerify` with its own `claimDigest`; claim window, re-checked just before sending; lock not refunded | — |
+| locking stablecoins | — | funding at the exact outpoint with `minZcashConfirmations`; value (htlc ≥ quote, adaptor = proposal); window rule now and with the EVM time actually left; ≥ `minEvmLockSecondsLeft` (30 s) left; inventory; lock parameters persisted |
+| revealing (claiming) | lock exists with `minEvmConfirmations`; recipient, token, amount ≥ quoted; (adaptor) signer and `preVerify` with its own `claimDigest`, on the escrow id and pre-signature from the taker's view (§9.2 step 10); claim window, re-checked just before sending; lock not refunded | — |
 | claiming ZEC | — | the secret from `Claimed` (htlc: `sha256(preimage) = hashlock`; adaptor: `extract` checks `y·G = Y`); claim persisted before broadcast |
 | refunding | `tip ≥ refundHeight`; the lock output is unspent | `now_evm ≥ expiry`; the lock is still active (else claim the ZEC) |
 
@@ -1128,9 +1202,16 @@ Zcash, because the HTLC's claim branch also requires the maker's signature.
 ### 10.9 Privacy (adaptor mode)
 
 Nothing on either chain links the legs, but:
-- `GET /swaps/{id}` is unauthenticated and returns `adaptorPoint` and, after the lock, `evmPreSignature`. Anyone who
-  learns the swap id (the quote UUID) can extract `y` from the public `Claimed` event and link the two legs. Makers
-  SHOULD keep swap ids private or authenticate this endpoint.
+- **(protocol v1.1)** The adaptor point `Y`, both pre-signatures, the signer's public key, the salt and the escrow id
+  stay between the two parties: the maker's public view (`GET /swaps/{id}`, `GET /swaps`) never contains them, and the
+  maker sends them only in answers to the taker's own `POST`s (§6.4, §6.5). (v1.0 makers served `adaptorPoint` and
+  `evmPreSignature` on `GET /swaps/{id}`, so anyone who learned a swap id could extract `y` from the public `Claimed`
+  event.)
+- The swap id itself is still sensitive: the public view of a swap lists its Zcash funding and claim txids, its EVM
+  lock, claim and refund transactions, and its amounts, so anyone who learns the id (the quote UUID, known to the two
+  parties) can pair the two legs from the maker's answer, with no cryptography needed. Takers SHOULD keep swap ids
+  private. Makers SHOULD treat them as sensitive wherever they appear (the reference maker writes them to its log) and
+  MAY authenticate `GET /swaps/{id}`. `GET /swaps` is off by default for the same reason.
 - Amounts and timing still correlate; the 2-of-2 and the escrow interaction are visible. See `docs/PRIVACY.md`.
 
 ### 10.10 Other
@@ -1149,8 +1230,13 @@ An implementation conforms to protocol v1.1 if it:
 2. builds the same transactions, scripts, digests, ids and messages for the same inputs (byte for byte, including
    fees, change and placeholder sizes), with RFC 6979 signing where signatures are deterministic;
 3. performs every MUST check in §§3–7 and §10.5 before the corresponding step;
-4. interoperates with v1.0 peers: makers accept requests without `fundingExpiryHeight`, takers tolerate quotes without
-   `chainId`.
+4. interoperates with v1.0 peers where the protocol allows it: makers accept htlc `AcceptRequest`s without
+   `fundingExpiryHeight` (with the derived deadline of §7.5), and takers tolerate quotes without `chainId`. Private
+   mode does not interoperate: a v1.0 taker reads the escrow pre-signature from `GET /swaps/{id}`, which a v1.1 maker
+   never serves (§10.9), so it could fund but never claim. A v1.1 maker therefore refuses adaptor proposals without
+   `fundingExpiryHeight` (only v1.0 takers omit it), before anything is locked; a v1.1 taker gets the adaptor data
+   from the `POST …/presignature` answer, which a v1.0 maker also returns (it answers with its full view), so v1.1
+   takers still work with v1.0 makers.
 
 Run the reference checks with `pnpm --filter @paralock/sdk exec vitest run test/vectors.test.ts` and regenerate the
 vectors with `pnpm build && pnpm exec tsx spec/generate-vectors.ts` (see `spec/vectors/README.md`).
@@ -1159,38 +1245,80 @@ vectors with `pnpm build && pnpm exec tsx spec/generate-vectors.ts` (see `spec/v
 
 ## Appendix A. Implementation notes and discrepancies
 
-Observed in the reference implementation while writing this spec (paths relative to the repository root, line
-numbers as of this writing). Only item 6 affects a party's safety margin (the maker's capacity); the others are
-listed so other implementations make a deliberate choice.
+Items 1–11 were observed in the reference implementation while writing this spec, items 12–21 while porting it to
+Rust (`crates/paralock-core`, which enforces all of them). All are **resolved in protocol v1.1** (this revision) except
+item 11, which is informative. Paths are relative to the repository root; line numbers are as of the fix. The
+vectors cover every resolved item that has observable behavior.
 
-1. **Lenient transaction parser.** `parseTx` (`packages/zcash/src/tx.ts:95`) does not validate the shielded part, and
-   `Reader.compactSize` (`packages/zcash/src/bytes.ts:83`) accepts non-canonical CompactSizes (e.g. `fd 05 00`).
-   Nodes reject both. Parsers SHOULD be strict.
-2. **Sighash type.** `transparentSighash` (`packages/zcash/src/sighash.ts:46`) masks the hash type with `0x1f` and
-   computes a digest for any value; v5 consensus allows only the six canonical values. Paralock only uses
-   `SIGHASH_ALL`, and `verifyMultisigSignature` (`packages/zcash/src/multisig.ts:148`) rejects any other type byte.
-3. **Template parsing vs. curve checks.** `parseHtlcRedeemScript` (`packages/zcash/src/script.ts:176`) checks key
-   prefixes and lengths only; `htlcFromRedeemScript` (`packages/zcash/src/htlc.ts:114`, used by the maker) also checks
-   that the keys are on the curve. Use the latter.
-4. **Error wording.** `assertSafeWindows` (`packages/sdk/src/policy.ts:66`) says the Zcash time "must exceed" the
-   factor × EVM time, but equality passes (`<` at the check). The spec (§7.2) follows the code: equality is safe.
-5. **htlc quotes are consumed early.** `Maker.accept` (`packages/sdk/src/maker.ts:467`) consumes the quote before the
-   claim-key (`:469`), capacity, window and inventory checks, so a failed htlc commitment burns the quote (vector:
-   `messages.json`, "Quote 2 again …"). `commitProposal` (`:524`) consumes it only after all its checks (`:543`). The
-   v1.1 funding-expiry check (`:466`) runs before consumption in both.
-6. **No refund-height upper bound in htlc mode (griefing).** `commitProposal` rejects `refundHeight − tip > 2 ×
-   zcashLockBlocks` (`packages/sdk/src/maker.ts:539`), but `accept` has no upper bound. Because `fundingExpiryHeight`
-   is optional, an htlc commitment that omits it and uses a far refund height keeps a concurrency slot and its
-   inventory reservation in stage `funding` until the window rule fails, which can be arbitrarily late (§10.4;
-   vector: `messages.json`, "htlc accept without fundingExpiryHeight and a refund 100,000 blocks away"). Ten such
-   requests exhaust the default `maxConcurrentSwaps`.
-7. **Hard-coded 30 s.** The maker's minimum EVM time left before sending a lock (`packages/sdk/src/maker.ts:791`) is a
-   constant, not a policy field; it equals the taker's default `minClaimWindowSeconds`.
-8. **"Every endpoint is idempotent".** `HttpMakerApiOptions.retries` (`packages/sdk/src/http.ts:33`) says every maker
-   endpoint is idempotent; `GET /quote` is not (retries create extra quotes, which expire).
-9. **Hex convention exceptions.** `AGENTS.md:80` says hex values are `0x`-prefixed except Zcash txids; encoded adaptor
-   pre-signatures (`takerPreSignature`, `Swap.adaptor.evmPreSignature`) are bare hex as well.
-10. **Swap view exposure.** `GET /swaps/{id}` serves `adaptorPoint` and `evmPreSignature` without authentication
-    (§10.9), while `docs/PRIVACY.md:39` says `Y` is something "only the two parties ever see".
-11. **Branch id constant.** `BRANCH_ID_NU6_3 = 0x37a5165b` (`packages/zcash/src/tx.ts:12`) is only a default; the SDK
-    always passes the node's value.
+1. **Lenient transaction parser. Resolved.** `Reader.compactSize` (`packages/zcash/src/bytes.ts:86`) rejects
+   non-canonical CompactSizes (`fd 05 00`, `fe ff ff 00 00`, …), as consensus does, so `parseTx` rejects them in
+   counts and script lengths (§2.1, §3.14; vectors: `zcash-tx-parse.json` → `invalid`). `parseTx`
+   (`packages/zcash/src/tx.ts:116`) still leaves the shielded part opaque (`shieldedRaw`); its JSDoc lists exactly what
+   is and isn't validated. No decision reads `shieldedRaw` except `transparentTxid`'s exact `00 00 00` comparison, on
+   transactions Paralock built itself; the maker's funding check (`fundsLock`, `packages/sdk/src/maker.ts:1054`) reads
+   only a transparent output.
+2. **Sighash type. Resolved.** `transparentSighash` (`packages/zcash/src/sighash.ts:38`) throws for any hash type other
+   than `0x01`, `0x02`, `0x03`, `0x81`, `0x82` and `0x83` instead of masking it with `0x1f` (§3.8; vectors:
+   `zcash-sighash.json` → `invalidHashTypes`). `verifyMultisigSignature` still accepts only `SIGHASH_ALL`.
+3. **Template parsing vs. curve checks. Resolved.** `parseHtlcRedeemScript` (`packages/zcash/src/script.ts:190`) checks
+   that both keys are points on the curve, like `htlcFromRedeemScript` (`packages/zcash/src/htlc.ts:141`). The
+   conformance test checks both against `zcash-htlc.json` → `invalidScripts`.
+4. **Error wording. Resolved.** `assertSafeWindows` (`packages/sdk/src/policy.ts:64`) now says the Zcash time "must be
+   at least" the factor × EVM time, matching the check (equality is safe, §7.2; vectors: `policy.json`).
+5. **htlc quotes consumed early. Resolved.** `Maker.accept` (`packages/sdk/src/maker.ts:522`) runs every check first
+   and consumes the quote last (`:543`), inside the commitment lock, like `commitProposal`, so a refused accept leaves
+   the quote usable (§6.5; vector: `messages.json`, "Quote 2 again with a safe HTLC: accepted, …").
+6. **No refund-height upper bound in htlc mode (griefing). Resolved.** `accept` rejects `refundHeight − tip >
+   2 × zcashLockBlocks` (`:541`), as `commitProposal` does. An accept without `fundingExpiryHeight` gets the derived
+   deadline `tip + maxFundingExpiryBlocks` (`:546`), persisted as `fundingDeadline`; `fundingExpired` (`:1028`) drops
+   the reservation once the tip is 2 blocks past it, but only if the maker has never seen a transaction paying the lock
+   at the declared outpoint (persisted as `fundingSeenHeight`), so a funding it saw is never abandoned by this rule
+   (§7.5, §10.4; vectors: `messages.json`, "… a refund 100,000 blocks away: rejected …", "… exactly 288 blocks away:
+   accepted …"). Adaptor proposals must now declare `fundingExpiryHeight` (§6.5).
+7. **Hard-coded 30 s. Resolved.** The maker's minimum EVM time left before it sends a lock is the maker limit
+   `minEvmLockSecondsLeft` (default 30, `packages/sdk/src/maker.ts:79`, used at `:883`; §7.2, §7.6; vector:
+   `policy.json` → `defaults`).
+8. **"Every endpoint is idempotent". Resolved.** The `HttpMakerApiOptions.retries` JSDoc (`packages/sdk/src/http.ts:34`)
+   says the POSTs are idempotent for identical requests and `GET /quote` is not (a retry may leave an extra quote,
+   which expires).
+9. **Hex convention exceptions. Resolved.** `AGENTS.md:79` lists encoded adaptor pre-signatures (`takerPreSignature`,
+   `Swap.adaptor.evmPreSignature`, 324 hex characters) as bare hex, with Zcash txids.
+10. **Swap view exposure. Resolved.** `Maker.getSwap` / `listSwaps` (`packages/sdk/src/maker.ts:493`, via
+    `publicView`, `:240`) and so `GET /swaps/{id}` and `GET /swaps` omit `adaptorPoint` and `adaptor`. The taker's view,
+    with them, is only the answer to `POST …/presignature` (`:678`), which requires the stored or another valid
+    pre-signature; the taker polls it for the lock (`packages/sdk/src/taker.ts:814`) instead of `GET /swaps/{id}`, and
+    re-sends the same request after a crash (§6.4–6.6, §9.2, §10.9; vectors: `messages.json`, "The adaptor swap by id
+    …: the public view, …"). `docs/PRIVACY.md` now states that `Y` stays with the two parties, and that a swap id still
+    lets its holder pair the legs through the public view.
+11. **Branch id constant (informative).** `BRANCH_ID_NU6_3 = 0x37a5165b` (`packages/zcash/src/tx.ts:15`) is no longer
+    a default (item 13): every builder requires the node's value.
+12. **Optional network in the builders. Resolved.** `TxOptions.network` (`packages/zcash/src/htlc.ts:76`) is required,
+    so no builder can skip the address-network check (§3.1); `assertTxOptions` (`:108`) also checks it at run time.
+13. **Default branch id. Resolved.** `TxOptions.branchId` (`:64`) is required and must be a non-zero 32-bit value; the
+    `BRANCH_ID_NU6_3` default is gone (the constant stays exported). A forgotten branch id used to sign for NU6.3
+    silently, which is invalid on a chain running another upgrade (e.g. a testnet on NU7, `0x77190ad9`) (§3.7;
+    vector: `zcash-htlc.json` → `transactions.validationErrors`, "branch id 0").
+14. **Negative or oversized fee override. Resolved.** A `fee` override must be ≥ 0 (`assertTxOptions`) and below the
+    value spent (`:201`, `:242`, `packages/zcash/src/multisig.ts:102`) (§3.9; vectors: `transactions.validationErrors`,
+    "negative fee override", "fee override equal to the HTLC value", "fee override not below the inputs").
+15. **Claim without a preimage check. Resolved.** `buildHtlcClaim` checks the preimage is 32 bytes and hashes to the
+    hashlock before signing (`packages/zcash/src/htlc.ts:259`) (§3.9; vector: "a 32-byte preimage whose sha256 is not
+    the hashlock").
+16. **Unchecked lock UTXO value. Resolved.** HTLC and 2-of-2 spends require `0 < utxo.value ≤ MAX_MONEY`
+    (`assertUtxoValue`, `:119`; `htlc.ts:233`, `multisig.ts:84`) on top of the existing fee-plus-dust check (§3.9;
+    vectors: `transactions.errors`, "… above MAX_MONEY"; `transactions.validationErrors`, "HTLC UTXO value 0").
+17. **Refund height of the adaptor spends. Resolved.** `adaptorSpends` requires `1 ≤ refundHeight < 500,000,000`
+    (`packages/sdk/src/adaptor-protocol.ts:101`); with 0 the pre-signed refund would be valid at once (§3.12;
+    vectors: `zcash-multisig.json` → `invalidAdaptorSpends`).
+18. **Signatures by any key. Resolved.** `verifyMultisigSignature` (`packages/zcash/src/multisig.ts:147`) returns false
+    for a public key that is not one of the 2-of-2's keys, even with a valid signature on the right sighash (§3.11;
+    vector: `signatureChecks`, "… by a key outside the 2-of-2").
+19. **`finalizeMultisigSpend({ verify: false })`. Resolved.** The option is gone (`:121`): both signatures are always
+    verified. Tests that need a spend only consensus rejects assemble it themselves.
+20. **Unbounded nonce loops. Resolved.** `hedgedNonce` and `preSign` (`packages/adaptor/src/index.ts:49`, `:131`) give
+    up after `MAX_NONCE_ATTEMPTS` (8, `:41`) unusable draws and throw, instead of looping forever on a broken RNG
+    (§5.2, §5.3; tested by replacing sha512 in `packages/adaptor/test/nonce-bound.test.ts`).
+21. **Pre-v5 txids over unparsed bytes. Resolved.** `decodeTx` (`packages/lightwalletd/src/txid.ts:62`) parses v1–v4
+    transactions to their last byte (Sapling descriptions, JoinSplits, keys and signatures, fOverwintered and version
+    group id) and throws on trailing data (`:105`) before hashing (§3.14; tested against the official ZIP 143 and
+    ZIP 243 transactions, vendored in `packages/lightwalletd/test/`).

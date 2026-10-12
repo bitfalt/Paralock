@@ -105,6 +105,8 @@ const makerPayout = key("maker-payout-key");
 const takerMultisig = key("taker-multisig-key");
 const makerQuoteKey = key("maker-quote-key");
 const signerKey = key("evm-signer-key");
+/** A key in no lock: for signatures that are valid ECDSA but by the wrong party. */
+const outsiderKey = key("outsider-key");
 const secret = labelHex("htlc-secret");
 const hashlock = sha256hex(unhex(secret));
 const adaptorSecret = labelHex("adaptor-secret");
@@ -462,10 +464,13 @@ function htlcVectors() {
     },
   };
 
+  // `fee` and `branchId`, when present, override the builder options (the fee override and the branch id are checked
+  // like any other input; there is no default branch id).
+  type Overrides = { fee?: bigint; branchId?: number };
   type ErrorCase =
-    | { description: string; kind: "funding"; key: string; utxos: zcash.Utxo[]; amount: bigint }
-    | { description: string; kind: "claim"; key: string; utxoValue: bigint; preimage: string }
-    | { description: string; kind: "refund"; key: string; utxoValue: bigint };
+    | ({ description: string; kind: "funding"; key: string; utxos: zcash.Utxo[]; amount: bigint } & Overrides)
+    | ({ description: string; kind: "claim"; key: string; utxoValue: bigint; preimage: string } & Overrides)
+    | ({ description: string; kind: "refund"; key: string; utxoValue: bigint } & Overrides);
   const keys: Record<string, zcash.KeyPair> = { "taker-funding-key": takerFunding, "maker-zcash-key": makerZcash };
   const errorCases: ErrorCase[] = [
     { description: "funding: inputs do not cover amount + fee", kind: "funding", key: "taker-funding-key", utxos: [utxo("utxo/g", 0, 100_005_000n)], amount: 100_000_000n },
@@ -476,17 +481,37 @@ function htlcVectors() {
     { description: "claim: signing key is not the claim key", kind: "claim", key: "taker-funding-key", utxoValue: 100_000_000n, preimage: secret },
     { description: "claim: 31-byte preimage", kind: "claim", key: "maker-zcash-key", utxoValue: 100_000_000n, preimage: secret.slice(2) },
     { description: "refund: signing key is not the refund key", kind: "refund", key: "maker-zcash-key", utxoValue: 100_000_000n },
+    { description: "claim: a 32-byte preimage whose sha256 is not the hashlock (checked before signing)", kind: "claim", key: "maker-zcash-key", utxoValue: 100_000_000n, preimage: sha256hex(utf8("not the secret")) },
+    { description: "refund: HTLC UTXO value above MAX_MONEY", kind: "refund", key: "taker-funding-key", utxoValue: zcash.MAX_MONEY + 1n },
   ];
-  const errors = errorCases.map((c) => {
+  // Inputs every implementation must refuse, but where it may refuse them at another layer (e.g. an unsigned fee type,
+  // a branch id type that can't be 0) or with another message: only the refusal is normative.
+  const validationCases: ErrorCase[] = [
+    { description: "claim: HTLC UTXO value 0", kind: "claim", key: "maker-zcash-key", utxoValue: 0n, preimage: secret },
+    { description: "refund: negative fee override", kind: "refund", key: "taker-funding-key", utxoValue: 100_000_000n, fee: -1n },
+    { description: "refund: fee override equal to the HTLC value", kind: "refund", key: "taker-funding-key", utxoValue: 100_000_000n, fee: 100_000_000n },
+    { description: "funding: fee override not below the inputs", kind: "funding", key: "taker-funding-key", utxos: [utxo("utxo/a", 1, 150_000_000n)], amount: 100_000_000n, fee: 150_000_000n },
+    { description: "funding: branch id 0 (there is no default branch id)", kind: "funding", key: "taker-funding-key", utxos: [utxo("utxo/a", 1, 150_000_000n)], amount: 100_000_000n, branchId: 0 },
+  ];
+  const errorJson = (c: ErrorCase) => {
     const k = keys[c.key]!;
+    const opts = { branchId: c.branchId ?? BRANCH, network: NETWORK, ...(c.fee !== undefined ? { fee: c.fee } : {}) };
     const error = thrown(() => {
-      if (c.kind === "funding") zcash.buildHtlcFunding({ htlc, amount: c.amount, utxos: c.utxos, key: k, branchId: BRANCH, network: NETWORK });
-      else if (c.kind === "claim") zcash.buildHtlcClaim({ htlc, utxo: { ...htlcUtxo, value: c.utxoValue }, key: k, preimage: c.preimage, to: payoutAddress, branchId: BRANCH, network: NETWORK });
-      else zcash.buildHtlcRefund({ htlc, utxo: { ...htlcUtxo, value: c.utxoValue }, key: k, to: takerAddress, branchId: BRANCH, network: NETWORK });
+      if (c.kind === "funding") zcash.buildHtlcFunding({ htlc, amount: c.amount, utxos: c.utxos, key: k, ...opts });
+      else if (c.kind === "claim") zcash.buildHtlcClaim({ htlc, utxo: { ...htlcUtxo, value: c.utxoValue }, key: k, preimage: c.preimage, to: payoutAddress, ...opts });
+      else zcash.buildHtlcRefund({ htlc, utxo: { ...htlcUtxo, value: c.utxoValue }, key: k, to: takerAddress, ...opts });
     });
-    return { ...c, ...("utxos" in c ? { utxos: c.utxos.map(utxoJson) } : {}), ...(c.kind !== "funding" ? { utxo: utxoJson({ ...htlcUtxo, value: c.utxoValue }) } : {}), error };
-  });
-  for (const e of errors) if (!e.error) throw new Error(`expected an error: ${e.description}`);
+    return {
+      ...c,
+      ...(c.branchId !== undefined ? { branchId: branchHex(c.branchId) } : {}),
+      ...("utxos" in c ? { utxos: c.utxos.map(utxoJson) } : {}),
+      ...(c.kind !== "funding" ? { utxo: utxoJson({ ...htlcUtxo, value: c.utxoValue }) } : {}),
+      error,
+    };
+  };
+  const errors = errorCases.map(errorJson);
+  const validationErrors = validationCases.map(errorJson);
+  for (const e of [...errors, ...validationErrors]) if (!e.error) throw new Error(`expected an error: ${e.description}`);
 
   const claimScriptSig = h(claimSigned.tx.inputs[0]!.scriptSig);
   const preimageExtraction = [
@@ -502,7 +527,7 @@ function htlcVectors() {
   return {
     vectors: {
       description:
-        "Paralock HTLC (htlc mode): redeem script template, P2SH encoding, and the funding, claim and refund transactions exactly as @paralock/zcash builds them. Signatures are RFC 6979 deterministic, so every signed transaction is reproducible byte for byte.",
+        "Paralock HTLC (htlc mode): redeem script template, P2SH encoding, and the funding, claim and refund transactions exactly as @paralock/zcash builds them. Signatures are RFC 6979 deterministic, so every signed transaction is reproducible byte for byte. transactions.errors are built with the fixture options (branch id BRANCH_ID_NU6_3, network testnet, conventional fee); transactions.validationErrors may override them with `fee` (zatoshi) or `branchId` and must be refused too, but only the refusal is normative there.",
       fixtures: FIXTURES,
       constants: {
         PREIMAGE_SIZE: zcash.PREIMAGE_SIZE,
@@ -525,7 +550,7 @@ function htlcVectors() {
       scripts,
       invalidScripts,
       invalidParams,
-      transactions: { funding: [f1, f2, f3, f4, f5], claim: [claim, claimSmall], refund: [refund], errors },
+      transactions: { funding: [f1, f2, f3, f4, f5], claim: [claim, claimSmall], refund: [refund], errors, validationErrors },
       preimageExtraction,
     },
     htlc,
@@ -743,7 +768,19 @@ async function multisigVectors() {
     { description: "maker's claim signature checked against the refund: rejected", spend: "refund", pubkey: h(makerQuoteKey.publicKey), signature: h(makerClaimSig) },
     { description: "adaptor-completed taker claim signature: valid", spend: "claim", pubkey: h(takerMultisig.publicKey), signature: h(takerClaimSig) },
     { description: "8-byte garbage: rejected", spend: "claim", pubkey: h(takerMultisig.publicKey), signature: "3006020101020101" },
+    {
+      description: "a valid low-S SIGHASH_ALL signature on the refund sighash by a key outside the 2-of-2: rejected",
+      spend: "refund",
+      pubkey: h(outsiderKey.publicKey),
+      signature: h(zcash.signDigest(spends.refund.sighash, outsiderKey.privateKey, zcash.SIGHASH_ALL)),
+    },
   ].map((v) => ({ ...v, valid: zcash.verifyMultisigSignature(v.spend === "refund" ? spends.refund : spends.claim, v.pubkey, v.signature) }));
+  const invalidAdaptorSpends = [
+    { description: "refundHeight 0: the refund would be spendable at once", refundHeight: 0 },
+    { description: "refundHeight 500000000: a timestamp, not a height", refundHeight: 500_000_000 },
+    { description: "refundHeight 1.5", refundHeight: 1.5 },
+  ].map((v) => ({ ...v, error: thrown(() => sdk.adaptorSpends({ ...spendArgs, refundHeight: v.refundHeight })) ?? null }));
+  for (const v of invalidAdaptorSpends) if (v.error === null) throw new Error(`adaptorSpends unexpectedly accepted: ${v.description}`);
 
   return {
     vectors: {
@@ -770,6 +807,7 @@ async function multisigVectors() {
         },
       },
       signatureChecks,
+      invalidAdaptorSpends,
     },
     claimPre,
     fundingSigned,
@@ -859,13 +897,19 @@ function txParseVectors(paralockTxs: { description: string; hex: string }[]) {
     { description: "wrong version group id", hex: `${t.slice(0, 8)}0b27a726${t.slice(16)}` },
     { description: "truncated inside the first input", hex: t.slice(0, 2 * 60) },
     { description: "input count with a 64-bit CompactSize (0xff)", hex: `${t.slice(0, 40)}ff${"00".repeat(8)}` },
+    { description: "input count 1 as a non-canonical 3-byte CompactSize (fd 01 00)", hex: `${t.slice(0, 40)}fd0100${t.slice(42)}` },
+    { description: "input count 1 as a non-canonical 5-byte CompactSize (fe 01 00 00 00)", hex: `${t.slice(0, 40)}fe01000000${t.slice(42)}` },
+    {
+      description: "first scriptSig length as a non-canonical 3-byte CompactSize (fd <len> 00)",
+      hex: `${t.slice(0, 114)}fd${t.slice(114, 116)}00${t.slice(116)}`,
+    },
     { description: "empty", hex: "" },
   ].map((v) => ({ ...v, error: thrown(() => zcash.parseTx(v.hex)) ?? null }));
   for (const v of invalid) if (v.error === null) throw new Error(`parse unexpectedly succeeded: ${v.description}`);
 
   return {
     description:
-      "v5 transaction parsing (header and transparent bundle) and ZIP 244 txids. Txids are shown in display order (the byte-reversed BLAKE2b output, as RPCs print them); txidInternalOrder is the raw digest. For official vectors with shielded bundles the txid comes from the official file (the TypeScript code does not compute shielded digests).",
+      "v5 transaction parsing (header and transparent bundle) and ZIP 244 txids. Txids are shown in display order (the byte-reversed BLAKE2b output, as RPCs print them); txidInternalOrder is the raw digest. For official vectors with shielded bundles the txid comes from the official file (the TypeScript code does not compute shielded digests). Every CompactSize must be canonical (shortest form); the bytes after the transparent bundle are not parsed (shieldedRaw), and a transaction is transparent-only only if they are exactly 00 00 00.",
     valid: [...valid, ...official],
     invalid,
   };
@@ -880,10 +924,22 @@ function sighashVectors(txs: { description: string; signed: zcash.SignedTx; prev
     ["SIGHASH_NONE|ANYONECANPAY", 0x82],
     ["SIGHASH_SINGLE|ANYONECANPAY", 0x83],
   ] as const;
+  const first = txs[0]!;
+  const invalidHashTypes = [
+    { description: "0x00 (no base type)", hashType: 0x00 },
+    { description: "0x04 (unknown base type; v4 and Bitcoin would treat it as ALL)", hashType: 0x04 },
+    { description: "0x80 (ANYONECANPAY with no base type)", hashType: 0x80 },
+    { description: "0x84 (ANYONECANPAY with an unknown base type)", hashType: 0x84 },
+    { description: "0x41 (Bitcoin Cash FORKID | ALL)", hashType: 0x41 },
+    { description: "0x21 (a bit between the base type and ANYONECANPAY)", hashType: 0x21 },
+    { description: "0xff", hashType: 0xff },
+  ].map((v) => ({ ...v, error: thrown(() => zcash.transparentSighash(first.signed.tx, 0, first.prevouts, v.hashType)) ?? null }));
+  for (const v of invalidHashTypes) if (v.error === null) throw new Error(`hash type unexpectedly accepted: ${v.description}`);
   return {
     description:
-      "ZIP 244 transparent signature digests for all six hash types on Paralock-built transactions (Paralock itself only signs SIGHASH_ALL). For a P2SH input the scriptPubKey hashed is the P2SH script, not the redeem script. scriptSigs are not committed, so the digest of a signed transaction equals that of its unsigned form.",
+      "ZIP 244 transparent signature digests for all six hash types on Paralock-built transactions (Paralock itself only signs SIGHASH_ALL). For a P2SH input the scriptPubKey hashed is the P2SH script, not the redeem script. scriptSigs are not committed, so the digest of a signed transaction equals that of its unsigned form. Any other hash type is invalid in v5 and must be rejected, not masked (invalidHashTypes, on input 0 of the first transaction).",
     hashTypes: Object.fromEntries(types.map(([n, v]) => [n, v])),
+    invalidHashTypes,
     vectors: txs.map(({ description, signed, prevouts }) => ({
       description,
       hex: signed.hex,

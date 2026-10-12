@@ -1,5 +1,5 @@
 {
-  "description": "ZIP 244 transparent signature digests for all six hash types on Paralock-built transactions (Paralock itself only signs SIGHASH_ALL). For a P2SH input the scriptPubKey hashed is the P2SH script, not the redeem script. scriptSigs are not committed, so the digest of a signed transaction equals that of its unsigned form.",
+  "description": "ZIP 244 transparent signature digests for all six hash types on Paralock-built transactions (Paralock itself only signs SIGHASH_ALL). For a P2SH input the scriptPubKey hashed is the P2SH script, not the redeem script. scriptSigs are not committed, so the digest of a signed transaction equals that of its unsigned form. Any other hash type is invalid in v5 and must be rejected, not masked (invalidHashTypes, on input 0 of the first transaction).",
   "hashTypes": {
     "SIGHASH_ALL": 1,
     "SIGHASH_NONE": 2,
@@ -8,6 +8,43 @@
     "SIGHASH_NONE|ANYONECANPAY": 130,
     "SIGHASH_SINGLE|ANYONECANPAY": 131
   },
+  "invalidHashTypes": [
+    {
+      "description": "0x00 (no base type)",
+      "hashType": 0,
+      "error": "invalid sighash type 0: v5 allows only 0x01, 0x02, 0x03, 0x81, 0x82 and 0x83"
+    },
+    {
+      "description": "0x04 (unknown base type; v4 and Bitcoin would treat it as ALL)",
+      "hashType": 4,
+      "error": "invalid sighash type 4: v5 allows only 0x01, 0x02, 0x03, 0x81, 0x82 and 0x83"
+    },
+    {
+      "description": "0x80 (ANYONECANPAY with no base type)",
+      "hashType": 128,
+      "error": "invalid sighash type 128: v5 allows only 0x01, 0x02, 0x03, 0x81, 0x82 and 0x83"
+    },
+    {
+      "description": "0x84 (ANYONECANPAY with an unknown base type)",
+      "hashType": 132,
+      "error": "invalid sighash type 132: v5 allows only 0x01, 0x02, 0x03, 0x81, 0x82 and 0x83"
+    },
+    {
+      "description": "0x41 (Bitcoin Cash FORKID | ALL)",
+      "hashType": 65,
+      "error": "invalid sighash type 65: v5 allows only 0x01, 0x02, 0x03, 0x81, 0x82 and 0x83"
+    },
+    {
+      "description": "0x21 (a bit between the base type and ANYONECANPAY)",
+      "hashType": 33,
+      "error": "invalid sighash type 33: v5 allows only 0x01, 0x02, 0x03, 0x81, 0x82 and 0x83"
+    },
+    {
+      "description": "0xff",
+      "hashType": 255,
+      "error": "invalid sighash type 255: v5 allows only 0x01, 0x02, 0x03, 0x81, 0x82 and 0x83"
+    }
+  ],
   "vectors": [
     {
       "description": "HTLC funding with 3 P2PKH inputs and 2 outputs (input 2 has no output at its index: SIGHASH_SINGLE commits to no output)",

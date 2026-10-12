@@ -1,5 +1,5 @@
 {
-  "description": "Paralock HTLC (htlc mode): redeem script template, P2SH encoding, and the funding, claim and refund transactions exactly as @paralock/zcash builds them. Signatures are RFC 6979 deterministic, so every signed transaction is reproducible byte for byte.",
+  "description": "Paralock HTLC (htlc mode): redeem script template, P2SH encoding, and the funding, claim and refund transactions exactly as @paralock/zcash builds them. Signatures are RFC 6979 deterministic, so every signed transaction is reproducible byte for byte. transactions.errors are built with the fixture options (branch id BRANCH_ID_NU6_3, network testnet, conventional fee); transactions.validationErrors may override them with `fee` (zatoshi) or `branchId` and must be refused too, but only the refusal is normative there.",
   "fixtures": {
     "derivation": "privateKey = sha256(utf8(\"paralock/vectors/v1/\" + label))",
     "keys": {
@@ -397,7 +397,7 @@
     {
       "description": "claim key is not a curve point (x = 0)",
       "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da238821020000000000000000000000000000000000000000000000000000000000000000670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
-      "error": "claim pubkey is not a compressed secp256k1 point: 020000000000000000000000000000000000000000000000000000000000000000"
+      "error": "not a Paralock HTLC script: a key is not a curve point"
     },
     {
       "description": "claim key equals refund key",
@@ -1187,6 +1187,109 @@
           "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
         },
         "error": "key is not the HTLC refunder"
+      },
+      {
+        "description": "claim: a 32-byte preimage whose sha256 is not the hashlock (checked before signing)",
+        "kind": "claim",
+        "key": "maker-zcash-key",
+        "utxoValue": "100000000",
+        "preimage": "1524735ef55b9a4682c43045d942c3340909b0407f77f027f71a037090490c94",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "preimage does not match the HTLC hashlock"
+      },
+      {
+        "description": "refund: HTLC UTXO value above MAX_MONEY",
+        "kind": "refund",
+        "key": "taker-funding-key",
+        "utxoValue": "2100000000000001",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "2100000000000001",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "UTXO 48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6:0 has an invalid value"
+      }
+    ],
+    "validationErrors": [
+      {
+        "description": "claim: HTLC UTXO value 0",
+        "kind": "claim",
+        "key": "maker-zcash-key",
+        "utxoValue": "0",
+        "preimage": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "0",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "UTXO 48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6:0 has an invalid value"
+      },
+      {
+        "description": "refund: negative fee override",
+        "kind": "refund",
+        "key": "taker-funding-key",
+        "utxoValue": "100000000",
+        "fee": "-1",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "fee must be a non-negative bigint, got -1"
+      },
+      {
+        "description": "refund: fee override equal to the HTLC value",
+        "kind": "refund",
+        "key": "taker-funding-key",
+        "utxoValue": "100000000",
+        "fee": "100000000",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "fee of 100000000 zat is not below the 100000000 zat spent"
+      },
+      {
+        "description": "funding: fee override not below the inputs",
+        "kind": "funding",
+        "key": "taker-funding-key",
+        "utxos": [
+          {
+            "txid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+            "vout": 1,
+            "value": "150000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "amount": "100000000",
+        "fee": "150000000",
+        "error": "fee of 150000000 zat is not below the 150000000 zat spent"
+      },
+      {
+        "description": "funding: branch id 0 (there is no default branch id)",
+        "kind": "funding",
+        "key": "taker-funding-key",
+        "utxos": [
+          {
+            "txid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+            "vout": 1,
+            "value": "150000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "amount": "100000000",
+        "branchId": "0x00000000",
+        "error": "branchId must be the next block's consensus branch id (a non-zero 32-bit integer from the node), got 0"
       }
     ]
   },
