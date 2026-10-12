@@ -52,7 +52,7 @@ const LEVELS = [
   {
     n: 3,
     name: "Fully shielded leg",
-    status: "Research",
+    status: "In research",
     does: "FROST 2-of-2 shielded notes with Schnorr adaptor signatures, so the ZEC never leaves the shielded pool.",
     zcash: "A normal shielded transaction",
     link: "None",
@@ -88,6 +88,41 @@ try {
   if (err instanceof SwapFailedError) await taker.refund(err.swap.id);
 }
 `;
+
+const DEV_FEATURES = [
+  {
+    title: "A few lines to pay",
+    text: "createTaker, quoteExactOut, swap. The recipient gets exactly the amount you quoted, on the chain they chose.",
+  },
+  {
+    title: "Never custodial",
+    text: "Your app never holds user funds. They sit in two on-chain locks and move only when the protocol says so.",
+  },
+  {
+    title: "Crash-safe",
+    text: "Secrets and refund data are saved before anything is broadcast. resume() and refund() work from a fresh process.",
+  },
+  {
+    title: "One-command devnet",
+    text: "pnpm paralock dev starts a Zcash regtest, six EVM chains, the contracts and a maker on your laptop.",
+  },
+  {
+    title: "No node to run",
+    text: "@paralock/lightwalletd talks to public lightwalletd servers, and the escrows are live on six public testnets.",
+  },
+  {
+    title: "Agent-ready",
+    text: "llms.txt, every docs page as Markdown, a read-only MCP server and an installable skill for coding agents.",
+  },
+];
+
+const DEV_LINKS = [
+  { label: "Read the docs", href: "/docs" },
+  { label: "Quickstart", href: "/docs/quickstart" },
+  { label: "API reference", href: "/docs/sdk" },
+  { label: "Contract addresses", href: "/docs/contracts" },
+  { label: "llms.txt", href: "/llms.txt" },
+];
 
 const USES = [
   {
@@ -172,7 +207,7 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
         <p>
           In standard mode the Zcash lock is a transparent HTLC carrying the same hash as the dollar lock, so the two legs
           can be paired. Private mode removes that hash, and Zcash sees an ordinary 2-of-2 multisig. A fully shielded
-          Zcash leg through FROST is still research.
+          Zcash leg through FROST is still in research.
         </p>
       </>
     ),
@@ -425,8 +460,9 @@ export default function Landing() {
             <header className="sec-head">
               <h2 id="dev-title">Build on it.</h2>
               <p>
-                The SDK is a public good: MIT-licensed TypeScript for wallets, agents, solvers and makers. Embed the taker
-                to give your users dollar payments from ZEC, or run a maker and earn the spread on every swap it fills.
+                Give your users dollar payments from shielded ZEC in a few lines of TypeScript. The SDK runs both chains,
+                the timeouts and the recovery, and your app never touches their funds. It&apos;s MIT-licensed: embed the
+                taker, or run a maker and earn the spread.
               </p>
             </header>
             <div className="dev">
@@ -453,6 +489,26 @@ export default function Landing() {
                 </div>
               </div>
               <CodeSample file="pay.ts" code={SNIPPET} />
+            </div>
+            <ul className="devfeat">
+              {DEV_FEATURES.map((f) => (
+                <li key={f.title}>
+                  <h3>{f.title}</h3>
+                  <p>{f.text}</p>
+                </li>
+              ))}
+            </ul>
+            <div className="devlinks">
+              <p>
+                300 tests across the contracts, the SDK and live regtest runs. Experimental and not audited.
+              </p>
+              <nav aria-label="Developer resources">
+                {DEV_LINKS.map((l) => (
+                  <Link key={l.href} href={l.href} className="textlink" prefetch={false}>
+                    {l.label}
+                  </Link>
+                ))}
+              </nav>
             </div>
           </div>
         </section>
