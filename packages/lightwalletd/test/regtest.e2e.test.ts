@@ -74,7 +74,7 @@ describe.skipIf(!reachable)("HTLC through lightwalletd (regtest)", () => {
       { hashlock: sha256(secret), claimPubkey: maker.publicKey, refundPubkey: taker.publicKey, refundHeight: (await lwd.getBlockCount()) + 50 },
       "regtest",
     );
-    const funding = buildHtlcFunding({ htlc, amount: 100_000_000n, utxos: await utxosOf(takerAddress), key: taker, branchId });
+    const funding = buildHtlcFunding({ htlc, amount: 100_000_000n, utxos: await utxosOf(takerAddress), key: taker, branchId, network: "regtest" });
     expect(await lwd.sendRawTransaction(funding.hex)).toBe(funding.txid);
     // Broadcasting the same bytes again is harmless and returns the same txid.
     expect(await lwd.sendRawTransaction(funding.hex)).toBe(funding.txid);
@@ -88,11 +88,11 @@ describe.skipIf(!reachable)("HTLC through lightwalletd (regtest)", () => {
     const [locked] = await utxosOf(htlc.address);
     expect(locked).toMatchObject({ txid: funding.txid, value: 100_000_000n, scriptPubKey: bytesToHex(htlc.scriptPubKey) });
 
-    const refund = buildHtlcRefund({ htlc, utxo: locked!, key: taker, to: takerAddress, branchId });
+    const refund = buildHtlcRefund({ htlc, utxo: locked!, key: taker, to: takerAddress, branchId, network: "regtest" });
     await expect(lwd.sendRawTransaction(refund.hex)).rejects.toBeInstanceOf(LightwalletdError);
 
     const makerAddress = keyAddress(maker, "regtest");
-    const claim = buildHtlcClaim({ htlc, utxo: locked!, key: maker, preimage: secret, to: makerAddress, branchId });
+    const claim = buildHtlcClaim({ htlc, utxo: locked!, key: maker, preimage: secret, to: makerAddress, branchId, network: "regtest" });
     expect(await lwd.sendRawTransaction(claim.hex)).toBe(claim.txid);
     await mine();
 
@@ -101,7 +101,7 @@ describe.skipIf(!reachable)("HTLC through lightwalletd (regtest)", () => {
     expect(bytesToHex(extractPreimage(spend!.vin[0]!.scriptSig!.hex, htlc.params.hashlock)!)).toBe(bytesToHex(secret));
     expect((await lwd.getAddressTxids([htlc.address])).sort()).toEqual([funding.txid, claim.txid].sort());
     expect((await utxosOf(makerAddress)).map((u) => u.value)).toEqual([100_000_000n - claim.fee]);
-  });
+  }, 30_000); // live: waits on the faucet and on blocks the devnet maker mines every 3 s
 
   it("rejects an unknown transaction", async () => {
     await expect(lwd.getRawTransaction("00".repeat(32))).rejects.toBeInstanceOf(LightwalletdError);

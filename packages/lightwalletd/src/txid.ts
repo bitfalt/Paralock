@@ -42,7 +42,23 @@ const OVERWINTERED = 0x80000000;
 const NULL_TXID = "0".repeat(64);
 const empty = new Uint8Array();
 
-/** Decodes a raw transaction (v1–v5): its txid and transparent inputs. Throws on other versions or malformed data. */
+/** Version group ids of v3 (Overwinter) and v4 (Sapling) transactions. */
+const VERSION_GROUP_ID: Record<number, number> = { 3: 0x03c48270, 4: 0x892f2085 };
+/** Serialized sizes of the fixed-size shielded descriptions of v2–v4 transactions. */
+const JOINSPLIT_BCTV14_SIZE = 1802; // v2, v3: 8 + 8 + 32 + 2·32 + 2·32 + 32 + 32 + 2·32 + 296 (PHGR13 proof) + 2·601
+const JOINSPLIT_GROTH16_SIZE = 1698; // v4: the same with a 192-byte Groth16 proof
+const SAPLING_SPEND_V4_SIZE = 384; // cv, anchor, nullifier, rk (4·32), proof (192), spendAuthSig (64)
+const SAPLING_OUTPUT_V4_SIZE = 948; // cv, cmu, ephemeralKey (3·32), encCiphertext (580), outCiphertext (80), proof (192)
+
+/**
+ * Decodes a raw transaction (v1–v5): its txid and transparent inputs. Throws on other versions or malformed data.
+ *
+ * Every version is parsed to its last byte, and data left over after the transaction throws, so the txid is only ever
+ * computed over exactly one well-formed transaction. v5 uses `parseTx` plus a full Sapling/Orchard parse
+ * (`shieldedDigests`). v1–v4 are parsed structurally (ZIP 202/243 layout: transparent bundle, lock time, expiry,
+ * Sapling spends and outputs, JoinSplits, keys and signatures, with canonical CompactSizes and the right version
+ * group id); proofs, signatures and other field contents are not checked, since only the txid and inputs are needed.
+ */
 export function decodeTx(data: Uint8Array | string): DecodedTx {
   const bytes = toBytes(data);
   const r = new Reader(bytes);
@@ -54,7 +70,9 @@ export function decodeTx(data: Uint8Array | string): DecodedTx {
     return { txid: v5Txid(tx, shieldedDigests(tx.shieldedRaw)), version, inputs };
   }
   if (version < 1 || version > 4) throw new UnsupportedVersionError(version);
-  if ((header & OVERWINTERED) !== 0) r.u32(); // version group id (v3, v4)
+  const overwintered = (header & OVERWINTERED) !== 0;
+  if (overwintered !== version >= 3) throw new Error(`a v${version} transaction must have fOverwintered ${version >= 3 ? "set" : "clear"}`);
+  if (overwintered && r.u32() !== VERSION_GROUP_ID[version]) throw new Error(`bad version group id for a v${version} transaction`);
   const inputs: RawInput[] = [];
   for (let n = r.compactSize(); n > 0; n--) {
     const prevTxid = bytesToTxid(r.take(32));
@@ -63,6 +81,28 @@ export function decodeTx(data: Uint8Array | string): DecodedTx {
     r.u32(); // sequence
     inputs.push(input(prevTxid, vout, scriptSig));
   }
+  for (let n = r.compactSize(); n > 0; n--) {
+    r.take(8); // value
+    r.varBytes(); // scriptPubKey
+  }
+  r.u32(); // lock_time
+  if (version >= 3) r.u32(); // nExpiryHeight
+  let saplingDescriptions = 0;
+  if (version === 4) {
+    r.take(8); // valueBalance
+    const spends = r.compactSize();
+    r.take(spends * SAPLING_SPEND_V4_SIZE);
+    const outputs = r.compactSize();
+    r.take(outputs * SAPLING_OUTPUT_V4_SIZE);
+    saplingDescriptions = spends + outputs;
+  }
+  if (version >= 2) {
+    const joinSplits = r.compactSize();
+    r.take(joinSplits * (version === 4 ? JOINSPLIT_GROTH16_SIZE : JOINSPLIT_BCTV14_SIZE));
+    if (joinSplits > 0) r.take(32 + 64); // joinSplitPubKey, joinSplitSig
+  }
+  if (saplingDescriptions > 0) r.take(64); // bindingSig
+  if (!r.done) throw new Error(`unexpected data after the v${version} transaction`);
   return { txid: bytesToTxid(sha256(sha256(bytes))), version, inputs };
 }
 
