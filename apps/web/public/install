@@ -1,0 +1,155 @@
+#!/bin/sh
+# Installs `paralock`, the Paralock command-line tool (swaps between shielded ZEC and stablecoins, and a market
+# maker, without Node):
+#
+#   curl -fsSL https://paralock.xyz/install | sh
+#
+# It downloads the release tarball for this machine from GitHub, checks it against the release's SHA256SUMS and
+# installs the binary to ${PARALOCK_HOME:-$HOME/.paralock}/bin/paralock.
+#
+#   PARALOCK_VERSION=cli-v0.1.0   install that release instead of the latest (0.1.0 and v0.1.0 work too)
+#   PARALOCK_HOME=/opt/paralock   install to /opt/paralock/bin
+#
+# Paralock is experimental and not audited. Source: https://github.com/bitfalt/Paralock
+#
+# Everything runs inside main(), called on the last line, so a partly downloaded script does nothing.
+
+set -eu
+
+REPO="bitfalt/Paralock"
+
+say() {
+  printf 'paralock-install: %s\n' "$1"
+}
+
+err() {
+  printf 'paralock-install: error: %s\n' "$1" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || err "this installer needs '$1'; install it and try again"
+}
+
+download() { # url file
+  if command -v curl >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 --output "$2" "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget --https-only --quiet --tries=3 --output-document="$2" "$1"
+  else
+    err "this installer needs curl or wget"
+  fi
+}
+
+sha256() { # file
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  else
+    err "this installer needs sha256sum, shasum or openssl to check the download"
+  fi
+}
+
+detect_target() {
+  os=$(uname -s)
+  arch=$(uname -m)
+  case "$os" in
+    Darwin)
+      platform="apple-darwin"
+      # An x86_64 shell under Rosetta on Apple silicon: use the native build.
+      if [ "$arch" = "x86_64" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+        arch="arm64"
+      fi
+      ;;
+    Linux) platform="unknown-linux-gnu" ;;
+    *) err "unsupported operating system: $os (paralock ships for macOS and Linux; try 'cargo install paralock-cli')" ;;
+  esac
+  case "$arch" in
+    x86_64 | amd64) arch="x86_64" ;;
+    arm64 | aarch64) arch="aarch64" ;;
+    *) err "unsupported architecture: $arch (paralock ships for x86_64 and arm64; try 'cargo install paralock-cli')" ;;
+  esac
+  echo "${arch}-${platform}"
+}
+
+main() {
+  need uname
+  need tar
+  need awk
+  need mktemp
+
+  target=$(detect_target)
+  asset="paralock-${target}.tar.gz"
+  version="${PARALOCK_VERSION:-}"
+  if [ -n "$version" ]; then
+    case "$version" in
+      cli-v*) tag="$version" ;;
+      v*) tag="cli-$version" ;;
+      *) tag="cli-v$version" ;;
+    esac
+    base="https://github.com/${REPO}/releases/download/${tag}"
+  else
+    tag="latest"
+    base="https://github.com/${REPO}/releases/latest/download"
+  fi
+
+  home="${PARALOCK_HOME:-$HOME/.paralock}"
+  bin_dir="$home/bin"
+
+  tmp=$(mktemp -d 2>/dev/null || mktemp -d -t paralock)
+  trap 'rm -rf "$tmp"' EXIT INT TERM
+
+  say "downloading $asset ($tag)"
+  download "$base/$asset" "$tmp/$asset" || err "could not download $base/$asset"
+  download "$base/SHA256SUMS" "$tmp/SHA256SUMS" || err "could not download $base/SHA256SUMS"
+
+  expected=$(awk -v f="$asset" '{ name = $2; sub(/^\*/, "", name); if (name == f) print $1 }' "$tmp/SHA256SUMS")
+  [ -n "$expected" ] || err "SHA256SUMS lists no $asset"
+  actual=$(sha256 "$tmp/$asset")
+  if [ "$expected" != "$actual" ]; then
+    err "checksum mismatch for $asset (expected $expected, got $actual); nothing was installed"
+  fi
+  say "checksum verified ($actual)"
+
+  tar -xzf "$tmp/$asset" -C "$tmp"
+  binary="$tmp/paralock-${target}/paralock"
+  [ -f "$binary" ] || err "the archive has no paralock binary"
+
+  mkdir -p "$bin_dir"
+  # Replace atomically: a running paralock keeps its old file.
+  cp "$binary" "$bin_dir/.paralock.new"
+  chmod 755 "$bin_dir/.paralock.new"
+  mv -f "$bin_dir/.paralock.new" "$bin_dir/paralock"
+
+  installed=$("$bin_dir/paralock" version 2>/dev/null || true)
+  say "installed ${installed:-paralock} to $bin_dir/paralock"
+
+  case ":${PATH:-}:" in
+    *":$bin_dir:"*)
+      say "run 'paralock --help' to get started"
+      ;;
+    *)
+      echo
+      say "$bin_dir is not on your PATH. Add it:"
+      case "${SHELL:-}" in
+        */zsh) profile="$HOME/.zshrc" ;;
+        */bash) profile="$HOME/.bashrc" ;;
+        */fish) profile="" ;;
+        *) profile="$HOME/.profile" ;;
+      esac
+      if [ -z "$profile" ]; then
+        echo "  fish_add_path $bin_dir"
+      else
+        echo "  echo 'export PATH=\"$bin_dir:\$PATH\"' >> $profile"
+        echo "  export PATH=\"$bin_dir:\$PATH\""
+      fi
+      echo
+      say "then run 'paralock --help'"
+      ;;
+  esac
+}
+
+main "$@"

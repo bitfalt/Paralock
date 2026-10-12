@@ -1,0 +1,111 @@
+name: Release binaries
+
+# Builds the `paralock` binary (crates/paralock-cli) for macOS and Linux on x86_64 and arm64 when a `cli-v*` tag is
+# pushed (e.g. `git tag cli-v0.1.0 && git push origin cli-v0.1.0`), and attaches the tarballs and SHA256SUMS to a
+# GitHub release for the tag, marked as the latest release. https://paralock.xyz/install downloads from
+# releases/latest/download/paralock-<target>.tar.gz and checks it against SHA256SUMS, so asset names carry no version.
+# Publishing the crate to crates.io stays in release.yml.
+
+on:
+  push:
+    tags: ["cli-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-binaries-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-14 # cross-compiled from Apple silicon
+          # Built on Ubuntu 22.04 so the binaries run on glibc 2.35 and newer.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Check the tag against the crate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "paralock-cli") | .version')
+          if [ "cli-v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match paralock-cli $version (expected cli-v$version)"
+            exit 1
+          fi
+      - name: Build
+        run: cargo build --release --locked -p paralock-cli --bin paralock --target ${{ matrix.target }}
+      - name: Smoke test
+        if: matrix.target != 'x86_64-apple-darwin'
+        run: target/${{ matrix.target }}/release/paralock version
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="paralock-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/paralock" "dist/$name/"
+          cp crates/paralock-cli/README.md crates/paralock-cli/LICENSE crates/paralock-cli/paralock.example.toml "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: paralock-${{ matrix.target }}
+          path: dist/paralock-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: paralock-*
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum paralock-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          notes="The \`paralock\` binary ${tag#cli-}: swaps between shielded ZEC and stablecoins, and a market maker, without Node.
+
+          Install: \`curl -fsSL https://paralock.xyz/install | sh\` (checks SHA256SUMS), or \`cargo install paralock-cli\`.
+
+          Experimental and not audited. The Zcash leg is transparent on chain."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --verify-tag --latest --title "paralock ${tag#cli-}" --notes "$notes"
+          fi

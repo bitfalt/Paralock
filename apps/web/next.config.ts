@@ -14,6 +14,20 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/mcp": ["./content/docs/**/*", "../../contracts/deployments/*.json"],
   },
+  async headers() {
+    return [
+      // The `paralock` binary's installer (`curl -fsSL https://paralock.xyz/install | sh`): a shell script, served as
+      // text so browsers show it and nothing sniffs it as something else.
+      {
+        source: "/install",
+        headers: [
+          { key: "Content-Type", value: "text/plain; charset=utf-8" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Cache-Control", value: "public, max-age=300" },
+        ],
+      },
+    ];
+  },
   async redirects() {
     return [
       // Payment links used to open on `/` (`/?pay=0x…&usd=…`). The app lives at /app now; the query string carries over.
