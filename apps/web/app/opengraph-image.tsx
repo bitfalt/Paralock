@@ -50,11 +50,10 @@ export default async function Image() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <svg width="32" height="32" viewBox="0 0 20 20">
-              <path d="M5.25 9V6.6a2.85 2.85 0 0 1 5.7 0V9" fill="none" stroke={FG} strokeWidth="1.5" />
-              <path d="M9.05 9V6.6a2.85 2.85 0 0 1 5.7 0V9" fill="none" stroke={FG} strokeWidth="1.5" />
-              <rect x="3" y="9" width="14" height="9" rx="1.6" fill={FG} />
-              <circle cx="10" cy="12.6" r="1.3" fill={ACCENT} />
-              <rect x="9.45" y="12.9" width="1.1" height="2.6" rx="0.4" fill={ACCENT} />
+              <path d="M9.6 3H4.6A2.6 2.6 0 0 0 2 5.6v8.8A2.6 2.6 0 0 0 4.6 17h5Z" fill={FG} />
+              <path d="M10.4 3h5A2.6 2.6 0 0 1 18 5.6v8.8a2.6 2.6 0 0 1-2.6 2.6h-5Z" fill={FG} />
+              <circle cx="10" cy="8.7" r="2.15" fill={ACCENT} />
+              <path d="M8.95 9.6h2.1l.45 4.4h-3Z" fill={ACCENT} />
             </svg>
             <span style={{ fontSize: 28, color: FG, letterSpacing: "-0.02em" }}>Paralock</span>
           </div>
@@ -86,7 +85,7 @@ export default async function Image() {
         </div>
 
         <div style={{ display: "flex", gap: 34, marginTop: "auto", fontFamily: "Fragment Mono", fontSize: 19, color: FG3 }}>
-          <span>TypeScript SDK and Rust core</span>
+          <span>TypeScript and Rust SDKs</span>
           <span>Six EVM chains</span>
           <span>Live on public testnets</span>
         </div>
