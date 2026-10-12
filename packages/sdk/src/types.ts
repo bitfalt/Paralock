@@ -134,7 +134,7 @@ export interface Swap {
   status: SwapStatus;
   zcash: ZcashLeg;
   evm: EvmLeg;
-  /** adaptor mode: protocol data the two parties exchange. Safe to share; never published on-chain. */
+  /** adaptor mode: protocol data the two parties exchange. Safe to share. The escrow id, signer and salt also appear in the escrow's `Locked` event. */
   adaptor?: AdaptorSwapData;
   /** Set when the stablecoins pay someone other than the taker (the Pay flow). */
   payment?: { recipient: Hex; label?: string };

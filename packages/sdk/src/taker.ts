@@ -139,7 +139,7 @@ export interface TakerConfig {
   minClaimWindowSeconds?: number;
   /** Devnet hook to mine Zcash blocks while waiting. */
   mineZcash?: (blocks: number) => Promise<unknown>;
-  /** Called after every step with the updated swap. */
+  /** Called with the updated swap whenever its status changes. */
   onUpdate?: (swap: Swap) => void;
   /**
    * Receives the key of each fresh recipient address (it is also kept in the store). It controls the swapped

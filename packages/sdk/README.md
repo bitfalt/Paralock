@@ -99,7 +99,7 @@ confirms) or refunds after the EVM expiry.
 
 | Area | Exports |
 |---|---|
-| Factories | `createTaker`, `createMaker`, `connectEvmChain`, `zcashKeyFrom`, `zcashNodeFrom`; options types `CreateTakerOptions`, `CreateMakerOptions`, `ZcashOptions` (`rpcUrl` or any `node: ZcashNode`), `EvmChainOptions`, `TakerEvmChainOptions` (`tokens`, `relayer`, `minConfirmations`, `minClaimWindowSeconds`), `MakerEvmChainOptions` (`token`) |
+| Factories | `createTaker`, `createMaker`, `connectEvmChain`, `zcashKeyFrom`, `zcashNodeFrom`; options types `CreateTakerOptions`, `CreateMakerOptions`, `ZcashOptions` (`rpcUrl` or any `node: ZcashNode`), `EvmChainOptions`, `TakerEvmChainOptions` (`tokens`, `tokenDecimals`, `relayer`, `minConfirmations`, `minClaimWindowSeconds`), `MakerEvmChainOptions` (`token`) |
 | Taker | `Taker`: `quote`, `quoteExactOut`, `validateQuote`, `swap`, `lockOnly`, `resume(id, { claim })`, `refund(idOrSwap, { wait })`, `getSwap`, `pendingSwaps`, `freshRecipient(id)`; `TakerLimits` / `DEFAULT_TAKER_LIMITS`, `TakerTimeouts` / `DEFAULT_TAKER_TIMEOUTS`, `SwapOptions`, `MakerApi` |
 | Maker | `Maker`: `start`, `stop`, `quote`, `quoteExactOut`, `accept`, `proposeAdaptor`, `adaptorPreSignature`, `getSwap`, `getStage`, `listSwaps`; `MakerLimits` / `DEFAULT_MAKER_LIMITS`, `MakerStage` |
 | Persistence | `SwapStore`, `MemorySwapStore` (not durable), `FileSwapStore` (one file per record, atomic write + fsync + rename, dir 0700 / files 0600), `encodeRecord` / `decodeRecord` (JSON with bigints, for database-backed stores) |
