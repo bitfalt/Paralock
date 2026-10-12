@@ -3,7 +3,8 @@
  *
  * Protocol (ZEC -> USD stablecoin on an EVM chain: Tempo, Base, Ethereum, …):
  *  1. Taker asks a maker for a quote: amounts, the maker's Zcash pubkey and EVM address, and the timeout policy.
- *  2. Taker locks ZEC on Zcash in a P2SH output the maker can spend only with the swap secret.
+ *  2. Taker signs a funding that locks ZEC in a P2SH output the maker can spend only with the swap secret, has the
+ *     maker commit to it (the maker reserves its stablecoins; v5 txids are final before broadcast), then broadcasts it.
  *  3. Maker verifies the Zcash lock, then locks stablecoins on the EVM chain for the taker, expiring well before
  *     the Zcash refund height.
  *  4. Taker claims on the EVM chain, which makes the secret public.
@@ -27,7 +28,11 @@ export type SwapDirection = "ZEC_TO_USD";
 /** `htlc` (shared sha256 hashlock) or `adaptor` (private mode: adaptor signatures, no shared value on-chain). */
 export type SwapMode = "htlc" | "adaptor";
 
-/** EVM chains a swap can settle on. Any EVM chain works; these are the ones the devnet and UI know by name. */
+/**
+ * The EVM chains a swap can settle on. `createTaker`, `createMaker` and the engines accept exactly these six names;
+ * each name works with any chain id and RPC where the Paralock escrows are deployed (e.g. its testnet). Another chain
+ * needs a new name here.
+ */
 export type EvmChain = "tempo" | "base" | "ethereum" | "arbitrum" | "robinhood" | "hyperevm";
 
 /** Display names of the known chains. */

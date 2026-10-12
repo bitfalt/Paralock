@@ -35,9 +35,10 @@ import {
   type AdaptorSpends,
   adaptorSpends,
 } from "./adaptor-protocol.js";
-import { ParalockError, SwapFailedError, errorMessage } from "./errors.js";
+import { ParalockError, SwapFailedError, errorMessage, isParalockError } from "./errors.js";
 import type { AdaptorEvmClient, AdaptorEvmSwap, EvmClient, EvmSwap } from "./evm-client.js";
 import type { AcceptRequest } from "./maker.js";
+import { FUNDING_BROADCAST_MARGIN_BLOCKS, FUNDING_EXPIRY_MARGIN_BLOCKS } from "./policy.js";
 import { type PrivacyOptions, evmAddressOf, freshEvmAccount, isStandardAmount, jitter } from "./privacy.js";
 import { pollUntil } from "./retry.js";
 import { fromHex, newSecret } from "./secret.js";
@@ -54,7 +55,10 @@ export interface MakerApi {
   quote(zecAmountZat: bigint, chain?: EvmChain, mode?: SwapMode): Promise<Quote>;
   /** Quote for delivering an exact stablecoin amount (token base units). */
   quoteExactOut(usdAmount: bigint, chain?: EvmChain, mode?: SwapMode): Promise<Quote>;
-  /** htlc mode: report the funded HTLC. Must be idempotent. */
+  /**
+   * htlc mode: commit the maker to an HTLC whose funding is signed but not yet broadcast (the maker consumes the quote
+   * and reserves its stablecoins). Must be idempotent.
+   */
   accept(req: AcceptRequest): Promise<Swap>;
   /** The maker's view of a swap (an in-process `Maker` answers synchronously). */
   getSwap(id: string): Promise<Swap | undefined> | Swap | undefined;
@@ -161,12 +165,29 @@ export interface SwapOptions {
 }
 
 /**
- * Internal stage of a taker swap (persisted): `prepared` (funding signed, not broadcast), `proposed` (adaptor: the
- * maker's refund signature is held), `funded` (funding broadcast), `accepted` (maker notified), `locked` (maker's lock
- * verified), `claimed` (stablecoins claimed: the secret is public), `completed` (maker claimed the ZEC), `refunded`,
- * `abandoned` (nothing was broadcast).
+ * Internal stage of a taker swap (persisted):
+ * - `prepared`: funding signed and persisted, not broadcast; the maker hasn't committed yet.
+ * - `reserved` (htlc): the maker accepted the HTLC, consumed the quote and reserved its stablecoins; the funding is
+ *   broadcast next.
+ * - `proposed` (adaptor): the maker's signature on the refund is held and the maker reserved its stablecoins; the
+ *   funding is broadcast next.
+ * - `funded`: funding broadcast.
+ * - `accepted`: the maker has all it needs to lock (htlc: the funding confirmed; adaptor: the pre-signature was sent).
+ * - `locked`: the maker's lock was verified.
+ * - `claimed`: stablecoins claimed (the secret is public). `completed`: the maker claimed the ZEC. `refunded`.
+ * - `abandoned`: nothing was locked (the funding was never broadcast, or it expired without being mined).
  */
-export type TakerStage = "prepared" | "proposed" | "funded" | "accepted" | "locked" | "claimed" | "completed" | "refunded" | "abandoned";
+export type TakerStage =
+  | "prepared"
+  | "reserved"
+  | "proposed"
+  | "funded"
+  | "accepted"
+  | "locked"
+  | "claimed"
+  | "completed"
+  | "refunded"
+  | "abandoned";
 
 /** A swap as persisted by the taker, including its secrets. */
 export interface TakerSwapRecord {
@@ -176,8 +197,12 @@ export interface TakerSwapRecord {
   stage: TakerStage;
   swap: Swap;
   options: { claim: boolean; privacy?: PrivacyOptions; stopAfterFunding?: boolean };
-  /** Signed funding transaction (output `vout` is the lock). */
+  /** Signed funding transaction (output `vout` is the lock). It can only be mined up to block `expiryHeight`. */
   funding: { hex: string; txid: string; vout: number; expiryHeight: number };
+  /** When the maker committed to the swap, before the funding was broadcast (htlc: `accept`; adaptor: the proposal). */
+  reservedAt?: number;
+  /** When the funding was first handed to the Zcash node. Until then nothing can be locked. */
+  fundingSentAt?: number;
   returnAddress: string;
   htlc?: { secret: Hex };
   adaptor?: {
@@ -197,6 +222,10 @@ export interface TakerSwapRecord {
 }
 
 const DONE: readonly TakerStage[] = ["claimed", "completed", "refunded", "abandoned"];
+/** Stages in which the funding may not have reached the network yet. */
+const UNFUNDED: readonly TakerStage[] = ["prepared", "reserved", "proposed"];
+/** A quote counts as expired locally only this long after its `expiresAt` (the maker's clock may run behind ours). */
+const QUOTE_CLOCK_SKEW_SECONDS = 5;
 const PREFIX = "taker/";
 const zec = (zat: bigint) => (Number(zat) / 1e8).toString();
 const fmt = (units: bigint, decimals = 6) => (Number(units) / 10 ** decimals).toFixed(2);
@@ -208,8 +237,10 @@ const hex32 = (n: bigint): Hex => `0x${n.toString(16).padStart(64, "0")}`;
  * The taker side of a ZEC → stablecoin swap. It holds the secret (htlc) or the adaptor secret (adaptor mode), which
  * is revealed only by claiming on the EVM chain after verifying the maker's lock.
  *
- * Every secret and key is written to the store before any transaction is broadcast, so `resume(id)` and `refund(id)`
- * work after a crash or restart.
+ * The maker commits before any ZEC moves: the taker signs and persists its funding, has the maker accept it (htlc) or
+ * sign its refund (adaptor), and only then broadcasts it. v5 txids don't commit to signatures, so the funding's txid
+ * is final before it is broadcast. Every secret and key is written to the store before any transaction is broadcast,
+ * so `resume(id)` and `refund(id)` work after a crash or restart.
  */
 export class Taker {
   private readonly store: SwapStore;
@@ -297,16 +328,22 @@ export class Taker {
   // Swaps
 
   /**
-   * Runs the whole swap. Resolves once the stablecoins are claimed (and the maker's ZEC claim observed, if it shows up
-   * within `timeouts.followMakerMs`). Throws `SwapFailedError` if something fails after the ZEC was locked: the swap is
-   * in the store, and `refund(err.swap.id)` returns the ZEC after the refund height.
+   * Runs the whole swap: prepare and persist the funding, have the maker commit to it, broadcast it, verify the maker's
+   * lock, claim. Resolves once the stablecoins are claimed (and the maker's ZEC claim observed, if it shows up within
+   * `timeouts.followMakerMs`). If the maker refuses or the quote expired, nothing is broadcast: the swap is marked
+   * abandoned and the error is rethrown as is. Throws `SwapFailedError` if something fails once the funding may have
+   * reached the network: the swap is in the store, and `refund(err.swap.id)` returns the ZEC after the refund height.
    */
   async swap(quote: Quote, opts: SwapOptions = {}): Promise<Swap> {
     const record = await this.prepare(quote, opts, false);
     return this.drive(record);
   }
 
-  /** Funds the Zcash lock and stops (e.g. to demo a refund when the maker never locks). */
+  /**
+   * Funds the Zcash lock and stops once the funding confirms (e.g. to demo a refund when the maker never locks). In
+   * htlc mode the maker is never contacted, so it never locks: the ZEC comes back with `refund` after the refund
+   * height. In adaptor mode the proposal still runs, since the maker's refund signature is needed before funding.
+   */
   async lockOnly(quote: Quote, payTo?: { recipient?: Hex; label?: string }): Promise<Swap> {
     const record = await this.prepare(quote, { recipient: payTo?.recipient, label: payTo?.label, claim: false }, true);
     return this.drive(record);
@@ -314,29 +351,74 @@ export class Taker {
 
   /**
    * Continues a persisted swap after a restart: claims if the maker's lock is there and still safe to claim, and
-   * follows the maker's ZEC claim. A funding that never reached the network is not broadcast again (the swap is marked
-   * abandoned). `claim` overrides the option the swap was started with.
+   * follows the maker's ZEC claim. `claim` overrides the option the swap was started with; `relayClaim: false` submits
+   * the claim from your own EVM account instead of the relayer (e.g. after the relayer refused).
+   *
+   * A swap interrupted before its funding reached the network is handled conservatively:
+   * - `prepared` (the maker never committed): abandoned, nothing is broadcast.
+   * - `reserved` / `proposed` (the maker committed): the funding is broadcast late only if the tip is at least
+   *   `FUNDING_BROADCAST_MARGIN_BLOCKS` below its expiry height, at least `limits.minZcashLockBlocks` of the refund
+   *   window remain, and the maker still holds the swap (it re-checks its timeout policy on every poll and drops a
+   *   reservation it can no longer lock safely). Otherwise the swap is abandoned.
+   * A swap is never abandoned while a funding it already handed to a node could still be mined: then `resume` throws
+   * `conflict` until the funding's expiry height has passed.
    */
-  async resume(id: string, options: { claim?: boolean } = {}): Promise<Swap> {
+  async resume(id: string, options: { claim?: boolean; relayClaim?: boolean } = {}): Promise<Swap> {
     const record = await this.load(id);
     if (DONE.includes(record.stage)) return record.swap;
-    if (options.claim !== undefined) {
-      record.options = { ...record.options, claim: options.claim, stopAfterFunding: false };
+    if (options.claim !== undefined || options.relayClaim !== undefined) {
+      record.options = {
+        ...record.options,
+        ...(options.claim !== undefined ? { claim: options.claim, stopAfterFunding: false } : {}),
+        ...(options.relayClaim !== undefined ? { privacy: { ...record.options.privacy, relayClaim: options.relayClaim } } : {}),
+      };
       await this.save(record);
     }
-    if (record.stage === "prepared" || (record.stage === "proposed" && record.adaptor)) {
-      // Never broadcast a stale funding: only continue if it already reached the network.
-      const known = await this.cfg.zcash.getRawTransaction(record.funding.txid).then(
-        () => true,
-        () => false,
-      );
-      if (!known || (record.stage === "prepared" && record.adaptor)) {
-        await this.transition(record, "abandoned", "failed", { chain: "zcash", detail: "Abandoned before funding; nothing was locked" });
-        return record.swap;
-      }
-      await this.transition(record, "funded");
-    }
+    if (UNFUNDED.includes(record.stage) && !(await this.resumeUnfunded(record))) return record.swap;
     return this.drive(record);
+  }
+
+  /**
+   * Resume rules for a swap whose funding may not have reached the network (see `resume`). Returns false once the swap
+   * is abandoned, true to continue (the next step broadcasts the funding, or it is already out).
+   */
+  private async resumeUnfunded(record: TakerSwapRecord): Promise<boolean> {
+    // A prepared adaptor swap holds no refund signature yet, so its funding was never broadcast.
+    const neverSent = record.stage === "prepared" && !!record.adaptor;
+    if (!neverSent && (await this.fundingKnown(record))) {
+      // It reached the network before the interruption.
+      await this.transition(record, "funded", "zcash_locked", { chain: "zcash", txid: record.funding.txid, detail: "Funding found on the network" });
+      return true;
+    }
+    const tip = await this.cfg.zcash.getBlockCount();
+    const problem = record.stage === "prepared" ? "interrupted before the maker committed" : await this.lateBroadcastProblem(record, tip);
+    if (!problem) return true;
+    // Abandon only if no node can have it, or it can't be mined any more (and both checks say it wasn't).
+    const dead = tip > record.funding.expiryHeight + FUNDING_EXPIRY_MARGIN_BLOCKS && (await this.fundingMined(record)) === false;
+    if (record.fundingSentAt === undefined || dead) {
+      record.error = problem;
+      await this.transition(record, "abandoned", "failed", { chain: "zcash", detail: `Abandoned before funding (${problem}); nothing was locked` });
+      return false;
+    }
+    throw new ParalockError(
+      "conflict",
+      `not broadcasting the funding again (${problem}), but it may still be mined until block ${record.funding.expiryHeight}; resume or refund after that`,
+    );
+  }
+
+  /** Why a committed but unbroadcast funding should not be broadcast now, or undefined if it may be. */
+  private async lateBroadcastProblem(record: TakerSwapRecord, tip: number): Promise<string | undefined> {
+    const { swap } = record;
+    if (tip + FUNDING_BROADCAST_MARGIN_BLOCKS > record.funding.expiryHeight) return `the funding expires at block ${record.funding.expiryHeight}`;
+    if (swap.zcash.refundHeight - tip < this.limits.minZcashLockBlocks) return "too little of the Zcash refund window is left";
+    // The maker re-checks its timeout policy on every poll and drops a reservation once locking would be unsafe, so a
+    // reservation it still holds means the windows are still safe.
+    const view = await (async () => this.cfg.maker.getSwap(swap.id))().catch(() => undefined);
+    if (!view) return "the maker doesn't know the swap or is unreachable";
+    if (view.status === "failed" || view.zcash.fundingTxid?.toLowerCase() !== record.funding.txid.toLowerCase()) {
+      return "the maker dropped the reservation";
+    }
+    return undefined;
   }
 
   /** The public view of a persisted swap. */
@@ -464,9 +546,13 @@ export class Taker {
       }
       return record.swap;
     } catch (err) {
-      const funded = !["prepared", "proposed", "abandoned"].includes(record.stage);
       record.error = errorMessage(err);
-      if (!funded) {
+      if (record.stage === "abandoned") {
+        await this.save(record);
+        throw err; // a step gave up on a funding that can no longer be mined: nothing was locked
+      }
+      if (UNFUNDED.includes(record.stage) && record.fundingSentAt === undefined) {
+        // No node has seen the funding (e.g. the maker refused or the quote expired): no funds moved.
         await this.transition(record, "abandoned", "failed", { chain: "zcash", detail: `Not funded: ${record.error}` });
         throw err;
       }
@@ -480,12 +566,16 @@ export class Taker {
     switch (record.stage) {
       case "prepared":
         if (record.adaptor) return this.propose(record);
+        // lockOnly: lock without involving the maker (it never locks; the ZEC comes back after the refund height).
+        if (record.options.stopAfterFunding) return this.broadcastFunding(record, `Locked ${zec(swap.zcash.amountZat)} ZEC in the Zcash HTLC`);
+        return this.reserveHtlc(record);
+      case "reserved":
         return this.broadcastFunding(record, `Locked ${zec(swap.zcash.amountZat)} ZEC in the Zcash HTLC`);
       case "proposed":
         return this.broadcastFunding(record, `Locked ${zec(swap.zcash.amountZat)} ZEC in a 2-of-2 (refund pre-signed by the maker)`);
       case "funded":
-        await this.waitForZcashTx(record.funding.txid, this.timeouts.fundingConfirmationMs);
-        return record.adaptor ? this.sendPreSignature(record) : this.acceptHtlc(record);
+        await this.waitForFunding(record);
+        return record.adaptor ? this.sendPreSignature(record) : this.fundingConfirmed(record);
       case "accepted":
         return record.adaptor ? this.verifyAdaptorLock(record) : this.verifyHtlcLock(record);
       case "locked":
@@ -495,35 +585,105 @@ export class Taker {
     }
   }
 
+  /** Fails fast, before the maker is asked to commit, if the quote has clearly expired. */
+  private assertQuoteLive(quote: Quote) {
+    if (quote.expiresAt + QUOTE_CLOCK_SKEW_SECONDS < Math.floor(Date.now() / 1000)) {
+      throw new ParalockError("quote_expired", "the quote expired before the maker committed; nothing was broadcast");
+    }
+  }
+
   private async broadcastFunding(record: TakerSwapRecord, detail: string) {
+    // Never hand a node a funding that could expire before it is mined.
+    const tip = await this.cfg.zcash.getBlockCount();
+    if (tip + FUNDING_BROADCAST_MARGIN_BLOCKS > record.funding.expiryHeight) {
+      throw new ParalockError("timeout", `the funding expires at block ${record.funding.expiryHeight} (tip ${tip}); not broadcasting it`);
+    }
+    if (record.fundingSentAt === undefined) {
+      // From here on a node may have the funding: the swap is never abandoned while it could still be mined.
+      record.fundingSentAt = Date.now();
+      await this.save(record);
+    }
     try {
       await this.cfg.zcash.sendRawTransaction(record.funding.hex);
     } catch (err) {
       // The node may have accepted it before the error (e.g. a lost response): only give up if it doesn't have it.
-      const known = await this.cfg.zcash.getRawTransaction(record.funding.txid).then(
-        () => true,
-        () => false,
-      );
-      if (!known) throw err;
+      if (!(await this.fundingKnown(record))) throw err;
     }
     await this.transition(record, "funded", "zcash_locked", { chain: "zcash", txid: record.funding.txid, detail });
   }
 
+  /**
+   * Waits for the funding to confirm. Abandons the swap (and throws) if the chain moves past the funding's expiry
+   * height without mining it: it can't be mined any more, so nothing was locked.
+   */
+  private async waitForFunding(record: TakerSwapRecord) {
+    const { txid, expiryHeight } = record.funding;
+    const confirmed = async () => ((await this.cfg.zcash.getRawTransaction(txid).catch(() => undefined))?.confirmations ?? 0) > 0;
+    let expired = false;
+    try {
+      await this.poll(async () => ((await confirmed()) ? true : undefined), `Zcash transaction ${txid}`, this.timeouts.fundingConfirmationMs, async () => {
+        expired = (await this.cfg.zcash.getBlockCount()) > expiryHeight + FUNDING_EXPIRY_MARGIN_BLOCKS && (await this.fundingMined(record)) === false;
+        return expired;
+      });
+    } catch (err) {
+      if (!expired) throw err;
+      const detail = `The funding expired at block ${expiryHeight} without being mined; nothing was locked`;
+      await this.transition(record, "abandoned", "failed", { chain: "zcash", detail });
+      throw new ParalockError("timeout", detail);
+    }
+  }
+
+  /**
+   * Whether the funding is mined: true, false (the node doesn't report it mined AND the lock address holds no such
+   * output), or undefined when the node can't tell. A node error never reads as "not mined".
+   */
+  private async fundingMined(record: TakerSwapRecord): Promise<boolean | undefined> {
+    const tx = await this.cfg.zcash.getRawTransaction(record.funding.txid).catch(() => undefined);
+    if ((tx?.confirmations ?? 0) > 0) return true;
+    const utxos = await this.cfg.zcash.getAddressUtxos([record.swap.zcash.htlcAddress]).catch(() => undefined);
+    if (!utxos) return undefined;
+    return utxos.some((u) => u.txid === record.funding.txid && u.vout === record.funding.vout);
+  }
+
+  private async fundingKnown(record: TakerSwapRecord): Promise<boolean> {
+    return this.cfg.zcash.getRawTransaction(record.funding.txid).then(
+      () => true,
+      () => false,
+    );
+  }
+
   // htlc ------------------------------------------------------------------------------------------------------------
 
-  private async acceptHtlc(record: TakerSwapRecord) {
+  /** The htlc accept request. `fundingExpiryHeight` is left out once the funding is mined: it no longer matters. */
+  private acceptRequest(record: TakerSwapRecord, withExpiry = true): AcceptRequest {
     const { swap } = record;
-    if (record.options.stopAfterFunding) {
-      await this.transition(record, "accepted");
-      return;
-    }
-    await this.cfg.maker.accept({
+    return {
       quoteId: swap.quote.id,
       redeemScript: swap.zcash.redeemScript,
       fundingTxid: record.funding.txid,
       fundingVout: record.funding.vout,
       takerEvmAddress: swap.evm.recipient,
+      ...(withExpiry ? { fundingExpiryHeight: record.funding.expiryHeight } : {}),
+    };
+  }
+
+  /** The maker accepts the HTLC (consuming the quote and reserving its stablecoins) before any ZEC moves. */
+  private async reserveHtlc(record: TakerSwapRecord) {
+    this.assertQuoteLive(record.swap.quote);
+    await this.cfg.maker.accept(this.acceptRequest(record));
+    record.reservedAt = Date.now();
+    await this.transition(record, "reserved", "quoted", {
+      chain: "zcash",
+      detail: "Maker accepted the HTLC and reserved the stablecoins; broadcasting the funding",
     });
+  }
+
+  private async fundingConfirmed(record: TakerSwapRecord) {
+    if (record.reservedAt === undefined && !record.options.stopAfterFunding) {
+      // Funded without a reservation (a swap started by an older SDK, or a resumed lockOnly): tell the maker now.
+      await this.cfg.maker.accept(this.acceptRequest(record, false));
+      record.reservedAt = Date.now();
+    }
     await this.transition(record, "accepted");
   }
 
@@ -565,6 +725,7 @@ export class Taker {
     const { swap } = record;
     const a = record.adaptor!;
     const multisigKey = keyPairFromPrivate(unhex(a.multisigKey));
+    this.assertQuoteLive(swap.quote);
     const accepted = await this.cfg.maker.proposeAdaptor({
       quoteId: swap.quote.id,
       takerZcashPubkey: hex(multisigKey.publicKey),
@@ -575,6 +736,7 @@ export class Taker {
       refundHeight: swap.zcash.refundHeight,
       refundAddress: record.returnAddress,
       takerEvmRecipient: swap.evm.recipient,
+      fundingExpiryHeight: record.funding.expiryHeight,
     });
     // Check everything the pre-signed refund depends on before funding.
     if (accepted.swapId !== swap.quote.id) throw new ParalockError("quote_rejected", "maker answered for a different swap");
@@ -596,6 +758,7 @@ export class Taker {
     if (!signerOk) throw new ParalockError("quote_rejected", "signer pubkey does not match the signer address");
     a.accepted = accepted;
     swap.adaptor = { signer: accepted.signer, signerPubkey: accepted.signerPubkey };
+    record.reservedAt = Date.now();
     // Persist the refund signature before broadcasting: from here on the ZEC can always come back.
     await this.transition(record, "proposed");
   }
@@ -685,14 +848,14 @@ export class Taker {
       const v = 27 + recoveryId(unhex(a.accepted!.signerPubkey), unhex(digest), sig);
       const claimer = relayer?.adaptor ?? escrow;
       relayed = claimer !== escrow;
-      claimTx = await claimer.claim(a.escrow!, { v, r: hex32(sig.r), s: hex32(sig.s) });
+      claimTx = await this.submitClaim(relayed, () => claimer.claim(a.escrow!, { v, r: hex32(sig.r), s: hex32(sig.s) }));
     } else {
       const lock = await c.htlc.getLockedSwap(swap.hashlock!);
       if (!lock) throw new ParalockError("lock_mismatch", "the maker's lock disappeared");
       await this.assertClaimWindow(record, c.htlc, lock.expiry);
       const claimer = relayer?.htlc ?? c.htlc;
       relayed = claimer !== c.htlc;
-      claimTx = await claimer.claim(lock, record.htlc!.secret);
+      claimTx = await this.submitClaim(relayed, () => claimer.claim(lock, record.htlc!.secret));
     }
     swap.evm.claimTx = claimTx;
     const amount = `${fmt(swap.evm.amount, c.tokenDecimals)} ${swap.quote.tokenSymbol}`;
@@ -704,6 +867,20 @@ export class Taker {
       }`,
     });
     await this.followMaker(record);
+  }
+
+  /** Submits a claim; a relayer's failure says how to claim from your own account instead. */
+  private async submitClaim(relayed: boolean, send: () => Promise<Hex>): Promise<Hex> {
+    try {
+      return await send();
+    } catch (err) {
+      if (!relayed) throw err;
+      throw new ParalockError(
+        isParalockError(err) ? err.code : "unavailable",
+        `the relayer did not submit the claim (${errorMessage(err)}); \`resume(id, { relayClaim: false })\` submits it from your own account before the lock expires`,
+        { cause: err },
+      );
+    }
   }
 
   private async followMaker(record: TakerSwapRecord) {

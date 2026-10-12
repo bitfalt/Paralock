@@ -120,6 +120,29 @@ describe("wire parsers", () => {
     expect(() => parseAdaptorProposal({ ...good, amountZat: "0" }, "regtest")).toThrow(/amountZat/);
   });
 
+  it("accepts an optional fundingExpiryHeight (0.1 and 0.2 takers don't send it) and validates it", () => {
+    const accept = { quoteId: quote().id, redeemScript: "0x63", fundingTxid: "ab".repeat(32), fundingVout: 0, takerEvmAddress: TOKEN };
+    const proposal = {
+      quoteId: quote().id,
+      takerZcashPubkey: pubkey(),
+      adaptorPoint: pubkey(),
+      fundingTxid: "ab".repeat(32),
+      fundingVout: 0,
+      amountZat: "100000000",
+      refundHeight: 1_000,
+      refundAddress: keyAddress(randomKeyPair(), "regtest"),
+      takerEvmRecipient: TOKEN,
+    };
+    expect("fundingExpiryHeight" in parseAcceptRequest(accept)).toBe(false);
+    expect("fundingExpiryHeight" in parseAdaptorProposal(proposal, "regtest")).toBe(false);
+    expect(parseAcceptRequest({ ...accept, fundingExpiryHeight: 1_234 }).fundingExpiryHeight).toBe(1_234);
+    expect(parseAdaptorProposal({ ...proposal, fundingExpiryHeight: 1_234 }, "regtest").fundingExpiryHeight).toBe(1_234);
+    for (const bad of [0, -1, 1.5, "1234", null, 500_000_000]) {
+      expect(() => parseAcceptRequest({ ...accept, fundingExpiryHeight: bad })).toThrow(/fundingExpiryHeight/);
+      expect(() => parseAdaptorProposal({ ...proposal, fundingExpiryHeight: bad }, "regtest")).toThrow(/fundingExpiryHeight/);
+    }
+  });
+
   it("validates accept and pre-signature requests", () => {
     const accept = { quoteId: quote().id, redeemScript: "0x63", fundingTxid: "AB".repeat(32), fundingVout: 0, takerEvmAddress: TOKEN };
     expect(parseAcceptRequest(accept).fundingTxid).toBe("ab".repeat(32));

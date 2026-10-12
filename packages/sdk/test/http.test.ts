@@ -61,6 +61,15 @@ describe("makerHandler", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("validates the optional fundingExpiryHeight of an accept request on the wire", async () => {
+    const handle = makerHandler(makeMaker());
+    const quote = await (await get(handle, "/quote?zat=100000000&chain=base&mode=htlc")).json();
+    const body = { quoteId: quote.id, redeemScript: "0x00", fundingTxid: "ab".repeat(32), fundingVout: 0, takerEvmAddress: MAKER, fundingExpiryHeight: "soon" };
+    const res = await get(handle, "/swaps", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/fundingExpiryHeight/);
+  });
+
   it("sends CORS headers only when configured, for allowed origins", async () => {
     expect((await get(makerHandler(makeMaker()), "/health")).headers.get("access-control-allow-origin")).toBeNull();
     const handle = makerHandler(makeMaker(), { cors: { origin: ["https://app.example"] } });

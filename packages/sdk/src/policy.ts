@@ -35,6 +35,19 @@ export const DEVNET_POLICY: TimeoutPolicy = {
   safetyFactor: 2,
 };
 
+/**
+ * Blocks past a funding transaction's expiry height after which an unmined funding counts as dead: it can never be
+ * mined any more, and the margin absorbs indexer lag and short reorgs. The maker then drops its reservation and the
+ * taker abandons the swap.
+ */
+export const FUNDING_EXPIRY_MARGIN_BLOCKS = 2;
+
+/**
+ * The taker broadcasts a funding only while the chain tip is at least this many blocks below the funding's expiry
+ * height, so it can still be mined (nodes refuse transactions that expire within 3 blocks of the tip).
+ */
+export const FUNDING_BROADCAST_MARGIN_BLOCKS = 5;
+
 /** Throws `ParalockError("unsafe_timeouts")` unless the policy itself is coherent (positive, safe defaults). */
 export function assertValidPolicy(policy: TimeoutPolicy): void {
   const positive = [policy.zcashLockBlocks, policy.evmLockSeconds, policy.zcashBlockSeconds, policy.minZcashConfirmations];

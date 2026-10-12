@@ -83,6 +83,14 @@ export function isQuoteId(value: unknown): value is string {
 // ---------------------------------------------------------------------------------------------------------------
 // Maker side: requests from takers
 
+/**
+ * The optional `fundingExpiryHeight` of an accept request or proposal (0.1 and 0.2 takers don't send it). Only its
+ * shape is checked here; the maker checks it against its chain tip.
+ */
+function optionalFundingExpiry(value: unknown): { fundingExpiryHeight?: number } {
+  return value === undefined ? {} : { fundingExpiryHeight: parseInteger(value, "fundingExpiryHeight", { min: 1, max: 499_999_999 }) };
+}
+
 /** Validates the htlc-mode accept request body. */
 export function parseAcceptRequest(body: unknown): AcceptRequest {
   const b = object(body, "request");
@@ -96,6 +104,7 @@ export function parseAcceptRequest(body: unknown): AcceptRequest {
     fundingTxid: (b.fundingTxid as string).toLowerCase(),
     fundingVout: parseInteger(b.fundingVout, "fundingVout", { max: 10_000 }),
     takerEvmAddress: b.takerEvmAddress as Hex,
+    ...optionalFundingExpiry(b.fundingExpiryHeight),
   };
 }
 
@@ -118,6 +127,7 @@ export function parseAdaptorProposal(body: unknown, network: Network): AdaptorPr
     refundHeight: parseInteger(b.refundHeight, "refundHeight", { min: 1, max: 499_999_999 }),
     refundAddress: b.refundAddress as string,
     takerEvmRecipient: b.takerEvmRecipient as Hex,
+    ...optionalFundingExpiry(b.fundingExpiryHeight),
   };
 }
 

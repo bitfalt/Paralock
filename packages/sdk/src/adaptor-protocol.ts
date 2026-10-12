@@ -6,6 +6,8 @@
  *    adaptor point Y = y·G. Only the taker knows y.
  * 2. Maker → taker `AdaptorProposalAccepted`: the maker's signature on the taker's time-locked refund (so the taker
  *    can always get the ZEC back), where the maker's ZEC will go, and the one-time EVM signer it will use.
+ *    The maker reserves its stablecoins for this swap until the funding confirms, or until `fundingExpiryHeight`
+ *    passes without it being mined.
  * 3. Taker broadcasts the funding, then sends a pre-signature on the maker's claim, encrypted to Y.
  * 4. Maker locks stablecoins in the adaptor escrow (released by the one-time signer's signature) and hands the taker
  *    a pre-signature on the escrow's claim digest, also encrypted to Y.
@@ -39,6 +41,12 @@ export interface AdaptorProposal {
   refundAddress: string;
   /** Who the escrow pays (the taker, a fresh address, or a third party). */
   takerEvmRecipient: Hex;
+  /**
+   * Last block the funding can be mined in (its `expiryHeight`). The maker drops the swap, and releases the stablecoins
+   * it reserved, once the chain is past it and the funding was never mined. Optional: 0.1 and 0.2 takers don't send
+   * it, and the maker then keeps the reservation until the Zcash window is too short to lock.
+   */
+  fundingExpiryHeight?: number;
 }
 
 /** Step 2, maker → taker. The taker checks all of it before broadcasting the funding. */

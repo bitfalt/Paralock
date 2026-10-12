@@ -35,7 +35,10 @@ interface Out {
   spentBy?: string;
 }
 
-/** A Zcash chain in memory: mempool, blocks, UTXOs, lock-time and double-spend rules (no script evaluation). */
+/**
+ * A Zcash chain in memory: mempool, blocks, UTXOs, lock-time, expiry and double-spend rules (no script evaluation).
+ * Blocks come from `generate` (tests and the engines' devnet hook) or, with `autoMine`, on a real-time schedule.
+ */
 export class FakeZcash implements ZcashNode {
   height = 100;
   readonly txs = new Map<string, { hex: string; height?: number }>();
@@ -44,6 +47,24 @@ export class FakeZcash implements ZcashNode {
   onBroadcast?: (txid: string) => void | Promise<void>;
   /** Make the next broadcasts fail (simulates a node outage). */
   failBroadcasts = 0;
+  /** Leave mempool transactions out of new blocks (congestion). Expired ones are still evicted. */
+  holdMempool = false;
+  private miner?: ReturnType<typeof setInterval>;
+
+  /**
+   * Mines one block every `blockTimeMs` of real time, the first one `blockTimeMs` from now (e.g. 75 s blocks scaled
+   * down, slower than a quote's TTL). Returns a function that stops it; `stopMining()` does too.
+   */
+  autoMine(blockTimeMs: number): () => void {
+    this.stopMining();
+    this.miner = setInterval(() => void this.generate(1), blockTimeMs);
+    return () => this.stopMining();
+  }
+
+  stopMining() {
+    if (this.miner) clearInterval(this.miner);
+    this.miner = undefined;
+  }
 
   /** Credits `value` to `address` out of thin air (a faucet), confirmed. */
   faucet(script: Uint8Array, value: bigint): Utxo {
@@ -60,9 +81,26 @@ export class FakeZcash implements ZcashNode {
     return BRANCH_ID_NU6_3;
   }
   async generate(n: number) {
-    this.height += n;
-    for (const tx of this.txs.values()) tx.height ??= this.height;
+    for (let i = 0; i < n; i++) {
+      this.height++;
+      for (const [id, tx] of this.txs) {
+        if (tx.height !== undefined) continue;
+        // A transaction can be mined up to its expiry height; after that it leaves the mempool for good.
+        const expiry = tx.hex ? parseTx(tx.hex).expiryHeight : 0;
+        if (expiry > 0 && expiry < this.height) this.evict(id);
+        else if (!this.holdMempool) tx.height = this.height;
+      }
+    }
     return [];
+  }
+  private evict(id: string) {
+    const tx = parseTx(this.txs.get(id)!.hex);
+    for (const input of tx.inputs) {
+      const prev = this.outs.get(`${input.prevTxid}:${input.vout}`);
+      if (prev?.spentBy === id) prev.spentBy = undefined;
+    }
+    tx.outputs.forEach((_, vout) => this.outs.delete(`${id}:${vout}`));
+    this.txs.delete(id);
   }
   async getAddressUtxos(addresses: string[]) {
     return [...this.outs.values()]
@@ -93,7 +131,8 @@ export class FakeZcash implements ZcashNode {
     const id = txidOf(tx);
     if (this.txs.has(id)) return id;
     if (tx.lockTime > 0 && tx.lockTime > this.height) throw new Error("non-final transaction (lock time not reached)");
-    if (tx.expiryHeight > 0 && tx.expiryHeight <= this.height) throw new Error("transaction expired");
+    // Like zcashd/Zebra: refuse a transaction that could only be mined within 3 blocks of its expiry.
+    if (tx.expiryHeight > 0 && tx.expiryHeight < this.height + 4) throw new Error("tx-expiring-soon");
     let inValue = 0n;
     for (const input of tx.inputs) {
       const out = this.outs.get(`${input.prevTxid}:${input.vout}`);
