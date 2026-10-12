@@ -128,10 +128,10 @@ swaps (eigenwallet).
 | [`packages/adaptor`](packages/adaptor) | `@paralock/adaptor`: ECDSA adaptor signatures on secp256k1 with DLEQ proofs (pre-sign, pre-verify, adapt, extract). |
 | [`contracts`](contracts) | `ParalockHTLC` (hashlock escrow) and `ParalockAdaptorEscrow` (signature-release escrow) for TIP-20 and ERC-20 stablecoins. One storage slot per swap. |
 | [`packages/evm`](packages/evm) | `@paralock/evm`: viem clients for both escrows on Tempo or any EVM chain. |
-| [`packages/sdk`](packages/sdk) | `@paralock/sdk`: `Maker` and `Taker` engines for both modes, timeout policy, privacy options, maker HTTP API, devnet wiring. |
+| [`packages/sdk`](packages/sdk) | `@paralock/sdk`: `createTaker` / `createMaker` factories, `Maker` and `Taker` engines for both modes, crash-safe persistence and recovery, quote validation, maker risk limits, maker HTTP API, devnet wiring. |
 | [`packages/cli`](packages/cli) | The `paralock` CLI: devnet, maker server, swaps. |
 | [`apps/web`](apps/web) | The landing page (`/`) and the app (`/app`): Pay (payment links) and Swap. |
-| [`examples`](examples) | Apps built with Paralock: private payroll, selling a secret for ZEC. |
+| [`examples`](examples) | Apps built with Paralock: quickstart, private payroll, selling a secret for ZEC. |
 
 ## Quickstart (local devnet)
 
@@ -151,6 +151,9 @@ pnpm paralock swap --zec 1 --chain base --private     # ZEC → USDC on Base, no
 pnpm paralock swap --zec 0.5 --fresh-recipient --relay --standard-only
 pnpm paralock swap --zec 0.5 --refund-demo            # the maker never locks; the taker refunds after the timeout
 pnpm paralock pay --usd 25 --to 0x… --chain arbitrum  # pay someone exactly $25 from shielded ZEC
+pnpm paralock swaps                                   # unfinished swaps saved in .paralock/taker
+pnpm paralock resume <id>                             # continue a saved swap after a crash or restart
+pnpm paralock refund <id>                             # refund a saved swap's ZEC after its refund height
 pnpm --filter web dev                                 # the web app
 ```
 
@@ -166,42 +169,62 @@ Devnet roles:
 
 | Example | Built on | What it shows |
 |---|---|---|
-| [`examples/payroll`](examples/payroll) | `@paralock/sdk` | **Private payroll.** Pay a team exact dollar amounts on their own chains from a shielded ZEC treasury. Private mode, relayed claims, receipts. One run paid $4,665.75 to four contributors on Tempo, Base, Arbitrum and Ethereum. |
+| [`examples/quickstart`](examples/quickstart) | `@paralock/sdk` | **Hello world.** `createTaker`, a validated quote, a swap, and the refund path when the maker never locks, in about 60 lines. |
+| [`examples/payroll`](examples/payroll) | `@paralock/sdk` | **Private payroll.** Pay a team exact dollar amounts on their own chains from a shielded ZEC treasury, with `createTaker`. Private mode, relayed claims, crash-safe store, receipts. One run paid $4,665.75 to four contributors on Tempo, Base, Arbitrum and Ethereum. |
 | [`examples/sell-a-secret`](examples/sell-a-secret) | `@paralock/zcash` only | **Fair exchange of digital goods.** The seller gets paid only by revealing the decryption key on-chain, and the buyer reads it from the claim transaction. No escrow agent. |
 | [`apps/web`](apps/web) | `@paralock/sdk` | **Pay with shielded ZEC.** A payment-link checkout plus a swap app. |
 
 ```sh
 pnpm paralock dev --evm all
+pnpm --filter @paralock/example-quickstart start [-- --private | --refund]
 pnpm --filter @paralock/example-payroll start
-pnpm --filter @paralock/example-sell-a-secret start
+pnpm --filter @paralock/example-sell-a-secret start [-- --seller-vanishes]
 ```
+
+## Using the SDK
+
+```ts
+import { createTaker } from "@paralock/sdk";
+
+const taker = createTaker({
+  zcash: { rpcUrl: "http://127.0.0.1:8232", network: "mainnet", key: process.env.ZEC_KEY! },
+  evm: { base: { rpcUrl, chainId: 8453, htlc: HTLC, adaptorEscrow: ESCROW, account: EVM_KEY, fromBlock: DEPLOY_BLOCK } },
+  maker: "https://maker.example",
+  store: "./paralock-taker", // secrets and refund data, persisted before anything is broadcast
+});
+const quote = await taker.quoteExactOut(25_000_000n, "base", "adaptor"); // validated against your config and limits
+const swap = await taker.swap(quote, { recipient: "0xMerchant…", privacy: { relayClaim: true } });
+// After a crash: taker.resume(id), or taker.refund(id) once the refund height is reached.
+```
+
+`createMaker` + `makerHandler` run the other side; see [`packages/sdk`](packages/sdk) for the maker, recovery, limits
+and security notes.
 
 ## Using the Zcash library on its own
 
 ```ts
-import { createHtlc, buildHtlcFunding, buildHtlcClaim, ZcashRpc } from "@paralock/zcash";
+import { FUNDING_EXPIRY_DELTA, ZcashRpc, buildHtlcClaim, buildHtlcFunding, createHtlc } from "@paralock/zcash";
 
-const rpc = new ZcashRpc("http://127.0.0.1:18232");
-const htlc = createHtlc(
-  { hashlock, claimPubkey: maker.publicKey, refundPubkey: taker.publicKey, refundHeight: (await rpc.getBlockCount()) + 144 },
-  "testnet",
-);
-const funding = buildHtlcFunding({ htlc, amount: 100_000_000n, utxos, key: taker, branchId: await rpc.getNextBranchId() });
+const rpc = new ZcashRpc("http://127.0.0.1:18232", { timeoutMs: 15_000, retries: 3 });
+const tip = await rpc.getBlockCount();
+const branchId = await rpc.getNextBranchId();
+const htlc = createHtlc({ hashlock, claimPubkey: maker.publicKey, refundPubkey: taker.publicKey, refundHeight: tip + 144 }, "testnet");
+const funding = buildHtlcFunding({ htlc, amount: 100_000_000n, utxos, key: taker, branchId, network: "testnet", expiryHeight: tip + FUNDING_EXPIRY_DELTA });
 await rpc.sendRawTransaction(funding.hex);
-const claim = buildHtlcClaim({ htlc, utxo, key: maker, preimage: secret, to: makerAddress, branchId });
+const claim = buildHtlcClaim({ htlc, utxo, key: maker, preimage: secret, to: makerAddress, branchId, network: "testnet" });
 ```
 
 ## Tests
 
-**224 tests in total.**
+**294 tests in total.**
 
 | Suite | Count | What it covers |
 |---|---|---|
-| `packages/zcash` | 15 | ZIP 244 txid and all six transparent sighash types against the [official test vectors](https://github.com/zcash/zcash-test-vectors); live regtest: HTLC fund/claim/refund (refund rejected before the timeout), 2-of-2 claim with an adaptor-completed signature, pre-signed refund only after its lock time, wrong secret rejected |
-| `packages/adaptor` | 30 | Pre-sign → pre-verify → adapt → valid ECDSA → extract, over random rounds; tampering rejected; EVM `ecrecover` compatible |
+| `packages/zcash` | 28 | ZIP 244 txid and all six transparent sighash types against the [official test vectors](https://github.com/zcash/zcash-test-vectors); RPC timeouts, retries and duplicate broadcasts; key, address-network, dust and signature checks; live regtest: HTLC fund/claim/refund (refund rejected before the timeout), 2-of-2 claim with an adaptor-completed signature, pre-signed refund only after its lock time, wrong secret rejected |
+| `packages/adaptor` | 32 | Pre-sign → pre-verify → adapt → valid ECDSA → extract, over random rounds; tampering and out-of-range scalars rejected; fresh nonces per call; EVM `ecrecover` compatible |
 | `contracts` | 146 | Both escrows: happy paths, wrong secret or signer, high-s, expiry edges, double claim, reuse, tampering, fuzzing, real TIP-20 tokens |
-| `packages/evm` | 20 | Both clients against local Tempo and plain EVM chains |
-| `packages/sdk` | 8 | Timeout policy, pricing, transport, privacy helpers, deterministic adaptor spends |
+| `packages/evm` | 23 | Both clients against local Tempo and plain EVM chains, including lock lookups with block numbers |
+| `packages/sdk` | 65 | Maker and taker engines on fake chains: both modes end to end, restart and resume of both parties, secrets persisted before funding, claim rebroadcast, refunds from the store, a maker refusing an underfunded 2-of-2, a delayed funding and a missing pre-signature, maker limits; stores (atomic files, 0600); quote and request validation; retries; factories; HTTP handler and client |
 
 End-to-end swaps verified on the devnet:
 - htlc mode on Tempo;

@@ -74,11 +74,15 @@ An observer who suspects a swap can still correlate amounts and time windows, bu
 ### Implementation status
 
 - **`@paralock/adaptor`:** ECDSA adaptor signatures on secp256k1 with Chaum–Pedersen DLEQ proofs. Pre-sign,
-  pre-verify, adapt, extract; 30 tests.
+  pre-verify, adapt, extract, with hedged nonces (fresh randomness mixed with the key and message, so a weak RNG
+  can't repeat a nonce); 32 tests.
 - **`@paralock/zcash`:** 2-of-2 multisig locks and pre-signed time-locked refunds. Regtest tests cover: claim with
   an adaptor-completed signature; refund rejected before its lock time and accepted after; wrong secret rejected.
-- **Not audited.** The prototype keeps refund material in memory; a production taker must persist it before funding.
-  Adaptor ECDSA has seen far less scrutiny than Schnorr adaptor signatures. Treat Level 2 as experimental.
+- **`@paralock/sdk`:** the taker writes the adaptor secret, its multisig key and the maker's refund signature to its
+  `SwapStore` before broadcasting the funding, so the refund survives a crash (`taker.refund(id)`). The maker persists
+  its per-quote key and checks the funding value, the remaining window and pending network upgrades before locking.
+- **Not audited.** Adaptor ECDSA has seen far less scrutiny than Schnorr adaptor signatures. Treat Level 2 as
+  experimental.
 
 ## Level 3: a fully shielded Zcash leg (research)
 
