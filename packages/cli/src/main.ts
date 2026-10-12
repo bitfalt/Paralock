@@ -5,7 +5,7 @@ import { devCommand } from "./dev.js";
 import { devnetDown, devnetStatus, devnetUp } from "./devnet.js";
 import { doctorCommand } from "./doctor.js";
 import { runMaker } from "./maker-server.js";
-import { runSwap } from "./swap.js";
+import { listSwaps, refundSwap, resumeSwap, runSwap } from "./swap.js";
 
 const HELP = `paralock: trustless swaps between shielded ZEC and dollars on EVM chains
 
@@ -29,6 +29,11 @@ Usage:
       --jitter <ms>                       Random delay before claiming
       --no-shield                         Don't unshield first / reshield after
       --refund-demo                       Lock ZEC and let the maker vanish; refund after the timeout
+  paralock pay --usd <amount> --to <0x…> [--chain <chain>] [--private] [--relay] [--label <text>]
+                                          Pay someone an exact dollar amount from shielded ZEC
+  paralock swaps                          List unfinished swaps saved in .paralock/taker
+  paralock resume <id>                    Continue a saved swap after a crash or restart
+  paralock refund <id> [--no-shield]      Refund a saved swap's ZEC once its refund height is reached
 
 <chains>: comma-separated, from tempo, base, ethereum, arbitrum, robinhood, hyperevm, or "all".
   Default: tempo,base,ethereum. Each runs on its own anvil (ports 8545-8550, chain ids 31337-31342).
@@ -71,6 +76,13 @@ async function main() {
   if (cmd === "maker") {
     const { values } = parseArgs({ args, options: { port: { type: "string" } } });
     return runMaker({ port: Number(values.port ?? 7420) });
+  }
+  if (cmd === "swaps") return listSwaps();
+  if (cmd === "resume" || cmd === "refund") {
+    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "no-shield": { type: "boolean" } } });
+    const id = positionals[0];
+    if (!id) throw new Error(`usage: paralock ${cmd} <swap id>`);
+    return cmd === "resume" ? resumeSwap(id) : refundSwap(id, { shield: !values["no-shield"] });
   }
   if (cmd === "pay") {
     const { values } = parseArgs({
@@ -128,6 +140,11 @@ async function main() {
   }
   process.stdout.write(HELP);
 }
+
+process.on("unhandledRejection", (err) => {
+  console.error("unhandled rejection:", err);
+  process.exitCode = 1;
+});
 
 main().catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : err);

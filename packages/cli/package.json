@@ -1,14 +1,21 @@
 {
   "name": "@paralock/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "paralock CLI: local Zcash + multi-chain EVM devnet, doctor, maker server, and swaps from the terminal.",
   "license": "MIT",
   "type": "module",
-  "bin": { "paralock": "dist/main.js" },
-  "scripts": { "build": "tsc -p .", "typecheck": "tsc -p . --noEmit", "start": "node dist/main.js" },
+  "bin": {
+    "paralock": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "start": "node dist/main.js"
+  },
   "dependencies": {
     "@paralock/sdk": "workspace:*",
     "@paralock/evm": "workspace:*",
     "@paralock/zcash": "workspace:*"
-  }
+  },
+  "private": true
 }

@@ -8,7 +8,7 @@ import {
   isStandardAmount,
   saveRecipient,
 } from "@paralock/sdk";
-import { readDevnet } from "./env.js";
+import { readDevnet, statePath } from "./env.js";
 
 const ZAT = 100_000_000;
 const fmtUsd = (units: bigint) => (Number(units) / 1e6).toFixed(2);
@@ -40,7 +40,8 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
   if (!opts.pay && opts.privacy.standardAmountsOnly && !isStandardAmount(zatIn)) {
     throw new Error("--standard-only allows 0.1, 0.5, 1 or 5 ZEC");
   }
-  const { taker, maker, ths, prepareFunds, reshield } = await devnetTaker(cfg, {
+  const { taker, ths, prepareFunds, reshield } = await devnetTaker(cfg, {
+    store: statePath("taker"),
     onUpdate: printStep,
     onFreshRecipient: (account, swap) => {
       saveRecipient({ address: account.address, privateKey: account.privateKey, swapId: swap.id, chain: opts.chain });
@@ -49,9 +50,10 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
   });
 
   const mode = opts.private ? "adaptor" : "htlc";
+  // The taker validates every quote: key, chain id, token, lock windows, expiry.
   const quote = opts.pay
-    ? await maker.quoteExactOut(BigInt(Math.round(Number(opts.pay.usd) * 1e6)), opts.chain, mode)
-    : await maker.quote(zatIn, opts.chain, mode);
+    ? await taker.quoteExactOut(BigInt(Math.round(Number(opts.pay.usd) * 1e6)), opts.chain, mode)
+    : await taker.quote(zatIn, opts.chain, mode);
   const zat = quote.zecAmountZat;
   const zecText = (Number(zat) / ZAT).toString();
   if (opts.pay) {
@@ -82,7 +84,8 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
   } catch (err) {
     if (!(err instanceof SwapFailedError)) throw err;
     console.log(`Swap failed after locking ZEC (${err.message}). Refunding once the Zcash timeout passes…`);
-    await taker.refund(err.swap);
+    console.log(`  (the swap is saved; \`paralock refund ${err.swap.id}\` also works after a restart)`);
+    await taker.refund(err.swap.id);
     console.log("ZEC refunded to the taker.");
     process.exitCode = 1;
     return;
@@ -95,4 +98,29 @@ export async function runSwap(opts: SwapCommand): Promise<void> {
   if (swap.mode === "adaptor") console.log("No hashlock appeared on either chain; the secret traveled inside the signatures.");
   if (opts.shield && (await reshield())) console.log("Leftover change shielded back into Ironwood.");
   console.log(`The maker is shielding its ZEC back into Ironwood (ths account ${cfg.maker.thsAccount}; see ${ths.url}).`);
+}
+
+/** Lists the devnet taker's unfinished swaps (their ZEC may still be locked). */
+export async function listSwaps(): Promise<void> {
+  const { taker } = await devnetTaker(readDevnet(), { store: statePath("taker") });
+  const pending = await taker.pendingSwaps();
+  if (!pending.length) return console.log("No unfinished swaps.");
+  for (const s of pending) {
+    console.log(`${s.id}  ${s.mode.padEnd(7)} ${s.status.padEnd(13)} ${(Number(s.zcash.amountZat) / ZAT).toString()} ZEC → ${s.quote.chain}, refund at block ${s.zcash.refundHeight}`);
+  }
+}
+
+/** Continues a saved swap (e.g. after a crash) and prints its progress. */
+export async function resumeSwap(id: string): Promise<void> {
+  const { taker } = await devnetTaker(readDevnet(), { store: statePath("taker"), onUpdate: printStep });
+  const swap = await taker.resume(id, { claim: true });
+  console.log(`Swap ${swap.id}: ${swap.status}`);
+}
+
+/** Refunds a saved swap's ZEC once its refund height is reached. */
+export async function refundSwap(id: string, opts: { shield: boolean }): Promise<void> {
+  const { taker, reshield } = await devnetTaker(readDevnet(), { store: statePath("taker"), onUpdate: printStep });
+  const swap = await taker.refund(id);
+  console.log(`Refunded ${(Number(swap.zcash.amountZat) / ZAT).toString()} ZEC in ${swap.zcash.refundTxid}.`);
+  if (opts.shield && (await reshield())) console.log("Refunded ZEC shielded back into Ironwood.");
 }
