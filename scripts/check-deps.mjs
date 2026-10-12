@@ -2,7 +2,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const PACKAGES = ["zcash", "adaptor", "evm", "sdk"];
+const PACKAGES = ["zcash", "adaptor", "evm", "sdk", "lightwalletd"];
 const IMPORT = /(?:from|import)\s+["']([^"'.][^"']*)["']/g;
 
 function sources(dir) {

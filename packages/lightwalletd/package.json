@@ -1,0 +1,55 @@
+{
+  "name": "@paralock/lightwalletd",
+  "version": "0.1.0",
+  "description": "Use a lightwalletd (or Zaino) server as the Zcash backend for Paralock swaps: no full node needed.",
+  "keywords": [
+    "zcash",
+    "lightwalletd",
+    "zaino",
+    "grpc",
+    "atomic-swap",
+    "zip-244"
+  ],
+  "license": "MIT",
+  "author": "bitfalt (https://github.com/bitfalt)",
+  "homepage": "https://github.com/bitfalt/Paralock#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitfalt/Paralock.git",
+    "directory": "packages/lightwalletd"
+  },
+  "bugs": {
+    "url": "https://github.com/bitfalt/Paralock/issues"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "proto",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.6",
+    "@grpc/proto-loader": "^0.8.1",
+    "@noble/hashes": "^2.4.0",
+    "@paralock/zcash": "workspace:*"
+  }
+}
