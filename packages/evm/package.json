@@ -22,7 +22,33 @@
     "viem": "^2.57.4"
   },
   "files": [
+    "README.md",
     "dist",
     "src"
-  ]
+  ],
+  "keywords": [
+    "evm",
+    "tempo",
+    "htlc",
+    "escrow",
+    "atomic-swap",
+    "viem",
+    "adaptor-signatures"
+  ],
+  "author": "Daniel Garbanzo",
+  "homepage": "https://github.com/bitfalt/Paralock#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitfalt/Paralock.git",
+    "directory": "packages/evm"
+  },
+  "bugs": {
+    "url": "https://github.com/bitfalt/Paralock/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }
