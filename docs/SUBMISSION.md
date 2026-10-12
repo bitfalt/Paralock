@@ -5,21 +5,21 @@ colosseum.com before the deadline.
 
 ## Positioning
 
-> Pay anyone in dollars from shielded ZEC, with no custodian in between. Paralock is the open-source SDK for
-> non-custodial ZEC settlement, and **Pay** is the first product built on it: a shop shares a payment link, you pay
-> from your private savings, and they receive exactly the dollars they asked for, atomically. Either both sides
-> settle or both refund. We run the first market maker and earn the spread on every swap.
+> Paralock is open-source developer infrastructure for trustless swaps between shielded ZEC and stablecoins on EVM
+> chains: two locks, one key, either both sides settle or both refund. SDKs in TypeScript and Rust, a CLI, a
+> one-command devnet and agent-ready docs. The product on top is hosted liquidity: we run the market makers and earn
+> the spread on every swap. Pay (payment links) is one example of what developers can build with it.
 
-- **Zcash track:** lead with Pay: a payment link, shielded ZEC in, exact dollars out. Then the open-source SDK and
-  the one-command devnet.
+- **Lead with the toolkit (public good), not with Pay.** Pay is a demo of the SDK, not the pitch.
+- **Zcash track:** the open-source Zcash libraries and SDKs, then the public testnet runs, then the hosted makers.
 - **Differentiation from past swap projects** (SolAtomicSwaps, Mcortx, Fun Gerbil):
-  - they demoed a swap protocol; Paralock is a toolkit plus a product built on it (Pay);
+  - they demoed a swap protocol; Paralock is a published, documented toolkit with a business on top (hosted makers);
   - it is Zcash- and shielded-first, built on Zcash tooling that didn't exist (v5 transactions, ZIP 244, NU6.3 and
     NU7, a lightwalletd backend so you don't need a full node);
   - it runs on public testnets today, with every transaction recorded.
   - a business model with a payer.
-- **General pool:** lead with the business: who pays (takers, through the spread), the first integration (a Zcash
-  wallet's "pay in dollars"), and why the founder can build it (a backend engineer working on ZK infrastructure).
+- **General pool:** the business is hosted makers: takers pay through the spread, the first integrations are wallets
+  adding "swap to dollars" with the SDK, and the founder is a backend engineer working on ZK infrastructure.
 - **Public Good award:** the open-source Zcash libraries in TypeScript and Rust (npm and crates.io), adaptor
   signatures, the protocol spec with cross-language test vectors, the one-command devnet and the agent docs (llms.txt,
   MCP). 3 of the last 5 winners of that award were open-source dev tools.
@@ -28,8 +28,8 @@ colosseum.com before the deadline.
 
 **Name:** Paralock
 
-**One-liner:** Pay anyone in dollars from shielded ZEC, with no custodian: atomic, open source, on Tempo, Base,
-Ethereum and more.
+**One-liner:** Open-source SDKs for trustless swaps between shielded ZEC and stablecoins, with hosted makers that
+earn the spread.
 
 **Tracks:** Zcash (primary). Tempo too, if Colosseum allows more than one track; ask in Discord.
 
@@ -112,9 +112,9 @@ crates.io, so a market maker can run as one native binary. Both speak the same p
 set of test vectors. One command starts a full local network for developers, and the docs are written for coding
 agents too, with an MCP server.
 
-**[2:10, business]** The business is the market maker. We run the first maker, take a spread on every swap, and
-start with a "pay in dollars" button for Zcash wallets. The protocol is open, so more makers, and peer-to-peer
-offers, can join.
+**[2:10, business]** The toolkit is free. The business is liquidity: we host the market makers that quote these
+swaps and earn the spread on every one. Wallets and apps integrate the SDK; our payment-link app, Pay, is one
+example. The protocol is open, so more makers can join.
 
 **[2:35, close]** I'm bitfalt. I build backend infrastructure for zero-knowledge systems. Paralock: keep your savings
 private, spend them in dollars, and trust no one in between. Thank you.
