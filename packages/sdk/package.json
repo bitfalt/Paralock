@@ -1,15 +1,18 @@
 {
   "name": "@paralock/sdk",
-  "version": "0.1.1",
-  "description": "Paralock swap SDK: trustless atomic swaps between Zcash and EVM chains (Tempo first).",
+  "version": "0.2.0",
+  "description": "Maker and taker engines for trustless atomic swaps and payments between Zcash and stablecoins on EVM chains: factories, crash-safe persistence and recovery, quote validation, maker risk limits, and an HTTP transport.",
   "keywords": [
     "zcash",
     "atomic-swap",
     "cross-chain",
+    "htlc",
+    "adaptor-signatures",
+    "stablecoin",
+    "payments",
+    "market-maker",
     "evm",
-    "tempo",
-    "privacy",
-    "market-maker"
+    "tempo"
   ],
   "license": "MIT",
   "author": "bitfalt (https://github.com/bitfalt)",
@@ -54,6 +57,7 @@
     "@paralock/evm": "workspace:*",
     "@paralock/zcash": "workspace:*",
     "@scure/bip32": "^2.4.0",
-    "@scure/bip39": "^2.4.0"
+    "@scure/bip39": "^2.4.0",
+    "viem": "^2.57.4"
   }
 }

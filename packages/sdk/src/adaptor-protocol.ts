@@ -21,37 +21,51 @@ import {
 } from "@paralock/zcash";
 import type { Hex } from "./types.js";
 
+/** Step 1, taker → maker. The swap id becomes `quoteId`. */
 export interface AdaptorProposal {
   quoteId: string;
+  /** The taker's fresh per-swap key: its half of the 2-of-2. */
   takerZcashPubkey: Hex;
+  /** Y = y·G. */
   adaptorPoint: Hex;
+  /** Txid of the signed but not yet broadcast funding transaction. */
   fundingTxid: string;
   fundingVout: number;
+  /** Zatoshi, as a decimal string; must equal the quote. */
   amountZat: string;
+  /** Lock time of the taker's refund. */
   refundHeight: number;
+  /** Where the refund pays. */
   refundAddress: string;
+  /** Who the escrow pays (the taker, a fresh address, or a third party). */
   takerEvmRecipient: Hex;
 }
 
+/** Step 2, maker → taker. The taker checks all of it before broadcasting the funding. */
 export interface AdaptorProposalAccepted {
   swapId: string;
   /** Maker's DER signature + sighash byte on the taker's refund. */
   makerRefundSignature: Hex;
   /** Address the maker's claim pays. */
   claimTo: string;
+  /** Consensus branch id both spends commit to; the taker checks it against its own node. */
   branchId: number;
   /** One-time EVM signer (address and compressed pubkey) whose signature releases the escrow. */
   signer: Hex;
   signerPubkey: Hex;
 }
 
+/** Step 3, taker → maker. */
 export interface AdaptorPreSignatureRequest {
   /** Taker's pre-signature on the maker's Zcash claim, encrypted to the adaptor point (`encodePreSignature`). */
   takerPreSignature: string;
 }
 
+/** The two spends of a 2-of-2 lock. */
 export interface AdaptorSpends {
+  /** Back to the taker, time-locked to the refund height. */
   refund: MultisigSpend;
+  /** To the maker's `claimTo`, no lock time. */
   claim: MultisigSpend;
 }
 
@@ -66,12 +80,14 @@ export function adaptorSpends(args: {
   refundHeight: number;
   refundAddress: string;
   claimTo: string;
+  /** Consensus branch id both spends commit to; the taker checks it against its own node. */
   branchId: number;
 }): AdaptorSpends {
   const multisig = createMultisig2of2(args.takerPubkey.slice(2), args.makerPubkey.slice(2), args.network);
   const utxo = { txid: args.fundingTxid, vout: args.fundingVout, value: args.amountZat, scriptPubKey: multisig.scriptPubKey };
   return {
-    refund: buildMultisigSpend({ multisig, utxo, to: args.refundAddress, lockTime: args.refundHeight, branchId: args.branchId }),
-    claim: buildMultisigSpend({ multisig, utxo, to: args.claimTo, branchId: args.branchId }),
+    // Both spends never expire (expiryHeight 0): they are signed long before they are broadcast.
+    refund: buildMultisigSpend({ multisig, utxo, to: args.refundAddress, lockTime: args.refundHeight, branchId: args.branchId, network: args.network }),
+    claim: buildMultisigSpend({ multisig, utxo, to: args.claimTo, branchId: args.branchId, network: args.network }),
   };
 }

@@ -1,18 +1,14 @@
-import {
-  type AdaptorEscrow,
-  type EvmHtlc,
-  HtlcTimeoutError,
-  SwapRefundedError,
-  createAdaptorEscrow,
-  createEvmHtlc,
-} from "@paralock/evm";
+/**
+ * Local devnet wiring (`paralock devnet up`): the same `createTaker` / `createMaker` factories a real deployment uses,
+ * fed from `.paralock/devnet.json`, plus ths helpers to move regtest ZEC between shielded and transparent pools.
+ */
 import { ZcashRpc, keyAddress } from "@paralock/zcash";
-import type { AdaptorEvmClient, ChainClients, EvmClient } from "./evm-client.js";
+import { createMaker, createTaker, type MakerEvmChainOptions, type StoreOption, type TakerEvmChainOptions } from "./factories.js";
 import { HttpMakerApi } from "./http.js";
-import { Maker } from "./maker.js";
+import type { Maker } from "./maker.js";
 import { DEVNET_POLICY } from "./policy.js";
 import { zecUsdPrice } from "./pricing.js";
-import { Taker, type TakerChain, type TakerConfig } from "./taker.js";
+import type { Taker, TakerConfig } from "./taker.js";
 import { ThsClient } from "./ths.js";
 import type { DevnetConfig, EvmChain, EvmNetwork, Hex } from "./types.js";
 
@@ -30,110 +26,56 @@ export interface DevnetFile extends DevnetConfig {
   relayer: { evmKey: Hex };
 }
 
-const latestTimestamp = async (c: EvmHtlc | AdaptorEscrow) => (await c.publicClient.getBlock({ blockTag: "latest" })).timestamp;
-
-/** Adapts `@paralock/evm`'s HTLC client to the engines' `EvmClient`. */
-export function evmClientFrom(chain: EvmChain, htlc: EvmHtlc): EvmClient {
-  const address = htlc.walletClient?.account.address;
-  if (!address) throw new Error("EVM client needs an account");
-  return {
-    chain,
-    chainId: htlc.chain.id,
-    contract: htlc.address,
-    address,
-    async lock(swap) {
-      await htlc.approveIfNeeded(swap.token, swap.amount);
-      return (await htlc.lock(swap)).hash;
-    },
-    async claim(swap, preimage) {
-      return (await htlc.claim(swap, preimage)).hash;
-    },
-    async refund(swap) {
-      return (await htlc.refund(swap)).hash;
-    },
-    getLockedSwap: (hashlock) => htlc.getLockedSwap(hashlock),
-    async waitForClaimPreimage(hashlock, opts) {
-      try {
-        return await htlc.waitForClaimPreimage(hashlock, { timeoutMs: opts.timeoutMs });
-      } catch (err) {
-        if (err instanceof HtlcTimeoutError || err instanceof SwapRefundedError) return undefined;
-        throw err;
-      }
-    },
-    now: () => latestTimestamp(htlc),
-  };
-}
-
-/** Adapts `@paralock/evm`'s adaptor escrow client to the engines' `AdaptorEvmClient`. */
-export function adaptorClientFrom(chain: EvmChain, escrow: AdaptorEscrow): AdaptorEvmClient {
-  const address = escrow.walletClient?.account.address;
-  if (!address) throw new Error("EVM client needs an account");
-  return {
-    chain,
-    chainId: escrow.chainId,
-    contract: escrow.address,
-    address,
-    idOf: (swap) => escrow.idOf(swap),
-    claimDigest: async (id) => escrow.claimDigest(id),
-    async lock(swap) {
-      await escrow.approveIfNeeded(swap.token, swap.amount);
-      const { hash, id } = await escrow.lock(swap);
-      return { hash, id };
-    },
-    async claim(swap, sig) {
-      return (await escrow.claim(swap, sig)).hash;
-    },
-    async refund(swap) {
-      return (await escrow.refund(swap)).hash;
-    },
-    getLockedSwap: (id) => escrow.getLockedSwap(id),
-    async waitForClaimSignature(id, opts) {
-      try {
-        const { v, r, s } = await escrow.waitForClaimSignature(id, { timeoutMs: opts.timeoutMs });
-        return { v: Number(v), r, s };
-      } catch (err) {
-        if (err instanceof HtlcTimeoutError || err instanceof SwapRefundedError) return undefined;
-        throw err;
-      }
-    },
-    now: () => latestTimestamp(escrow),
-  };
-}
-
-function connect(net: EvmNetwork, key: Hex) {
-  const common = { rpcUrl: net.rpc, chainId: net.chainId, account: key, fromBlock: BigInt(net.startBlock) };
-  return {
-    htlc: evmClientFrom(net.chain, createEvmHtlc({ ...common, contract: net.htlc })),
-    adaptor: net.adaptorEscrow ? adaptorClientFrom(net.chain, createAdaptorEscrow({ ...common, contract: net.adaptorEscrow })) : undefined,
-  };
-}
-
 function networks(cfg: DevnetFile): EvmNetwork[] {
   return Object.values(cfg.evm).filter((n): n is EvmNetwork => !!n);
 }
 
-function chainClients(net: EvmNetwork, key: Hex): ChainClients {
+function quoteToken(net: EvmNetwork): Hex {
   const token = net.tokens[net.quoteToken];
   if (!token) throw new Error(`${net.chain} has no ${net.quoteToken} token`);
-  return { chain: net.chain, chainId: net.chainId, token, tokenSymbol: net.quoteToken, tokenDecimals: 6, ...connect(net, key) };
+  return token;
 }
 
-/** The devnet maker: ths account 5 on Zcash, anvil dev account 0 on every EVM chain. Claimed ZEC is shielded again. */
-export async function devnetMaker(cfg: DevnetFile, opts: { log?: (m: string) => void } = {}) {
-  const zcash = new ZcashRpc(cfg.zcash.rpc);
+/** The public `EvmChainOptions` of a devnet chain for `account`. */
+export function devnetChainOptions(net: EvmNetwork, account: Hex) {
+  return {
+    rpcUrl: net.rpc,
+    chainId: net.chainId,
+    htlc: net.htlc,
+    adaptorEscrow: net.adaptorEscrow,
+    account,
+    fromBlock: net.startBlock,
+    // Local anvils answer instantly; fail fast instead of retrying for long.
+    rpcTimeoutMs: 5_000,
+  };
+}
+
+/** Taker limits that fit the devnet's short windows (40 blocks, 45 s locks). */
+export const DEVNET_TAKER_LIMITS = { minClaimWindowSeconds: 15 } as const;
+
+/**
+ * The devnet maker: ths account 5 on Zcash, anvil dev account 0 on every EVM chain, built with `createMaker`.
+ * Claimed ZEC is shielded again. Pass a `store` (e.g. `.paralock/maker`) so a restarted maker resumes its swaps.
+ */
+export async function devnetMaker(
+  cfg: DevnetFile,
+  opts: { log?: (m: string) => void; store?: StoreOption } = {},
+): Promise<{ maker: Maker; zcash: ZcashRpc; ths: ThsClient }> {
+  const zcash = new ZcashRpc(cfg.zcash.rpc, { timeoutMs: 10_000 });
   const ths = new ThsClient(cfg.zcash.dashboard);
   const zcashKey = await ths.accountKey(cfg.thsMnemonic, cfg.maker.thsAccount);
-  const chains: Partial<Record<EvmChain, ChainClients>> = {};
-  for (const net of networks(cfg)) chains[net.chain] = chainClients(net, cfg.maker.evmKey);
-  const maker = new Maker({
-    network: "regtest",
-    zcash,
-    zcashKey,
-    zcashPayoutAddress: keyAddress(zcashKey, "regtest"),
-    chains,
-    price: zecUsdPrice({ fallback: 1270 }),
+  const evm: Partial<Record<EvmChain, MakerEvmChainOptions>> = {};
+  for (const net of networks(cfg)) {
+    evm[net.chain] = { ...devnetChainOptions(net, cfg.maker.evmKey), token: { address: quoteToken(net), symbol: net.quoteToken, decimals: 6 } };
+  }
+  const maker = createMaker({
+    zcash: { node: zcash, network: "regtest", key: zcashKey },
+    evm,
+    price: zecUsdPrice({ fallback: 1270 }), // devnet only: never use a fixed fallback with real funds
     spreadBps: 50,
     policy: DEVNET_POLICY,
+    limits: { quoteTtlSeconds: 120, maxZecAmountZat: 500_000_000n, minZecAmountZat: 20_000n, maxConcurrentSwaps: 25 },
+    store: opts.store,
     log: opts.log,
     async afterClaim() {
       // Shield the claimed ZEC back into the maker's Ironwood balance.
@@ -150,38 +92,60 @@ export async function devnetMaker(cfg: DevnetFile, opts: { log?: (m: string) => 
   return { maker, zcash, ths };
 }
 
+/** Result of `devnetTaker`. */
+export interface DevnetTaker {
+  taker: Taker;
+  /** HTTP client of the devnet maker. */
+  maker: HttpMakerApi;
+  ths: ThsClient;
+  zcash: ZcashRpc;
+  /** The taker's swap address (ths account 2's transparent address). */
+  address: string;
+  /**
+   * Makes sure the swap address holds `amountZat` plus fees. With `fromShielded`, the missing amount is unshielded
+   * from the wallet's Ironwood balance (topped up from the faucet if needed); otherwise the faucet pays it directly.
+   * Returns the unshielding txid, if any.
+   */
+  prepareFunds(amountZat: bigint, opts: { fromShielded: boolean }): Promise<string | undefined>;
+  /** Shields change and refunds that came back to the wallet; false when nothing was spendable. */
+  reshield(): Promise<boolean>;
+}
+
 /**
- * The devnet taker. Savings live in ths account 1 (Ironwood); each swap unshields exactly what it needs into ths
- * account 2's transparent address, which only Paralock spends from. Change and refunds go back to account 1's
- * transparent address and are shielded again. On EVM chains it uses anvil dev account 1, with dev account 2 relaying.
+ * The devnet taker, built with `createTaker`. Savings live in ths account 1 (Ironwood); each swap unshields exactly
+ * what it needs into ths account 2's transparent address, which only Paralock spends from. Change and refunds go back
+ * to account 1's transparent address and are shielded again. On EVM chains it uses anvil dev account 1, with dev
+ * account 2 relaying.
  */
-export async function devnetTaker(cfg: DevnetFile, opts: Pick<TakerConfig, "onUpdate" | "onFreshRecipient"> = {}) {
-  const zcash = new ZcashRpc(cfg.zcash.rpc);
+export async function devnetTaker(
+  cfg: DevnetFile,
+  opts: Pick<TakerConfig, "onUpdate" | "onFreshRecipient" | "log"> & { store?: StoreOption } = {},
+): Promise<DevnetTaker> {
+  const zcash = new ZcashRpc(cfg.zcash.rpc, { timeoutMs: 10_000 });
   const ths = new ThsClient(cfg.zcash.dashboard);
   const wallet = cfg.taker.thsAccount;
   const swapAccount = cfg.taker.swapAccount ?? 2;
   const zcashKey = await ths.accountKey(cfg.thsMnemonic, swapAccount);
   const returnAddress = (await ths.account(wallet)).transparent_address;
-  const chains: Partial<Record<EvmChain, TakerChain>> = {};
-  for (const net of networks(cfg)) chains[net.chain] = { ...connect(net, cfg.taker.evmKey), relayer: connect(net, cfg.relayer.evmKey) };
+  const evm: Partial<Record<EvmChain, TakerEvmChainOptions>> = {};
+  for (const net of networks(cfg)) {
+    evm[net.chain] = { ...devnetChainOptions(net, cfg.taker.evmKey), relayer: cfg.relayer.evmKey, tokens: [quoteToken(net)] };
+  }
   const maker = new HttpMakerApi(cfg.maker.url);
-  const taker = new Taker({
-    network: "regtest",
-    zcash,
-    zcashKey,
-    returnAddress,
-    chains,
+  const taker = createTaker({
+    zcash: { node: zcash, network: "regtest", key: zcashKey, returnAddress },
+    evm,
     maker,
+    store: opts.store,
+    limits: DEVNET_TAKER_LIMITS,
+    timeouts: { pollIntervalMs: 1_000, fundingConfirmationMs: 180_000, makerLockMs: 180_000 },
     mineZcash: (n) => zcash.generate(n),
     onUpdate: opts.onUpdate,
     onFreshRecipient: opts.onFreshRecipient,
+    log: opts.log,
   });
   const address = keyAddress(zcashKey, "regtest");
 
-  /**
-   * Makes sure the swap address holds `amountZat` plus fees. With `fromShielded`, the missing amount is unshielded
-   * from the wallet's Ironwood balance (topped up from the faucet if needed); otherwise the faucet pays it directly.
-   */
   async function prepareFunds(amountZat: bigint, { fromShielded }: { fromShielded: boolean }): Promise<string | undefined> {
     const need = amountZat + 50_000n;
     const have = (await zcash.getAddressUtxos([address])).reduce((n, u) => n + u.value, 0n);
@@ -197,11 +161,8 @@ export async function devnetTaker(cfg: DevnetFile, opts: Pick<TakerConfig, "onUp
     return txid;
   }
 
-  /**
-   * Shields change and refunds that came back to the wallet's transparent address. The ths wallet only spends
-   * transparent funds after a few confirmations, so this mines them first; it returns false when nothing is spendable.
-   */
   async function reshield(): Promise<boolean> {
+    // The ths wallet only spends transparent funds after a few confirmations, so mine them first.
     await ths.mine(3);
     const transparent = BigInt((await ths.account(wallet)).transparent_zatoshi);
     if (transparent <= 50_000n) return false;

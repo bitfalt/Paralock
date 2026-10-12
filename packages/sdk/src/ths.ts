@@ -2,11 +2,13 @@ import { randomBytes } from "node:crypto";
 import { HDKey } from "@scure/bip32";
 import { mnemonicToSeedSync } from "@scure/bip39";
 import { type KeyPair, keyAddress, keyPairFromPrivate } from "@paralock/zcash";
+import { retry } from "./retry.js";
 
 /**
  * Client for a local `ths` (Thus Spoke Zakura) Zcash regtest environment.
  * https://github.com/zcashlabs/thus-spoke-zakura
  */
+/** A ths development account. */
 export interface ThsAccount {
   id: number;
   name: string;
@@ -16,31 +18,46 @@ export interface ThsAccount {
   ironwood_zatoshi: number;
 }
 
+/** A ths transaction result. */
 export interface ThsActivity {
   txid: string;
   status: string;
   block_hash?: string | null;
 }
 
+/** ths value pools. */
 export type ThsPool = "ironwood" | "transparent";
 
+/** Client for the ths dashboard API (regtest only). */
 export class ThsClient {
   constructor(readonly url = "http://127.0.0.1:32805") {}
 
-  private async request<T>(path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${this.url}${path}`, {
-      method: body === undefined ? "GET" : "POST",
-      headers: { "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`ths ${path}: ${res.status} ${await res.text()}`);
-    return (await res.json()) as T;
+  /**
+   * ths wallet sync fails transiently when two processes mine at the same moment. Requests carry idempotency keys,
+   * so they are retried with the same body.
+   */
+  private request<T>(path: string, body?: unknown): Promise<T> {
+    return retry(
+      async () => {
+        const res = await fetch(`${this.url}${path}`, {
+          method: body === undefined ? "GET" : "POST",
+          headers: { "content-type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!res.ok) throw new Error(`ths ${path}: ${res.status} ${await res.text()}`);
+        return (await res.json()) as T;
+      },
+      { retries: 4, minDelayMs: 1_000, shouldRetry: (err) => /synchronization failed|checkpoint changed/i.test(String(err)) },
+    );
   }
 
+  /** All development accounts. */
   accounts(): Promise<ThsAccount[]> {
     return this.request("/api/v1/accounts");
   }
 
+  /** One development account. */
   async account(id: number): Promise<ThsAccount> {
     const account = (await this.accounts()).find((a) => a.id === id);
     if (!account) throw new Error(`ths account ${id} not found`);

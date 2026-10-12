@@ -21,8 +21,10 @@ export interface PrivacyOptions {
 /** 0.1, 0.5, 1 and 5 ZEC. */
 export const STANDARD_AMOUNTS_ZAT: readonly bigint[] = [10_000_000n, 50_000_000n, 100_000_000n, 500_000_000n];
 
+/** True for one of `STANDARD_AMOUNTS_ZAT`. */
 export const isStandardAmount = (zat: bigint): boolean => STANDARD_AMOUNTS_ZAT.includes(zat);
 
+/** Waits a uniformly random 0..`maxMs` milliseconds (timing jitter). */
 export async function jitter(maxMs = 0): Promise<void> {
   if (maxMs > 0) await new Promise((r) => setTimeout(r, Math.floor(Math.random() * maxMs)));
 }

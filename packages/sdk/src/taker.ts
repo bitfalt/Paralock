@@ -8,10 +8,10 @@ import {
   recoveryId,
 } from "@paralock/adaptor";
 import {
+  FUNDING_EXPIRY_DELTA,
   type KeyPair,
-  type MultisigSpend,
   type Network,
-  type ZcashRpc,
+  type ZcashNode,
   buildHtlcFunding,
   buildHtlcRefund,
   buildP2pkhSpend,
@@ -20,7 +20,9 @@ import {
   createMultisig2of2,
   finalizeMultisigSpend,
   htlcFromRedeemScript,
+  isTransparentAddress,
   keyAddress,
+  keyPairFromPrivate,
   randomKeyPair,
   scriptPubKeyForAddress,
   signMultisigSpend,
@@ -30,53 +32,126 @@ import {
   type AdaptorPreSignatureRequest,
   type AdaptorProposal,
   type AdaptorProposalAccepted,
+  type AdaptorSpends,
   adaptorSpends,
 } from "./adaptor-protocol.js";
-import type { AdaptorEvmClient, EvmClient } from "./evm-client.js";
+import { ParalockError, SwapFailedError, errorMessage } from "./errors.js";
+import type { AdaptorEvmClient, AdaptorEvmSwap, EvmClient, EvmSwap } from "./evm-client.js";
 import type { AcceptRequest } from "./maker.js";
 import { type PrivacyOptions, evmAddressOf, freshEvmAccount, isStandardAmount, jitter } from "./privacy.js";
+import { pollUntil } from "./retry.js";
 import { fromHex, newSecret } from "./secret.js";
+import { MemorySwapStore, type SwapStore } from "./store.js";
+import { assertNoUpgradeBefore, isUnspent } from "./zcash-node.js";
 import type { EvmChain, Hex, Quote, Swap, SwapEvent, SwapMode, SwapStatus } from "./types.js";
+import { DEFAULT_QUOTE_LIMITS, type QuoteLimits, isEvmAddress, validateQuote } from "./validation.js";
+
+export { SwapFailedError };
 
 /** How the taker talks to a maker: in-process (`Maker`) or over HTTP (`HttpMakerApi`). */
 export interface MakerApi {
+  /** Quote for selling `zecAmountZat`. */
   quote(zecAmountZat: bigint, chain?: EvmChain, mode?: SwapMode): Promise<Quote>;
   /** Quote for delivering an exact stablecoin amount (token base units). */
   quoteExactOut(usdAmount: bigint, chain?: EvmChain, mode?: SwapMode): Promise<Quote>;
+  /** htlc mode: report the funded HTLC. Must be idempotent. */
   accept(req: AcceptRequest): Promise<Swap>;
-  getSwap(id: string): Promise<Swap | undefined>;
+  /** The maker's view of a swap (an in-process `Maker` answers synchronously). */
+  getSwap(id: string): Promise<Swap | undefined> | Swap | undefined;
+  /** adaptor mode, step 1. Must be idempotent. */
   proposeAdaptor(p: AdaptorProposal): Promise<AdaptorProposalAccepted>;
+  /** adaptor mode, step 3. Must be idempotent. */
   adaptorPreSignature(swapId: string, req: AdaptorPreSignatureRequest): Promise<Swap>;
 }
 
-/** The taker's accounts on one EVM chain. */
+/** The taker's accounts and expectations on one EVM chain. */
 export interface TakerChain {
   htlc: EvmClient;
   adaptor?: AdaptorEvmClient;
   /** Relayer accounts that submit claims so the recipient needs no gas. They can't redirect the funds. */
   relayer?: { htlc: EvmClient; adaptor?: AdaptorEvmClient };
+  /** Stablecoins you accept on this chain. Quotes paying any other token are rejected. */
+  tokens?: readonly Hex[];
+  /** Decimals of those tokens, for the slippage check. Default 6. */
+  tokenDecimals?: number;
+  /** Confirmations of the maker's EVM lock before you reveal anything. Default `limits.minEvmConfirmations`. */
+  minConfirmations?: number;
+  /** Time the maker's lock must still have left when you claim. Default `limits.minClaimWindowSeconds`. */
+  minClaimWindowSeconds?: number;
 }
 
+/** Bounds the taker enforces (quote checks plus claim safety). */
+export interface TakerLimits extends QuoteLimits {
+  /**
+   * Seconds the EVM lock must still have left when the taker claims. A claim mined after the expiry reverts but still
+   * publishes the secret, so leave room for congestion (minutes on Ethereum L1). Default 30.
+   */
+  minClaimWindowSeconds: number;
+  /** Confirmations of the maker's EVM lock before revealing (protects against reorgs). Default 1. */
+  minEvmConfirmations: number;
+}
+
+/** Defaults of `TakerLimits`. */
+export const DEFAULT_TAKER_LIMITS: TakerLimits = { ...DEFAULT_QUOTE_LIMITS, minClaimWindowSeconds: 30, minEvmConfirmations: 1 };
+
+/** How long the taker waits for each step. */
+export interface TakerTimeouts {
+  /** For the funding transaction to confirm. Default 30 min. */
+  fundingConfirmationMs: number;
+  /** For the maker's EVM lock (also bounded by the Zcash refund height). Default 30 min. */
+  makerLockMs: number;
+  /** For the maker to report its ZEC claim after ours (informational). Default 60 s. */
+  followMakerMs: number;
+  /** Between polls. Default 2 s. */
+  pollIntervalMs: number;
+}
+
+/** Defaults of `TakerTimeouts`. */
+export const DEFAULT_TAKER_TIMEOUTS: TakerTimeouts = {
+  fundingConfirmationMs: 30 * 60_000,
+  makerLockMs: 30 * 60_000,
+  followMakerMs: 60_000,
+  pollIntervalMs: 2_000,
+};
+
+/** Everything a `Taker` needs. Most apps build it with `createTaker`. */
 export interface TakerConfig {
   network: Network;
-  zcash: ZcashRpc;
+  /** Zcash backend: `ZcashRpc` (Zebra/Zakura) or any other `ZcashNode`. */
+  zcash: ZcashNode;
   /** Spends from this key's transparent address (the unshielded amount). */
   zcashKey: KeyPair;
   /** Where funding change and refunds go (default: the key's own address). */
   returnAddress?: string;
   chains: Partial<Record<EvmChain, TakerChain>>;
   maker: MakerApi;
-  /** Seconds the EVM lock must still have left for the taker to claim. */
+  /**
+   * Where swap secrets, per-swap keys and refund data are persisted BEFORE anything is broadcast. Use a durable store
+   * (`FileSwapStore`) for real funds; without it a crash can leave ZEC locked with no way to refund. Default:
+   * `MemorySwapStore`.
+   */
+  store?: SwapStore;
+  limits?: Partial<TakerLimits>;
+  timeouts?: Partial<TakerTimeouts>;
+  /** Your own USD/ZEC price, to reject quotes beyond `limits.maxSlippageBps`. */
+  price?: () => Promise<number>;
+  /** @deprecated Use `limits.minClaimWindowSeconds`. */
   minClaimWindowSeconds?: number;
-  /** Devnet hook to mine Zcash blocks while waiting for confirmations. */
+  /** Devnet hook to mine Zcash blocks while waiting. */
   mineZcash?: (blocks: number) => Promise<unknown>;
+  /** Called after every step with the updated swap. */
   onUpdate?: (swap: Swap) => void;
-  /** Receives the key of each fresh recipient address. It controls the swapped stablecoins: store it. */
+  /**
+   * Receives the key of each fresh recipient address (it is also kept in the store). It controls the swapped
+   * stablecoins: store it safely.
+   */
   onFreshRecipient?: (account: { address: Hex; privateKey: Hex }, swap: Swap) => void;
+  log?: (message: string) => void;
 }
 
+/** Options of `Taker.swap`. */
 export interface SwapOptions {
-  /** Demo of a taker who never claims: both sides end up refunding. */
+  /** Demo of a taker who never claims: both sides end up refunding. Default true. */
   claim?: boolean;
   privacy?: PrivacyOptions;
   /** Pay someone else: the stablecoins go to this address instead of the taker (the Pay flow). */
@@ -85,349 +160,688 @@ export interface SwapOptions {
   label?: string;
 }
 
-interface AdaptorRefund {
-  refund: MultisigSpend;
-  makerRefundSignature: Hex;
-  multisigKey: KeyPair;
+/**
+ * Internal stage of a taker swap (persisted): `prepared` (funding signed, not broadcast), `proposed` (adaptor: the
+ * maker's refund signature is held), `funded` (funding broadcast), `accepted` (maker notified), `locked` (maker's lock
+ * verified), `claimed` (stablecoins claimed: the secret is public), `completed` (maker claimed the ZEC), `refunded`,
+ * `abandoned` (nothing was broadcast).
+ */
+export type TakerStage = "prepared" | "proposed" | "funded" | "accepted" | "locked" | "claimed" | "completed" | "refunded" | "abandoned";
+
+/** A swap as persisted by the taker, including its secrets. */
+export interface TakerSwapRecord {
+  kind: "taker-swap";
+  version: 1;
+  id: string;
+  stage: TakerStage;
+  swap: Swap;
+  options: { claim: boolean; privacy?: PrivacyOptions; stopAfterFunding?: boolean };
+  /** Signed funding transaction (output `vout` is the lock). */
+  funding: { hex: string; txid: string; vout: number; expiryHeight: number };
+  returnAddress: string;
+  htlc?: { secret: Hex };
+  adaptor?: {
+    /** The adaptor secret y. */
+    secret: Hex;
+    /** Private key of the taker's half of the 2-of-2. */
+    multisigKey: Hex;
+    accepted?: AdaptorProposalAccepted;
+    takerPreSignature?: string;
+    evmPreSignature?: string;
+    escrow?: AdaptorEvmSwap;
+  };
+  freshRecipient?: { address: Hex; privateKey: Hex };
+  refund?: { txid: string; hex: string };
+  error?: string;
+  updatedAt: number;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const DONE: readonly TakerStage[] = ["claimed", "completed", "refunded", "abandoned"];
+const PREFIX = "taker/";
 const zec = (zat: bigint) => (Number(zat) / 1e8).toString();
-const usd = (units: bigint) => (Number(units) / 1e6).toFixed(2);
+const fmt = (units: bigint, decimals = 6) => (Number(units) / 10 ** decimals).toFixed(2);
 const hex = (b: Uint8Array): Hex => `0x${bytesToHex(b)}`;
+const unhex = (h: string) => h.replace(/^0x/, "");
 const hex32 = (n: bigint): Hex => `0x${n.toString(16).padStart(64, "0")}`;
 
-/** A swap that failed after the ZEC was locked; `swap` can be passed to `Taker.refund`. */
-export class SwapFailedError extends Error {
-  override name = "SwapFailedError";
-  constructor(
-    readonly swap: Swap,
-    cause: unknown,
-  ) {
-    super(cause instanceof Error ? cause.message : String(cause), { cause });
-  }
-}
-
 /**
- * The taker side of a ZEC -> stablecoin swap. It holds the secret (htlc) or the adaptor secret (adaptor mode),
- * which is revealed only by claiming on the EVM chain after verifying the maker's lock.
+ * The taker side of a ZEC → stablecoin swap. It holds the secret (htlc) or the adaptor secret (adaptor mode), which
+ * is revealed only by claiming on the EVM chain after verifying the maker's lock.
+ *
+ * Every secret and key is written to the store before any transaction is broadcast, so `resume(id)` and `refund(id)`
+ * work after a crash or restart.
  */
 export class Taker {
-  private readonly adaptorRefunds = new Map<string, AdaptorRefund>();
+  private readonly store: SwapStore;
+  private readonly limits: TakerLimits;
+  private readonly timeouts: TakerTimeouts;
+  private readonly checkedChains = new Set<string>();
 
-  constructor(private readonly cfg: TakerConfig) {}
+  constructor(private readonly cfg: TakerConfig) {
+    this.store = cfg.store ?? new MemorySwapStore();
+    this.limits = {
+      ...DEFAULT_TAKER_LIMITS,
+      ...(cfg.minClaimWindowSeconds !== undefined ? { minClaimWindowSeconds: cfg.minClaimWindowSeconds } : {}),
+      ...cfg.limits,
+    };
+    this.timeouts = { ...DEFAULT_TAKER_TIMEOUTS, ...cfg.timeouts };
+    if (cfg.returnAddress !== undefined && !isTransparentAddress(cfg.returnAddress, cfg.network)) {
+      throw new ParalockError("invalid_request", `returnAddress must be a ${cfg.network} transparent address`);
+    }
+  }
 
+  /** The transparent address this taker funds swaps from. */
   get zcashAddress(): string {
     return keyAddress(this.cfg.zcashKey, this.cfg.network);
   }
 
+  private log(message: string) {
+    this.cfg.log?.(`[taker] ${message}`);
+  }
+
   private chain(chain: EvmChain): TakerChain {
     const c = this.cfg.chains[chain];
-    if (!c) throw new Error(`taker has no account on ${chain}`);
+    if (!c) throw new ParalockError("quote_rejected", `taker has no account on ${chain}`);
     return c;
   }
 
-  private recipientFor(swap: Swap, client: { address: Hex }, privacy: PrivacyOptions = {}, payTo?: { recipient?: Hex; label?: string }): Hex {
-    if (payTo?.recipient) {
-      if (!/^0x[0-9a-fA-F]{40}$/.test(payTo.recipient)) throw new Error("recipient must be a 0x address");
-      swap.payment = { recipient: payTo.recipient, label: payTo.label };
-      return payTo.recipient;
+  // ---------------------------------------------------------------------------------------------------------------
+  // Quotes
+
+  /** Asks the maker for a quote and validates it. */
+  async quote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
+    const quote = await this.cfg.maker.quote(zecAmountZat, chain, mode);
+    if (quote.zecAmountZat !== zecAmountZat || quote.chain !== chain || quote.mode !== mode) {
+      throw new ParalockError("quote_rejected", "the maker quoted different terms than requested");
     }
-    if (!privacy.freshRecipient) return client.address;
-    const account = freshEvmAccount();
-    this.cfg.onFreshRecipient?.(account, swap);
-    return account.address;
+    await this.validateQuote(quote);
+    return quote;
   }
 
-  /** Runs the whole swap. Resolves once the taker holds the stablecoin (and the maker claimed the ZEC, if seen in time). */
-  async swap(quote: Quote, opts: SwapOptions = {}): Promise<Swap> {
-    if (opts.privacy?.standardAmountsOnly && !isStandardAmount(quote.zecAmountZat)) {
-      throw new Error("only standard amounts (0.1, 0.5, 1, 5 ZEC) are allowed with this privacy setting");
+  /** Asks the maker for an exact-out quote (deliver exactly `usdAmount` token units) and validates it. */
+  async quoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
+    const quote = await this.cfg.maker.quoteExactOut(usdAmount, chain, mode);
+    if (quote.usdAmount !== usdAmount || quote.chain !== chain || quote.mode !== mode || !quote.exactOut) {
+      throw new ParalockError("quote_rejected", "the maker quoted different terms than requested");
     }
-    return quote.mode === "adaptor" ? this.swapAdaptor(quote, opts) : this.swapHtlc(quote, opts);
+    await this.validateQuote(quote);
+    return quote;
+  }
+
+  /**
+   * Validates a quote against this taker's configuration and limits (see `validateQuote`), checks that each RPC node
+   * really serves the configured chain id, and (with `price`) the slippage. `swap` calls this too.
+   */
+  async validateQuote(quote: Quote): Promise<void> {
+    const c = this.chain(quote.chain);
+    validateQuote(quote, {
+      limits: this.limits,
+      chains: {
+        [quote.chain]: { chainId: c.htlc.chainId, tokens: c.tokens ?? [], adaptor: !!c.adaptor, decimals: c.tokenDecimals },
+      },
+      price: this.cfg.price ? await this.cfg.price() : undefined,
+    });
+    for (const client of [c.htlc, c.adaptor, c.relayer?.htlc, c.relayer?.adaptor]) {
+      if (!client) continue;
+      const key = `${client.chain}:${client.contract}:${client.address}`;
+      if (this.checkedChains.has(key)) continue;
+      const actual = await client.rpcChainId();
+      if (actual !== client.chainId) {
+        throw new ParalockError("quote_rejected", `the ${quote.chain} RPC serves chain id ${actual}, expected ${client.chainId}`);
+      }
+      this.checkedChains.add(key);
+    }
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // htlc mode
+  // Swaps
 
-  private async swapHtlc(quote: Quote, opts: SwapOptions): Promise<Swap> {
-    const { swap, secret } = await this.fund(quote, opts.privacy, opts);
-    try {
-      return await this.completeHtlc(swap, secret, opts);
-    } catch (err) {
-      this.update(swap, "failed", { chain: quote.chain, detail: err instanceof Error ? err.message : String(err) });
-      throw new SwapFailedError(swap, err);
+  /**
+   * Runs the whole swap. Resolves once the stablecoins are claimed (and the maker's ZEC claim observed, if it shows up
+   * within `timeouts.followMakerMs`). Throws `SwapFailedError` if something fails after the ZEC was locked: the swap is
+   * in the store, and `refund(err.swap.id)` returns the ZEC after the refund height.
+   */
+  async swap(quote: Quote, opts: SwapOptions = {}): Promise<Swap> {
+    const record = await this.prepare(quote, opts, false);
+    return this.drive(record);
+  }
+
+  /** Funds the Zcash lock and stops (e.g. to demo a refund when the maker never locks). */
+  async lockOnly(quote: Quote, payTo?: { recipient?: Hex; label?: string }): Promise<Swap> {
+    const record = await this.prepare(quote, { recipient: payTo?.recipient, label: payTo?.label, claim: false }, true);
+    return this.drive(record);
+  }
+
+  /**
+   * Continues a persisted swap after a restart: claims if the maker's lock is there and still safe to claim, and
+   * follows the maker's ZEC claim. A funding that never reached the network is not broadcast again (the swap is marked
+   * abandoned). `claim` overrides the option the swap was started with.
+   */
+  async resume(id: string, options: { claim?: boolean } = {}): Promise<Swap> {
+    const record = await this.load(id);
+    if (DONE.includes(record.stage)) return record.swap;
+    if (options.claim !== undefined) {
+      record.options = { ...record.options, claim: options.claim, stopAfterFunding: false };
+      await this.save(record);
+    }
+    if (record.stage === "prepared" || (record.stage === "proposed" && record.adaptor)) {
+      // Never broadcast a stale funding: only continue if it already reached the network.
+      const known = await this.cfg.zcash.getRawTransaction(record.funding.txid).then(
+        () => true,
+        () => false,
+      );
+      if (!known || (record.stage === "prepared" && record.adaptor)) {
+        await this.transition(record, "abandoned", "failed", { chain: "zcash", detail: "Abandoned before funding; nothing was locked" });
+        return record.swap;
+      }
+      await this.transition(record, "funded");
+    }
+    return this.drive(record);
+  }
+
+  /** The public view of a persisted swap. */
+  async getSwap(id: string): Promise<Swap | undefined> {
+    return (await this.store.get<TakerSwapRecord>(PREFIX + id))?.swap;
+  }
+
+  /** Persisted swaps that are not finished (their ZEC may still be locked). */
+  async pendingSwaps(): Promise<Swap[]> {
+    const all = await this.store.list<TakerSwapRecord>(PREFIX);
+    return all.filter(({ record }) => !DONE.includes(record.stage)).map(({ record }) => record.swap);
+  }
+
+  /** The fresh recipient account of a swap (it controls the stablecoins), if one was used. */
+  async freshRecipient(id: string): Promise<{ address: Hex; privateKey: Hex } | undefined> {
+    return (await this.store.get<TakerSwapRecord>(PREFIX + id))?.freshRecipient;
+  }
+
+  private async prepare(quote: Quote, opts: SwapOptions, stopAfterFunding: boolean): Promise<TakerSwapRecord> {
+    if (opts.privacy?.standardAmountsOnly && !isStandardAmount(quote.zecAmountZat)) {
+      throw new ParalockError("invalid_request", "only standard amounts (0.1, 0.5, 1, 5 ZEC) are allowed with this privacy setting");
+    }
+    if (opts.recipient !== undefined && !isEvmAddress(opts.recipient)) throw new ParalockError("invalid_request", "recipient must be a 0x address");
+    if (opts.privacy?.freshRecipient && !opts.recipient && !this.store.durable && !this.cfg.onFreshRecipient) {
+      throw new ParalockError("invalid_request", "freshRecipient needs a durable store or an onFreshRecipient handler, or the funds' key would be lost");
+    }
+    await this.validateQuote(quote);
+    if (await this.store.get(PREFIX + quote.id)) throw new ParalockError("conflict", "this quote was already used");
+    const c = this.chain(quote.chain);
+    const tip = await this.cfg.zcash.getBlockCount();
+    const branchId = await this.cfg.zcash.getNextBranchId();
+    const refundHeight = tip + quote.zcashLockBlocks;
+    const returnAddress = this.cfg.returnAddress ?? this.zcashAddress;
+    const expiryHeight = tip + FUNDING_EXPIRY_DELTA;
+    const utxos = await this.cfg.zcash.getAddressUtxos([this.zcashAddress]);
+    const base = { utxos, key: this.cfg.zcashKey, changeScriptPubKey: scriptPubKeyForAddress(returnAddress, this.cfg.network), branchId, expiryHeight };
+    const options = { claim: opts.claim !== false, privacy: opts.privacy, ...(stopAfterFunding ? { stopAfterFunding } : {}) };
+
+    let record: TakerSwapRecord;
+    if (quote.mode === "adaptor") {
+      if (!c.adaptor) throw new ParalockError("quote_rejected", `private mode is not available on ${quote.chain}`);
+      await assertNoUpgradeBefore(this.cfg.zcash, refundHeight + 1, (m) => this.log(m));
+      const adaptor = adaptorKeyPair();
+      const multisigKey = randomKeyPair(); // a fresh key per swap, unrelated to the funding address
+      const multisig = createMultisig2of2(multisigKey.publicKey, unhex(quote.makerZcashPubkey), this.cfg.network);
+      // Build and sign the funding now, but don't broadcast it until we hold the maker's refund signature.
+      const funding = buildP2pkhSpend({ ...base, outputs: [{ scriptPubKey: multisig.scriptPubKey, value: quote.zecAmountZat }] });
+      const swap = this.newSwap(quote, quote.id, c.adaptor, {
+        htlcAddress: multisig.address,
+        redeemScript: hex(multisig.redeemScript),
+        refundHeight,
+        amountZat: quote.zecAmountZat,
+        fundingTxid: funding.txid,
+        fundingVout: 0,
+      });
+      swap.adaptorPoint = hex(adaptor.point);
+      record = {
+        kind: "taker-swap",
+        version: 1,
+        id: swap.id,
+        stage: "prepared",
+        swap,
+        options,
+        funding: { hex: funding.hex, txid: funding.txid, vout: 0, expiryHeight },
+        returnAddress,
+        adaptor: { secret: hex(adaptor.secret), multisigKey: hex(multisigKey.privateKey) },
+        updatedAt: Date.now(),
+      };
+    } else {
+      const { secret, hashlock } = newSecret();
+      const htlc = createHtlc(
+        { hashlock: fromHex(hashlock), claimPubkey: fromHex(quote.makerZcashPubkey), refundPubkey: this.cfg.zcashKey.publicKey, refundHeight },
+        this.cfg.network,
+      );
+      const funding = buildHtlcFunding({ ...base, htlc, amount: quote.zecAmountZat });
+      const swap = this.newSwap(quote, hashlock, c.htlc, {
+        htlcAddress: htlc.address,
+        redeemScript: hex(htlc.redeemScript),
+        refundHeight,
+        amountZat: quote.zecAmountZat,
+        fundingTxid: funding.txid,
+        fundingVout: 0,
+      });
+      swap.hashlock = hashlock;
+      record = {
+        kind: "taker-swap",
+        version: 1,
+        id: swap.id,
+        stage: "prepared",
+        swap,
+        options,
+        funding: { hex: funding.hex, txid: funding.txid, vout: 0, expiryHeight },
+        returnAddress,
+        htlc: { secret },
+        updatedAt: Date.now(),
+      };
+    }
+    this.setRecipient(record, quote.mode === "adaptor" ? c.adaptor! : c.htlc, opts);
+    // Persist the secret, keys and refund data before anything leaves this process.
+    await this.save(record);
+    if (record.freshRecipient) this.cfg.onFreshRecipient?.(record.freshRecipient, record.swap);
+    return record;
+  }
+
+  private setRecipient(record: TakerSwapRecord, client: { address: Hex }, opts: SwapOptions) {
+    const { swap } = record;
+    if (opts.recipient) {
+      swap.payment = { recipient: opts.recipient, ...(opts.label ? { label: opts.label } : {}) };
+      swap.evm.recipient = opts.recipient;
+    } else if (opts.privacy?.freshRecipient) {
+      record.freshRecipient = freshEvmAccount();
+      swap.evm.recipient = record.freshRecipient.address;
+    } else {
+      swap.evm.recipient = client.address;
     }
   }
 
-  private async completeHtlc(swap: Swap, secret: Hex, opts: SwapOptions): Promise<Swap> {
-    const { quote } = swap;
-    const hashlock = swap.hashlock!;
-    const c = this.chain(quote.chain);
+  /** Runs the state machine until the swap is done (or stops after funding for `lockOnly`). */
+  private async drive(record: TakerSwapRecord): Promise<Swap> {
+    try {
+      while (!DONE.includes(record.stage)) {
+        if (record.options.stopAfterFunding && record.stage === "accepted") return record.swap;
+        if (record.stage === "locked" && !record.options.claim) return record.swap;
+        await this.step(record);
+      }
+      return record.swap;
+    } catch (err) {
+      const funded = !["prepared", "proposed", "abandoned"].includes(record.stage);
+      record.error = errorMessage(err);
+      if (!funded) {
+        await this.transition(record, "abandoned", "failed", { chain: "zcash", detail: `Not funded: ${record.error}` });
+        throw err;
+      }
+      await this.transition(record, undefined, "failed", { chain: record.swap.quote.chain, detail: record.error });
+      throw new SwapFailedError(record.swap, err);
+    }
+  }
 
-    // 2. Ask the maker to lock the stablecoin under the same hashlock.
+  private async step(record: TakerSwapRecord): Promise<void> {
+    const { swap } = record;
+    switch (record.stage) {
+      case "prepared":
+        if (record.adaptor) return this.propose(record);
+        return this.broadcastFunding(record, `Locked ${zec(swap.zcash.amountZat)} ZEC in the Zcash HTLC`);
+      case "proposed":
+        return this.broadcastFunding(record, `Locked ${zec(swap.zcash.amountZat)} ZEC in a 2-of-2 (refund pre-signed by the maker)`);
+      case "funded":
+        await this.waitForZcashTx(record.funding.txid, this.timeouts.fundingConfirmationMs);
+        return record.adaptor ? this.sendPreSignature(record) : this.acceptHtlc(record);
+      case "accepted":
+        return record.adaptor ? this.verifyAdaptorLock(record) : this.verifyHtlcLock(record);
+      case "locked":
+        return this.claim(record);
+      default:
+        return;
+    }
+  }
+
+  private async broadcastFunding(record: TakerSwapRecord, detail: string) {
+    try {
+      await this.cfg.zcash.sendRawTransaction(record.funding.hex);
+    } catch (err) {
+      // The node may have accepted it before the error (e.g. a lost response): only give up if it doesn't have it.
+      const known = await this.cfg.zcash.getRawTransaction(record.funding.txid).then(
+        () => true,
+        () => false,
+      );
+      if (!known) throw err;
+    }
+    await this.transition(record, "funded", "zcash_locked", { chain: "zcash", txid: record.funding.txid, detail });
+  }
+
+  // htlc ------------------------------------------------------------------------------------------------------------
+
+  private async acceptHtlc(record: TakerSwapRecord) {
+    const { swap } = record;
+    if (record.options.stopAfterFunding) {
+      await this.transition(record, "accepted");
+      return;
+    }
     await this.cfg.maker.accept({
-      quoteId: quote.id,
+      quoteId: swap.quote.id,
       redeemScript: swap.zcash.redeemScript,
-      fundingTxid: swap.zcash.fundingTxid!,
-      fundingVout: swap.zcash.fundingVout!,
+      fundingTxid: record.funding.txid,
+      fundingVout: record.funding.vout,
       takerEvmAddress: swap.evm.recipient,
     });
-
-    // 3. Verify the lock ourselves before revealing anything.
-    const locked = await this.poll(() => c.htlc.getLockedSwap(hashlock), "maker did not lock in time; refund after the Zcash timeout");
-    if (locked.recipient.toLowerCase() !== swap.evm.recipient.toLowerCase()) throw new Error("lock pays someone else");
-    if (locked.token.toLowerCase() !== quote.token.toLowerCase()) throw new Error("lock uses a different token");
-    if (locked.amount < quote.usdAmount) throw new Error("lock is smaller than quoted");
-    if (locked.expiry - (await c.htlc.now()) < BigInt(this.cfg.minClaimWindowSeconds ?? 15)) throw new Error("lock expires too soon to claim safely");
-    swap.evm.expiry = Number(locked.expiry);
-    this.update(swap, "evm_locked", { chain: quote.chain, detail: `Maker locked ${usd(locked.amount)} ${quote.tokenSymbol}; terms verified` });
-    if (opts.claim === false) return swap;
-
-    // 4. Claim. This reveals the secret, which lets the maker claim the ZEC.
-    await jitter(opts.privacy?.jitterMs);
-    const claimer = opts.privacy?.relayClaim && c.relayer ? c.relayer.htlc : c.htlc;
-    swap.evm.claimTx = await claimer.claim(locked, secret);
-    this.update(swap, "evm_claimed", {
-      chain: quote.chain,
-      txid: swap.evm.claimTx,
-      detail: `${swap.payment ? "Recipient received" : "Received"} ${usd(locked.amount)} ${quote.tokenSymbol}${claimer === c.htlc ? "" : " (claim relayed)"}; the secret is now public`,
-    });
-    await this.followMaker(swap);
-    return swap;
+    await this.transition(record, "accepted");
   }
 
-  /** Funds the Zcash HTLC for an htlc-mode quote without contacting the maker yet. Keep the secret private. */
-  async fund(quote: Quote, privacy?: PrivacyOptions, payTo?: { recipient?: Hex; label?: string }): Promise<{ swap: Swap; secret: Hex }> {
-    const { secret, hashlock } = newSecret();
-    const htlc = createHtlc(
-      {
-        hashlock: fromHex(hashlock),
-        claimPubkey: fromHex(quote.makerZcashPubkey),
-        refundPubkey: this.cfg.zcashKey.publicKey,
-        refundHeight: (await this.cfg.zcash.getBlockCount()) + quote.zcashLockBlocks,
-      },
-      this.cfg.network,
-    );
-    const c = this.chain(quote.chain);
-    const swap = this.newSwap(quote, hashlock, {
-      htlcAddress: htlc.address,
-      redeemScript: hex(htlc.redeemScript),
-      refundHeight: htlc.params.refundHeight,
-      amountZat: quote.zecAmountZat,
-    }, c.htlc);
-    swap.hashlock = hashlock;
-    swap.evm.recipient = this.recipientFor(swap, c.htlc, privacy, payTo);
-
-    // 1. Lock ZEC in the HTLC: the maker can claim it only with our secret; we can refund after refundHeight.
-    const funding = buildHtlcFunding({
-      htlc,
-      amount: quote.zecAmountZat,
-      utxos: await this.cfg.zcash.getAddressUtxos([this.zcashAddress]),
-      key: this.cfg.zcashKey,
-      changeScriptPubKey: this.cfg.returnAddress ? scriptPubKeyForAddress(this.cfg.returnAddress) : undefined,
-      branchId: await this.cfg.zcash.getNextBranchId(),
+  private async verifyHtlcLock(record: TakerSwapRecord) {
+    const { swap } = record;
+    const c = this.chain(swap.quote.chain);
+    const lock = await this.waitForLock(record, () => c.htlc.getLock(swap.hashlock!), c.htlc, c.minConfirmations);
+    this.checkTerms(record, lock.swap);
+    swap.evm.expiry = Number(lock.swap.expiry);
+    swap.evm.lockTx = lock.txHash;
+    await this.assertClaimWindow(record, c.htlc, lock.swap.expiry);
+    await this.transition(record, "locked", "evm_locked", {
+      chain: swap.quote.chain,
+      txid: lock.txHash,
+      detail: `Maker locked ${fmt(lock.swap.amount, c.tokenDecimals)} ${swap.quote.tokenSymbol}; terms verified`,
     });
-    await this.cfg.zcash.sendRawTransaction(funding.hex);
-    swap.zcash.fundingTxid = funding.txid;
-    swap.zcash.fundingVout = 0;
-    this.update(swap, "zcash_locked", { chain: "zcash", txid: funding.txid, detail: `Locked ${zec(quote.zecAmountZat)} ZEC in the Zcash HTLC` });
-    await this.waitForConfirmation(funding.txid);
-    return { swap, secret };
   }
 
-  /** Funds the HTLC and stops there (e.g. to demo a refund when the maker never locks). */
-  async lockOnly(quote: Quote, payTo?: { recipient?: Hex; label?: string }): Promise<Swap> {
-    if (quote.mode === "adaptor") return this.lockAdaptor(quote, {}, payTo).then((r) => r.swap);
-    return (await this.fund(quote, undefined, payTo)).swap;
-  }
+  // adaptor ---------------------------------------------------------------------------------------------------------
 
-  // ---------------------------------------------------------------------------------------------------------------
-  // adaptor mode
-
-  private async lockAdaptor(quote: Quote, privacy: PrivacyOptions, payTo?: { recipient?: Hex; label?: string }) {
-    const c = this.chain(quote.chain);
-    if (!c.adaptor) throw new Error(`private mode is not available on ${quote.chain}`);
-    const adaptor = adaptorKeyPair();
-    const multisigKey = randomKeyPair(); // a fresh key per swap, unrelated to the funding address
-    const multisig = createMultisig2of2(multisigKey.publicKey, quote.makerZcashPubkey.slice(2), this.cfg.network);
-    const refundHeight = (await this.cfg.zcash.getBlockCount()) + quote.zcashLockBlocks;
-    const returnAddress = this.cfg.returnAddress ?? this.zcashAddress;
-    const branchId = await this.cfg.zcash.getNextBranchId();
-
-    // Build and sign the funding now, but don't broadcast it until we hold the maker's refund signature.
-    const funding = buildP2pkhSpend({
-      utxos: await this.cfg.zcash.getAddressUtxos([this.zcashAddress]),
-      key: this.cfg.zcashKey,
-      outputs: [{ scriptPubKey: multisig.scriptPubKey, value: quote.zecAmountZat }],
-      changeScriptPubKey: scriptPubKeyForAddress(returnAddress),
-      branchId,
-    });
-    const swap = this.newSwap(quote, undefined, {
-      htlcAddress: multisig.address,
-      redeemScript: hex(multisig.redeemScript),
-      refundHeight,
-      amountZat: quote.zecAmountZat,
-      fundingTxid: funding.txid,
-      fundingVout: 0,
-    }, c.adaptor);
-    swap.adaptorPoint = hex(adaptor.point);
-    swap.evm.recipient = this.recipientFor(swap, c.adaptor, privacy, payTo);
-
-    const accepted = await this.cfg.maker.proposeAdaptor({
-      quoteId: quote.id,
-      takerZcashPubkey: hex(multisigKey.publicKey),
-      adaptorPoint: swap.adaptorPoint,
-      fundingTxid: funding.txid,
-      fundingVout: 0,
-      amountZat: quote.zecAmountZat.toString(),
-      refundHeight,
-      refundAddress: returnAddress,
-      takerEvmRecipient: swap.evm.recipient,
-    });
-    const spends = adaptorSpends({
+  private spends(record: TakerSwapRecord, accepted: AdaptorProposalAccepted): AdaptorSpends {
+    const { swap } = record;
+    const multisigKey = keyPairFromPrivate(unhex(record.adaptor!.multisigKey));
+    return adaptorSpends({
       network: this.cfg.network,
       takerPubkey: hex(multisigKey.publicKey),
-      makerPubkey: quote.makerZcashPubkey,
-      fundingTxid: funding.txid,
-      fundingVout: 0,
-      amountZat: quote.zecAmountZat,
-      refundHeight,
-      refundAddress: returnAddress,
+      makerPubkey: swap.quote.makerZcashPubkey,
+      fundingTxid: record.funding.txid,
+      fundingVout: record.funding.vout,
+      amountZat: swap.zcash.amountZat,
+      refundHeight: swap.zcash.refundHeight,
+      refundAddress: record.returnAddress,
       claimTo: accepted.claimTo,
       branchId: accepted.branchId,
     });
-    if (spends.refund.multisig.address !== multisig.address) throw new Error("maker built a different lock");
-    if (!verifyMultisigSignature(spends.refund, quote.makerZcashPubkey.slice(2), accepted.makerRefundSignature.slice(2))) {
-      throw new Error("maker's refund signature is invalid; not funding");
-    }
-    if (evmAddressOf(accepted.signerPubkey).toLowerCase() !== accepted.signer.toLowerCase()) throw new Error("signer pubkey does not match");
-    swap.id = accepted.swapId;
-    swap.adaptor = { signer: accepted.signer, signerPubkey: accepted.signerPubkey };
-    this.adaptorRefunds.set(swap.id, { refund: spends.refund, makerRefundSignature: accepted.makerRefundSignature, multisigKey });
-
-    // Safe to fund: whatever happens next, the pre-signed refund returns the ZEC after refundHeight.
-    await this.cfg.zcash.sendRawTransaction(funding.hex);
-    this.update(swap, "zcash_locked", { chain: "zcash", txid: funding.txid, detail: `Locked ${zec(quote.zecAmountZat)} ZEC in a 2-of-2 (refund pre-signed by the maker)` });
-    await this.waitForConfirmation(funding.txid);
-    return { swap, adaptor, multisigKey, spends, accepted };
   }
 
-  private async swapAdaptor(quote: Quote, opts: SwapOptions): Promise<Swap> {
-    const { swap, adaptor, multisigKey, spends, accepted } = await this.lockAdaptor(quote, opts.privacy ?? {}, opts);
+  private async propose(record: TakerSwapRecord) {
+    const { swap } = record;
+    const a = record.adaptor!;
+    const multisigKey = keyPairFromPrivate(unhex(a.multisigKey));
+    const accepted = await this.cfg.maker.proposeAdaptor({
+      quoteId: swap.quote.id,
+      takerZcashPubkey: hex(multisigKey.publicKey),
+      adaptorPoint: swap.adaptorPoint!,
+      fundingTxid: record.funding.txid,
+      fundingVout: record.funding.vout,
+      amountZat: swap.zcash.amountZat.toString(),
+      refundHeight: swap.zcash.refundHeight,
+      refundAddress: record.returnAddress,
+      takerEvmRecipient: swap.evm.recipient,
+    });
+    // Check everything the pre-signed refund depends on before funding.
+    if (accepted.swapId !== swap.quote.id) throw new ParalockError("quote_rejected", "maker answered for a different swap");
+    if (accepted.branchId !== (await this.cfg.zcash.getNextBranchId())) {
+      throw new ParalockError("quote_rejected", "maker signed the refund for a different consensus branch; not funding");
+    }
+    if (!isTransparentAddress(accepted.claimTo, this.cfg.network)) throw new ParalockError("quote_rejected", "maker's claim address is invalid");
+    const spends = this.spends(record, accepted);
+    if (spends.refund.multisig.address !== swap.zcash.htlcAddress) throw new ParalockError("quote_rejected", "maker built a different lock");
+    if (!verifyMultisigSignature(spends.refund, unhex(swap.quote.makerZcashPubkey), unhex(accepted.makerRefundSignature))) {
+      throw new ParalockError("quote_rejected", "maker's refund signature is invalid; not funding");
+    }
+    let signerOk = false;
     try {
-      const c = this.chain(quote.chain);
-      const escrow = c.adaptor!;
-      // 3. Pre-sign the maker's claim: it only becomes a valid signature with our adaptor secret.
-      const takerPre = preSign(multisigKey.privateKey, spends.claim.sighash, adaptor.point);
-      await this.cfg.maker.adaptorPreSignature(swap.id, { takerPreSignature: encodePreSignature(takerPre) });
+      signerOk = evmAddressOf(accepted.signerPubkey).toLowerCase() === accepted.signer.toLowerCase();
+    } catch {
+      signerOk = false;
+    }
+    if (!signerOk) throw new ParalockError("quote_rejected", "signer pubkey does not match the signer address");
+    a.accepted = accepted;
+    swap.adaptor = { signer: accepted.signer, signerPubkey: accepted.signerPubkey };
+    // Persist the refund signature before broadcasting: from here on the ZEC can always come back.
+    await this.transition(record, "proposed");
+  }
 
-      // 4. Wait for the maker's lock and pre-signature, and check both ourselves.
-      const view = await this.poll(async () => {
+  private async sendPreSignature(record: TakerSwapRecord) {
+    const { swap } = record;
+    const a = record.adaptor!;
+    if (record.options.stopAfterFunding) {
+      await this.transition(record, "accepted");
+      return;
+    }
+    if (!a.takerPreSignature) {
+      // Pre-sign the maker's claim: it only becomes a valid signature with our adaptor secret.
+      const spends = this.spends(record, a.accepted!);
+      a.takerPreSignature = encodePreSignature(preSign(unhex(a.multisigKey), spends.claim.sighash, unhex(swap.adaptorPoint!)));
+      await this.save(record);
+    }
+    await this.cfg.maker.adaptorPreSignature(swap.id, { takerPreSignature: a.takerPreSignature });
+    await this.transition(record, "accepted");
+  }
+
+  private async verifyAdaptorLock(record: TakerSwapRecord) {
+    const { swap } = record;
+    const a = record.adaptor!;
+    const c = this.chain(swap.quote.chain);
+    const escrow = c.adaptor!;
+    const view = await this.poll(
+      async () => {
         const v = await this.cfg.maker.getSwap(swap.id);
         return v?.adaptor?.evmPreSignature && v.adaptor.escrowId ? v : undefined;
-      }, "maker did not lock in time; refund after the Zcash timeout");
-      const escrowId = view.adaptor!.escrowId!;
-      const locked = await this.poll(() => escrow.getLockedSwap(escrowId), "escrow lock not found");
-      if (locked.recipient.toLowerCase() !== swap.evm.recipient.toLowerCase()) throw new Error("lock pays someone else");
-      if (locked.token.toLowerCase() !== quote.token.toLowerCase()) throw new Error("lock uses a different token");
-      if (locked.amount < quote.usdAmount) throw new Error("lock is smaller than quoted");
-      if (locked.signer.toLowerCase() !== accepted.signer.toLowerCase()) throw new Error("lock uses a different signer");
-      if (locked.expiry - (await escrow.now()) < BigInt(this.cfg.minClaimWindowSeconds ?? 15)) throw new Error("lock expires too soon to claim safely");
-      const digest = await escrow.claimDigest(escrowId);
-      const evmPre = decodePreSignature(view.adaptor!.evmPreSignature!);
-      if (!preVerify(accepted.signerPubkey.slice(2), digest.slice(2), adaptor.point, evmPre)) throw new Error("maker's pre-signature is invalid");
-      swap.evm.lockTx = view.evm.lockTx;
-      swap.evm.expiry = Number(locked.expiry);
-      swap.adaptor = view.adaptor;
-      this.update(swap, "evm_locked", { chain: quote.chain, txid: view.evm.lockTx, detail: `Maker locked ${usd(locked.amount)} ${quote.tokenSymbol}; lock and pre-signature verified` });
-      if (opts.claim === false) return swap;
-
-      // 5. Complete the release signature with our secret and claim. The signature reveals the secret to the maker only.
-      await jitter(opts.privacy?.jitterMs);
-      const sig = adapt(evmPre, adaptor.secret);
-      const v = 27 + recoveryId(accepted.signerPubkey.slice(2), digest.slice(2), sig);
-      const claimer = opts.privacy?.relayClaim && c.relayer?.adaptor ? c.relayer.adaptor : escrow;
-      swap.evm.claimTx = await claimer.claim(locked, { v, r: hex32(sig.r), s: hex32(sig.s) });
-      this.update(swap, "evm_claimed", {
-        chain: quote.chain,
-        txid: swap.evm.claimTx,
-        detail: `${swap.payment ? "Recipient received" : "Received"} ${usd(locked.amount)} ${quote.tokenSymbol}${claimer === escrow ? "" : " (claim relayed)"}; no hash on either chain`,
-      });
-      await this.followMaker(swap);
-      return swap;
-    } catch (err) {
-      this.update(swap, "failed", { chain: quote.chain, detail: err instanceof Error ? err.message : String(err) });
-      throw new SwapFailedError(swap, err);
+      },
+      "the maker's lock",
+      this.timeouts.makerLockMs,
+      () => this.pastRefundHeight(record),
+    );
+    const escrowId = view.adaptor!.escrowId!;
+    const lock = await this.waitForLock(record, () => escrow.getLock(escrowId), escrow, c.minConfirmations);
+    this.checkTerms(record, lock.swap);
+    if (lock.swap.signer.toLowerCase() !== a.accepted!.signer.toLowerCase()) throw new ParalockError("lock_mismatch", "lock uses a different signer");
+    const digest = await escrow.claimDigest(escrowId);
+    let evmPre;
+    try {
+      evmPre = decodePreSignature(view.adaptor!.evmPreSignature!);
+    } catch {
+      throw new ParalockError("lock_mismatch", "maker's pre-signature is malformed");
     }
+    if (!preVerify(unhex(a.accepted!.signerPubkey), unhex(digest), unhex(swap.adaptorPoint!), evmPre)) {
+      throw new ParalockError("lock_mismatch", "maker's pre-signature is invalid");
+    }
+    await this.assertClaimWindow(record, escrow, lock.swap.expiry);
+    a.evmPreSignature = view.adaptor!.evmPreSignature!;
+    a.escrow = lock.swap;
+    swap.evm.lockTx = lock.txHash ?? view.evm.lockTx;
+    swap.evm.expiry = Number(lock.swap.expiry);
+    swap.adaptor = { ...swap.adaptor, escrowId, salt: lock.swap.salt, evmPreSignature: a.evmPreSignature };
+    await this.transition(record, "locked", "evm_locked", {
+      chain: swap.quote.chain,
+      txid: swap.evm.lockTx,
+      detail: `Maker locked ${fmt(lock.swap.amount, c.tokenDecimals)} ${swap.quote.tokenSymbol}; lock and pre-signature verified`,
+    });
+  }
+
+  // claim -----------------------------------------------------------------------------------------------------------
+
+  private async claim(record: TakerSwapRecord) {
+    const { swap } = record;
+    const c = this.chain(swap.quote.chain);
+    const privacy = record.options.privacy ?? {};
+    const relayer = privacy.relayClaim ? c.relayer : undefined;
+    // After a restart the claim may already be on-chain.
+    const prior = record.adaptor ? await c.adaptor!.outcome(swap.adaptor!.escrowId!) : await c.htlc.outcome(swap.hashlock!);
+    if (prior.status === "claimed") {
+      await this.transition(record, "claimed", "evm_claimed", { chain: swap.quote.chain, detail: "Claim found on-chain" });
+      return this.followMaker(record);
+    }
+    if (prior.status === "refunded") throw new ParalockError("lock_mismatch", "the maker's lock was refunded before we claimed");
+    await jitter(privacy.jitterMs);
+    let claimTx: Hex;
+    let relayed: boolean;
+    if (record.adaptor) {
+      const a = record.adaptor;
+      const escrow = c.adaptor!;
+      await this.assertClaimWindow(record, escrow, a.escrow!.expiry);
+      // Complete the release signature with our secret. The signature reveals the secret to the maker only.
+      const digest = await escrow.claimDigest(swap.adaptor!.escrowId!);
+      const sig = adapt(decodePreSignature(a.evmPreSignature!), unhex(a.secret));
+      const v = 27 + recoveryId(unhex(a.accepted!.signerPubkey), unhex(digest), sig);
+      const claimer = relayer?.adaptor ?? escrow;
+      relayed = claimer !== escrow;
+      claimTx = await claimer.claim(a.escrow!, { v, r: hex32(sig.r), s: hex32(sig.s) });
+    } else {
+      const lock = await c.htlc.getLockedSwap(swap.hashlock!);
+      if (!lock) throw new ParalockError("lock_mismatch", "the maker's lock disappeared");
+      await this.assertClaimWindow(record, c.htlc, lock.expiry);
+      const claimer = relayer?.htlc ?? c.htlc;
+      relayed = claimer !== c.htlc;
+      claimTx = await claimer.claim(lock, record.htlc!.secret);
+    }
+    swap.evm.claimTx = claimTx;
+    const amount = `${fmt(swap.evm.amount, c.tokenDecimals)} ${swap.quote.tokenSymbol}`;
+    await this.transition(record, "claimed", "evm_claimed", {
+      chain: swap.quote.chain,
+      txid: claimTx,
+      detail: `${swap.payment ? "Recipient received" : "Received"} ${amount}${relayed ? " (claim relayed)" : ""}; ${
+        record.adaptor ? "no hash on either chain" : "the secret is now public"
+      }`,
+    });
+    await this.followMaker(record);
+  }
+
+  private async followMaker(record: TakerSwapRecord) {
+    const { swap } = record;
+    const view = await this.poll(
+      async () => {
+        const v = await this.cfg.maker.getSwap(swap.id);
+        return v?.status === "completed" ? v : undefined;
+      },
+      "the maker's ZEC claim",
+      this.timeouts.followMakerMs,
+    ).catch(() => undefined);
+    if (!view) return;
+    swap.zcash.claimTxid = view.zcash.claimTxid;
+    const detail = record.adaptor ? "Maker completed the signature and claimed the ZEC" : "Maker claimed the ZEC with the secret";
+    await this.transition(record, "completed", "completed", { chain: "zcash", txid: view.zcash.claimTxid, detail });
   }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // Refunds
 
-  /** Refunds the Zcash lock once the chain reaches its refund height. */
-  async refund(swap: Swap): Promise<Swap> {
-    let tip = await this.cfg.zcash.getBlockCount();
-    while (tip < swap.zcash.refundHeight) {
-      if (this.cfg.mineZcash) await this.cfg.mineZcash(swap.zcash.refundHeight - tip);
-      else await sleep(5_000);
-      tip = await this.cfg.zcash.getBlockCount();
+  /**
+   * Refunds the Zcash lock of a persisted swap once the chain reaches its refund height (waiting for it unless
+   * `wait: false`). Works after a restart: everything needed is in the store. Accepts the swap or its id.
+   */
+  async refund(swapOrId: Swap | string, options: { wait?: boolean } = {}): Promise<Swap> {
+    const record = await this.load(typeof swapOrId === "string" ? swapOrId : swapOrId.id);
+    const { swap } = record;
+    if (record.stage === "refunded") return swap;
+    const { fundingTxid, fundingVout, refundHeight } = { fundingTxid: record.funding.txid, fundingVout: record.funding.vout, refundHeight: swap.zcash.refundHeight };
+
+    if (!record.refund) {
+      const unspent = await isUnspent(this.cfg.zcash, swap.zcash.htlcAddress, fundingTxid, fundingVout);
+      if (!unspent) {
+        const funded = await this.cfg.zcash.getRawTransaction(fundingTxid).then(
+          () => true,
+          () => false,
+        );
+        throw new ParalockError("conflict", funded ? "the Zcash lock was already spent (the maker claimed it)" : "nothing to refund: the funding never confirmed");
+      }
+      let tip = await this.cfg.zcash.getBlockCount();
+      if (tip < refundHeight && options.wait === false) throw new ParalockError("conflict", `the refund opens at block ${refundHeight}`);
+      while (tip < refundHeight) {
+        if (this.cfg.mineZcash) await this.cfg.mineZcash(refundHeight - tip);
+        else await new Promise((r) => setTimeout(r, Math.max(this.timeouts.pollIntervalMs, 15_000)));
+        tip = await this.cfg.zcash.getBlockCount();
+      }
+      const branchId = await this.cfg.zcash.getNextBranchId();
+      let signed: { hex: string; txid: string };
+      if (record.adaptor) {
+        const a = record.adaptor;
+        if (!a.accepted) throw new ParalockError("conflict", "no pre-signed refund: this swap was never funded");
+        const multisigKey = keyPairFromPrivate(unhex(a.multisigKey));
+        const { refund } = this.spends(record, a.accepted);
+        signed = finalizeMultisigSpend(refund, {
+          [bytesToHex(multisigKey.publicKey)]: signMultisigSpend(refund, multisigKey),
+          [unhex(swap.quote.makerZcashPubkey)]: fromHex(a.accepted.makerRefundSignature),
+        });
+      } else {
+        const htlc = htlcFromRedeemScript(unhex(swap.zcash.redeemScript), this.cfg.network);
+        const utxo = { txid: fundingTxid, vout: fundingVout, value: swap.zcash.amountZat, scriptPubKey: htlc.scriptPubKey };
+        signed = buildHtlcRefund({ htlc, utxo, key: this.cfg.zcashKey, to: record.returnAddress, branchId, network: this.cfg.network });
+      }
+      record.refund = { txid: signed.txid, hex: signed.hex };
+      await this.save(record);
     }
-    const to = this.cfg.returnAddress ?? this.zcashAddress;
-    const branchId = await this.cfg.zcash.getNextBranchId();
-    let signed: { hex: string; txid: string };
-    if (swap.mode === "adaptor") {
-      const r = this.adaptorRefunds.get(swap.id);
-      if (!r) throw new Error("no pre-signed refund for this swap");
-      signed = finalizeMultisigSpend(r.refund, {
-        [bytesToHex(r.multisigKey.publicKey)]: signMultisigSpend(r.refund, r.multisigKey),
-        [swap.quote.makerZcashPubkey.slice(2)]: fromHex(r.makerRefundSignature),
-      });
-    } else {
-      const htlc = htlcFromRedeemScript(swap.zcash.redeemScript.replace(/^0x/, ""), this.cfg.network);
-      const [utxo] = await this.cfg.zcash.getAddressUtxos([htlc.address]);
-      if (!utxo) throw new Error("nothing to refund");
-      signed = buildHtlcRefund({ htlc, utxo, key: this.cfg.zcashKey, to, branchId });
-    }
-    await this.cfg.zcash.sendRawTransaction(signed.hex);
-    swap.zcash.refundTxid = signed.txid;
-    await this.waitForConfirmation(signed.txid);
-    this.update(swap, "refunded_zcash", { chain: "zcash", txid: signed.txid, detail: "Refunded the ZEC after the timeout" });
+    await this.cfg.zcash.sendRawTransaction(record.refund.hex);
+    swap.zcash.refundTxid = record.refund.txid;
+    await this.waitForZcashTx(record.refund.txid, this.timeouts.fundingConfirmationMs);
+    await this.transition(record, "refunded", "refunded_zcash", { chain: "zcash", txid: record.refund.txid, detail: "Refunded the ZEC after the timeout" });
     return swap;
   }
 
-  private async followMaker(swap: Swap) {
-    for (let i = 0; i < 60; i++) {
-      const view = await this.cfg.maker.getSwap(swap.id).catch(() => undefined);
-      if (view?.status === "completed") {
-        swap.zcash.claimTxid = view.zcash.claimTxid;
-        const detail = swap.mode === "adaptor" ? "Maker completed the signature and claimed the ZEC" : "Maker claimed the ZEC with the secret";
-        this.update(swap, "completed", { chain: "zcash", txid: view.zcash.claimTxid, detail });
-        return;
-      }
-      await sleep(1_000);
-    }
+  // ---------------------------------------------------------------------------------------------------------------
+  // Helpers
+
+  private checkTerms(record: TakerSwapRecord, locked: EvmSwap | AdaptorEvmSwap) {
+    const { swap } = record;
+    if (locked.recipient.toLowerCase() !== swap.evm.recipient.toLowerCase()) throw new ParalockError("lock_mismatch", "lock pays someone else");
+    if (locked.token.toLowerCase() !== swap.quote.token.toLowerCase()) throw new ParalockError("lock_mismatch", "lock uses a different token");
+    if (locked.amount < swap.quote.usdAmount) throw new ParalockError("lock_mismatch", "lock is smaller than quoted");
   }
 
-  private async poll<T>(fn: () => Promise<T | undefined>, timeoutMessage: string): Promise<T> {
-    for (let i = 0; i < 180; i++) {
-      const value = await fn().catch(() => undefined);
-      if (value) return value;
-      if (this.cfg.mineZcash && i % 3 === 2) await this.cfg.mineZcash(1).catch(() => undefined);
-      await sleep(1_000);
-    }
-    throw new Error(timeoutMessage);
+  private async assertClaimWindow(record: TakerSwapRecord, client: EvmClient | AdaptorEvmClient, expiry: bigint) {
+    const c = this.chain(record.swap.quote.chain);
+    const min = BigInt(c.minClaimWindowSeconds ?? this.limits.minClaimWindowSeconds);
+    if (expiry - (await client.now()) < min) throw new ParalockError("timeout", "the maker's lock expires too soon to claim safely");
   }
 
-  private async waitForConfirmation(txid: string) {
-    await this.poll(async () => {
-      const tx = await this.cfg.zcash.getRawTransaction(txid).catch(() => undefined);
-      return tx?.confirmations && tx.confirmations > 0 ? true : undefined;
-    }, `Zcash transaction ${txid} not confirmed in time`);
+  private async waitForLock<S>(
+    record: TakerSwapRecord,
+    read: () => Promise<{ swap: S; blockNumber: bigint; txHash?: Hex } | undefined>,
+    client: EvmClient | AdaptorEvmClient,
+    minConfirmations = this.limits.minEvmConfirmations,
+  ) {
+    return this.poll(
+      async () => {
+        const lock = await read();
+        if (!lock) return undefined;
+        const confirmations = (await client.blockNumber()) - lock.blockNumber + 1n;
+        return confirmations >= BigInt(minConfirmations) ? lock : undefined;
+      },
+      "the maker's lock",
+      this.timeouts.makerLockMs,
+      () => this.pastRefundHeight(record),
+    );
   }
 
-  private newSwap(quote: Quote, hashlock: Hex | undefined, zcash: Swap["zcash"], client: { contract: Hex; address: Hex; chainId: number }): Swap {
+  private async pastRefundHeight(record: TakerSwapRecord): Promise<boolean> {
+    return (await this.cfg.zcash.getBlockCount()) >= record.swap.zcash.refundHeight;
+  }
+
+  private poll<T>(check: () => Promise<T | undefined>, what: string, timeoutMs: number, giveUp?: () => Promise<boolean>): Promise<T> {
+    let idle = 0;
+    return pollUntil(check, {
+      what,
+      intervalMs: this.timeouts.pollIntervalMs,
+      timeoutMs,
+      giveUp,
+      onError: (err) => this.log(`waiting for ${what}: ${errorMessage(err)}`),
+      onIdle: () => (this.cfg.mineZcash && ++idle % 3 === 0 ? this.cfg.mineZcash(1).catch(() => undefined) : undefined),
+    });
+  }
+
+  private async waitForZcashTx(txid: string, timeoutMs: number) {
+    await this.poll(
+      async () => {
+        const tx = await this.cfg.zcash.getRawTransaction(txid).catch(() => undefined);
+        return (tx?.confirmations ?? 0) > 0 ? true : undefined;
+      },
+      `Zcash transaction ${txid}`,
+      timeoutMs,
+    );
+  }
+
+  private newSwap(quote: Quote, id: string, client: { contract: Hex; address: Hex; chainId: number }, zcash: Swap["zcash"]): Swap {
     return {
-      id: hashlock ?? quote.id,
+      id,
       quote,
       mode: quote.mode,
       status: "quoted",
@@ -437,9 +851,24 @@ export class Taker {
     };
   }
 
-  private update(swap: Swap, status: SwapStatus, event: Omit<SwapEvent, "status" | "at">) {
-    swap.status = status;
-    swap.events.push({ status, at: Date.now(), ...event });
-    this.cfg.onUpdate?.(swap);
+  private async load(id: string): Promise<TakerSwapRecord> {
+    const record = await this.store.get<TakerSwapRecord>(PREFIX + id);
+    if (!record) throw new ParalockError("not_found", `no swap ${id} in this taker's store`);
+    return record;
+  }
+
+  private async transition(record: TakerSwapRecord, stage?: TakerStage, status?: SwapStatus, event?: Omit<SwapEvent, "status" | "at">) {
+    if (stage) record.stage = stage;
+    if (status) {
+      record.swap.status = status;
+      record.swap.events.push({ status, at: Date.now(), ...event, chain: event?.chain ?? "zcash" });
+    }
+    await this.save(record);
+    if (status) this.cfg.onUpdate?.(record.swap);
+  }
+
+  private async save(record: TakerSwapRecord) {
+    record.updatedAt = Date.now();
+    await this.store.put(PREFIX + record.id, record);
   }
 }

@@ -18,15 +18,19 @@
  *    between a pre-signature and the final signature. Observers cannot link the two legs by any shared value.
  */
 
+/** `0x`-prefixed hex. */
 export type Hex = `0x${string}`;
 
+/** The only direction today: the taker sells ZEC for stablecoins. */
 export type SwapDirection = "ZEC_TO_USD";
 
+/** `htlc` (shared sha256 hashlock) or `adaptor` (private mode: adaptor signatures, no shared value on-chain). */
 export type SwapMode = "htlc" | "adaptor";
 
 /** EVM chains a swap can settle on. Any EVM chain works; these are the ones the devnet and UI know by name. */
 export type EvmChain = "tempo" | "base" | "ethereum" | "arbitrum" | "robinhood" | "hyperevm";
 
+/** Display names of the known chains. */
 export const EVM_CHAIN_NAMES: Record<EvmChain, string> = {
   tempo: "Tempo",
   base: "Base",
@@ -36,8 +40,10 @@ export const EVM_CHAIN_NAMES: Record<EvmChain, string> = {
   hyperevm: "HyperEVM",
 };
 
+/** A chain a swap event happened on. */
 export type Chain = "zcash" | EvmChain;
 
+/** Public progress of a swap, as both parties report it. */
 export type SwapStatus =
   | "quoted"
   | "zcash_locked" // taker funded the Zcash lock
@@ -48,12 +54,15 @@ export type SwapStatus =
   | "refunded_evm"
   | "failed";
 
+/** A maker's offer. Validate it (`validateQuote`, done by `Taker`) before acting on it. */
 export interface Quote {
   id: string;
   direction: SwapDirection;
   mode: SwapMode;
   /** Chain the stablecoins are paid on. */
   chain: EvmChain;
+  /** Chain id of `chain` on the maker's side (absent from 0.1 makers). The taker rejects a mismatch. */
+  chainId?: number;
   /** ZEC the taker sends, in zatoshi. */
   zecAmountZat: bigint;
   /** Stablecoin the taker receives, in token base units (6 decimals). */
@@ -75,6 +84,7 @@ export interface Quote {
   exactOut?: boolean;
 }
 
+/** One step in a swap's timeline. */
 export interface SwapEvent {
   status: SwapStatus;
   chain: Chain;
@@ -84,6 +94,7 @@ export interface SwapEvent {
   detail?: string;
 }
 
+/** The Zcash side of a swap. */
 export interface ZcashLeg {
   /** P2SH address holding the ZEC: an HTLC (htlc mode) or a 2-of-2 multisig (adaptor mode). */
   htlcAddress: string;
@@ -96,6 +107,7 @@ export interface ZcashLeg {
   refundTxid?: string;
 }
 
+/** The EVM side of a swap. */
 export interface EvmLeg {
   chain: EvmChain;
   chainId: number;
@@ -110,6 +122,7 @@ export interface EvmLeg {
   refundTx?: Hex;
 }
 
+/** Public view of a swap. Never contains secrets or private keys; those live only in the `SwapStore`. */
 export interface Swap {
   id: string;
   quote: Quote;
@@ -128,6 +141,7 @@ export interface Swap {
   events: SwapEvent[];
 }
 
+/** Private-mode data both parties see. */
 export interface AdaptorSwapData {
   /** ParalockAdaptorEscrow swap id (keccak of the escrow parameters). */
   escrowId?: Hex;
@@ -139,6 +153,7 @@ export interface AdaptorSwapData {
   evmPreSignature?: string;
 }
 
+/** An EVM chain of the local devnet (`.paralock/devnet.json`). */
 export interface EvmNetwork {
   chain: EvmChain;
   rpc: string;

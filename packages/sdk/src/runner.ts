@@ -1,8 +1,10 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type DevnetFile, devnetTaker } from "./devnet.js";
+import { type DevnetFile, type DevnetTaker, devnetTaker } from "./devnet.js";
+import { SwapFailedError } from "./errors.js";
+import type { StoreOption } from "./factories.js";
+import { HttpMakerApi } from "./http.js";
 import type { PrivacyOptions } from "./privacy.js";
-import { SwapFailedError } from "./taker.js";
 import type { EvmChain, Hex, Quote, Swap, SwapEvent, SwapMode } from "./types.js";
 
 /** Finds `.paralock/devnet.json` in `start` or any parent directory. */
@@ -16,8 +18,17 @@ export function devnetFilePath(start = process.cwd()): string {
   }
 }
 
+/** Reads `.paralock/devnet.json` (searching upward from `start`). */
 export function loadDevnetFile(start = process.cwd()): DevnetFile {
   return JSON.parse(readFileSync(devnetFilePath(start), "utf8")) as DevnetFile;
+}
+
+/**
+ * Directory of the devnet's swap store for `role`, next to `devnet.json` (`.paralock/taker` or `.paralock/maker`).
+ * The CLI and the web app share the taker store, so `paralock refund <id>` works for swaps started anywhere.
+ */
+export function devnetStorePath(role: "taker" | "maker", start = process.cwd()): string {
+  return join(dirname(devnetFilePath(start)), role);
 }
 
 /** Appends a fresh recipient's key to `.paralock/recipients.jsonl` so swapped funds stay reachable. */
@@ -27,6 +38,7 @@ export function saveRecipient(entry: { address: string; privateKey: string; swap
   appendFileSync(join(dir, "recipients.jsonl"), `${JSON.stringify({ ...entry, at: new Date().toISOString() })}\n`, { mode: 0o600 });
 }
 
+/** Options of `DevnetSwapRunner.start`. */
 export interface RunOptions {
   /** Unshield the swap amount from the taker's Ironwood balance first, and shield change/refunds afterwards. */
   shield: boolean;
@@ -52,6 +64,7 @@ interface Job {
   extraEvents: SwapEvent[];
 }
 
+/** A job as the runner reports it. */
 export type JobView = Swap & { refundable: boolean; error?: string; privacy?: PrivacyOptions; shield: boolean };
 
 /**
@@ -61,21 +74,32 @@ export type JobView = Swap & { refundable: boolean; error?: string; privacy?: Pr
 export class DevnetSwapRunner {
   private readonly quotes = new Map<string, Quote>();
   private readonly jobs = new Map<string, Job>();
-  private readonly takers = new Map<string, Awaited<ReturnType<typeof devnetTaker>>>();
+  private readonly takers = new Map<string, DevnetTaker>();
+  private readonly maker: HttpMakerApi;
+  private readonly store: StoreOption | undefined;
 
-  constructor(private readonly cfg: DevnetFile = loadDevnetFile()) {}
+  /**
+   * @param cfg The devnet (default: `.paralock/devnet.json`).
+   * @param options `store`: where takers persist swaps (default: the devnet taker store, `.paralock/taker`).
+   */
+  constructor(
+    private readonly cfg: DevnetFile = loadDevnetFile(),
+    options: { store?: StoreOption } = {},
+  ) {
+    this.maker = new HttpMakerApi(cfg.maker.url);
+    this.store = options.store ?? defaultStore();
+  }
 
+  /** Quote for selling `zecAmountZat`. */
   async quote(zecAmountZat: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
-    const { maker } = await devnetTaker(this.cfg);
-    const quote = await maker.quote(zecAmountZat, chain, mode);
+    const quote = await this.maker.quote(zecAmountZat, chain, mode);
     this.quotes.set(quote.id, quote);
     return quote;
   }
 
   /** Quote for paying exactly `usdAmount` (token base units). */
   async quoteExactOut(usdAmount: bigint, chain: EvmChain = "tempo", mode: SwapMode = "htlc"): Promise<Quote> {
-    const { maker } = await devnetTaker(this.cfg);
-    const quote = await maker.quoteExactOut(usdAmount, chain, mode);
+    const quote = await this.maker.quoteExactOut(usdAmount, chain, mode);
     this.quotes.set(quote.id, quote);
     return quote;
   }
@@ -91,6 +115,7 @@ export class DevnetSwapRunner {
     return this.view(quoteId, job);
   }
 
+  /** The job's current view. */
   get(id: string): JobView | undefined {
     const job = this.jobs.get(id);
     return job
@@ -98,6 +123,7 @@ export class DevnetSwapRunner {
       : undefined;
   }
 
+  /** Refunds a failed job's ZEC (waits for the refund height). */
   async refund(id: string): Promise<Swap> {
     const job = this.jobs.get(id);
     if (!job) throw new Error("unknown swap");
@@ -115,6 +141,7 @@ export class DevnetSwapRunner {
     try {
       // One taker per job: it holds this swap's secrets and refund material.
       const parties = await devnetTaker(this.cfg, {
+        store: this.store,
         onUpdate: (s) => (job.swap = structuredClone(s)),
         onFreshRecipient: (account, swap) =>
           saveRecipient({ address: account.address, privateKey: account.privateKey, swapId: id, chain: swap.quote.chain }),
@@ -157,6 +184,14 @@ export class DevnetSwapRunner {
   private view(id: string, job: Job): Swap {
     const events = [...job.extraEvents, ...job.swap.events].sort((a, b) => a.at - b.at);
     return { ...job.swap, id, events };
+  }
+}
+
+function defaultStore(): StoreOption | undefined {
+  try {
+    return devnetStorePath("taker");
+  } catch {
+    return undefined;
   }
 }
 
