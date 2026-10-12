@@ -1,0 +1,362 @@
+{
+  "description": "Transparent address encoding: Base58Check(prefix(2) ‖ hash160(20)) with a double-SHA-256 checksum. P2PKH hashes a 33-byte compressed public key; P2SH hashes the redeem script. Testnet and regtest share prefixes and decode as 'testnet'.",
+  "prefixes": {
+    "mainnet": {
+      "p2pkh": "1cb8",
+      "p2sh": "1cbd",
+      "p2pkhLeading": "t1",
+      "p2shLeading": "t3"
+    },
+    "testnet": {
+      "p2pkh": "1d25",
+      "p2sh": "1cba",
+      "p2pkhLeading": "tm",
+      "p2shLeading": "t2"
+    },
+    "regtest": {
+      "p2pkh": "1d25",
+      "p2sh": "1cba",
+      "p2pkhLeading": "tm",
+      "p2shLeading": "t2"
+    }
+  },
+  "p2pkh": [
+    {
+      "description": "private key 1: the public key is the generator G (even y, prefix 02), mainnet",
+      "network": "mainnet",
+      "privateKey": "0000000000000000000000000000000000000000000000000000000000000001",
+      "publicKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "pubkeyHash": "751e76e8199196d454941c45d1b3a323f1433bd6",
+      "address": "t1UYsZVJkLPeMjxEtACvSxfWuNmddpWfxzs",
+      "scriptPubKey": "76a914751e76e8199196d454941c45d1b3a323f1433bd688ac",
+      "decodedNetwork": "mainnet"
+    },
+    {
+      "description": "private key 1: the public key is the generator G (even y, prefix 02), testnet",
+      "network": "testnet",
+      "privateKey": "0000000000000000000000000000000000000000000000000000000000000001",
+      "publicKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "pubkeyHash": "751e76e8199196d454941c45d1b3a323f1433bd6",
+      "address": "tmLPctKo9j49rtCSKpwEBpLBeykiTGomGQs",
+      "scriptPubKey": "76a914751e76e8199196d454941c45d1b3a323f1433bd688ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "private key 1: the public key is the generator G (even y, prefix 02), regtest",
+      "network": "regtest",
+      "privateKey": "0000000000000000000000000000000000000000000000000000000000000001",
+      "publicKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "pubkeyHash": "751e76e8199196d454941c45d1b3a323f1433bd6",
+      "address": "tmLPctKo9j49rtCSKpwEBpLBeykiTGomGQs",
+      "scriptPubKey": "76a914751e76e8199196d454941c45d1b3a323f1433bd688ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "private key 2, mainnet",
+      "network": "mainnet",
+      "privateKey": "0000000000000000000000000000000000000000000000000000000000000002",
+      "publicKey": "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "pubkeyHash": "06afd46bcdfd22ef94ac122aa11f241244a37ecc",
+      "address": "t1JUxhMSGFmzKY5BTp1PsQwG4Ceq642SmnB",
+      "scriptPubKey": "76a91406afd46bcdfd22ef94ac122aa11f241244a37ecc88ac",
+      "decodedNetwork": "mainnet"
+    },
+    {
+      "description": "private key 2, testnet",
+      "network": "testnet",
+      "privateKey": "0000000000000000000000000000000000000000000000000000000000000002",
+      "publicKey": "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "pubkeyHash": "06afd46bcdfd22ef94ac122aa11f241244a37ecc",
+      "address": "tmAKi2BvfeSVpgKNuUjhcGbvooduucn1tGx",
+      "scriptPubKey": "76a91406afd46bcdfd22ef94ac122aa11f241244a37ecc88ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "private key 2, regtest",
+      "network": "regtest",
+      "privateKey": "0000000000000000000000000000000000000000000000000000000000000002",
+      "publicKey": "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "pubkeyHash": "06afd46bcdfd22ef94ac122aa11f241244a37ecc",
+      "address": "tmAKi2BvfeSVpgKNuUjhcGbvooduucn1tGx",
+      "scriptPubKey": "76a91406afd46bcdfd22ef94ac122aa11f241244a37ecc88ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "private key n − 1: the public key is −G (odd y, prefix 03), mainnet",
+      "network": "mainnet",
+      "privateKey": "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140",
+      "publicKey": "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "pubkeyHash": "adde4c73c7b9cee17da6c7b3e2b2eea1a0dcbe67",
+      "address": "t1ZiwD6uYW8ku8DSCM4f11BwsDateqtG7yz",
+      "scriptPubKey": "76a914adde4c73c7b9cee17da6c7b3e2b2eea1a0dcbe6788ac",
+      "decodedNetwork": "mainnet"
+    },
+    {
+      "description": "private key n − 1: the public key is −G (odd y, prefix 03), testnet",
+      "network": "testnet",
+      "privateKey": "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140",
+      "publicKey": "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "pubkeyHash": "adde4c73c7b9cee17da6c7b3e2b2eea1a0dcbe67",
+      "address": "tmRZgXwPwtoGQGTde1nxjrrccpZyULQFA5W",
+      "scriptPubKey": "76a914adde4c73c7b9cee17da6c7b3e2b2eea1a0dcbe6788ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "private key n − 1: the public key is −G (odd y, prefix 03), regtest",
+      "network": "regtest",
+      "privateKey": "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140",
+      "publicKey": "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "pubkeyHash": "adde4c73c7b9cee17da6c7b3e2b2eea1a0dcbe67",
+      "address": "tmRZgXwPwtoGQGTde1nxjrrccpZyULQFA5W",
+      "scriptPubKey": "76a914adde4c73c7b9cee17da6c7b3e2b2eea1a0dcbe6788ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "fixture taker-funding-key, mainnet",
+      "network": "mainnet",
+      "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+      "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+      "pubkeyHash": "cab62846648ae700776eedc2db0ff75e9d5e3f8b",
+      "address": "t1cMSibeDJtSfp7sxdN79WQdk3kK5TAMVTe",
+      "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+      "decodedNetwork": "mainnet"
+    },
+    {
+      "description": "fixture taker-funding-key, testnet",
+      "network": "testnet",
+      "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+      "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+      "pubkeyHash": "cab62846648ae700776eedc2db0ff75e9d5e3f8b",
+      "address": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+      "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "fixture taker-funding-key, regtest",
+      "network": "regtest",
+      "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+      "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+      "pubkeyHash": "cab62846648ae700776eedc2db0ff75e9d5e3f8b",
+      "address": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+      "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "fixture maker-zcash-key, mainnet",
+      "network": "mainnet",
+      "privateKey": "ebb8d84a96acfb21e1e4a431b4e5152ca98a92c66946b7cea7fea546ba442820",
+      "publicKey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+      "pubkeyHash": "c16941c0a904ecb50ae4fd4ca10e93f8e267d85a",
+      "address": "t1bWGWjT8XE5v87uGLSU6jTYVwkkRkt6Bn4",
+      "scriptPubKey": "76a914c16941c0a904ecb50ae4fd4ca10e93f8e267d85a88ac",
+      "decodedNetwork": "mainnet"
+    },
+    {
+      "description": "fixture maker-zcash-key, testnet",
+      "network": "testnet",
+      "privateKey": "ebb8d84a96acfb21e1e4a431b4e5152ca98a92c66946b7cea7fea546ba442820",
+      "publicKey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+      "pubkeyHash": "c16941c0a904ecb50ae4fd4ca10e93f8e267d85a",
+      "address": "tmTM1qZwXutbRGN6i1Amqb8DFYjqFH5ja4R",
+      "scriptPubKey": "76a914c16941c0a904ecb50ae4fd4ca10e93f8e267d85a88ac",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "fixture maker-zcash-key, regtest",
+      "network": "regtest",
+      "privateKey": "ebb8d84a96acfb21e1e4a431b4e5152ca98a92c66946b7cea7fea546ba442820",
+      "publicKey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+      "pubkeyHash": "c16941c0a904ecb50ae4fd4ca10e93f8e267d85a",
+      "address": "tmTM1qZwXutbRGN6i1Amqb8DFYjqFH5ja4R",
+      "scriptPubKey": "76a914c16941c0a904ecb50ae4fd4ca10e93f8e267d85a88ac",
+      "decodedNetwork": "testnet"
+    }
+  ],
+  "p2sh": [
+    {
+      "description": "the fixture HTLC redeem script (zcash-htlc.json, first script), mainnet",
+      "network": "mainnet",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "scriptHash": "62fc5367913c1fbc354c216cedc9b81ce14d93d4",
+      "address": "t3Tb1RahKz9GJnXTAXX5GzAfPAEfjscu4K5",
+      "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487",
+      "decodedNetwork": "mainnet"
+    },
+    {
+      "description": "the fixture HTLC redeem script (zcash-htlc.json, first script), testnet",
+      "network": "testnet",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "scriptHash": "62fc5367913c1fbc354c216cedc9b81ce14d93d4",
+      "address": "t2FaCUFoTrbsgLE2uTG5KXnr2GitukjJxdo",
+      "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "the fixture HTLC redeem script (zcash-htlc.json, first script), regtest",
+      "network": "regtest",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "scriptHash": "62fc5367913c1fbc354c216cedc9b81ce14d93d4",
+      "address": "t2FaCUFoTrbsgLE2uTG5KXnr2GitukjJxdo",
+      "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "the fixture 2-of-2 multisig redeem script (zcash-multisig.json, first script), mainnet",
+      "network": "mainnet",
+      "redeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+      "scriptHash": "45f4250be1166196e51b2ce3155904e0dd82f22f",
+      "address": "t3QwW2azM5iWR1g8ViSbXETAKp9Pfzcqi7K",
+      "scriptPubKey": "a91445f4250be1166196e51b2ce3155904e0dd82f22f87",
+      "decodedNetwork": "mainnet"
+    },
+    {
+      "description": "the fixture 2-of-2 multisig redeem script (zcash-multisig.json, first script), testnet",
+      "network": "testnet",
+      "redeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+      "scriptHash": "45f4250be1166196e51b2ce3155904e0dd82f22f",
+      "address": "t2Cvh5G6UxB7nZNiEeBbZn5LxvdcqtoapQC",
+      "scriptPubKey": "a91445f4250be1166196e51b2ce3155904e0dd82f22f87",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "the fixture 2-of-2 multisig redeem script (zcash-multisig.json, first script), regtest",
+      "network": "regtest",
+      "redeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+      "scriptHash": "45f4250be1166196e51b2ce3155904e0dd82f22f",
+      "address": "t2Cvh5G6UxB7nZNiEeBbZn5LxvdcqtoapQC",
+      "scriptPubKey": "a91445f4250be1166196e51b2ce3155904e0dd82f22f87",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "a one-byte script (OP_1), mainnet",
+      "network": "mainnet",
+      "redeemScript": "51",
+      "scriptHash": "da1745e9b549bd0bfa1a569971c77eba30cd5a4b",
+      "address": "t3eSn7juy24rR1b65eJjMJ2nufTyRKgH7vC",
+      "scriptPubKey": "a914da1745e9b549bd0bfa1a569971c77eba30cd5a4b87",
+      "decodedNetwork": "mainnet"
+    },
+    {
+      "description": "a one-byte script (OP_1), testnet",
+      "network": "testnet",
+      "redeemScript": "51",
+      "scriptHash": "da1745e9b549bd0bfa1a569971c77eba30cd5a4b",
+      "address": "t2SRyAR26tXTnZHfpa3jPqeyYmxCbAZxUnh",
+      "scriptPubKey": "a914da1745e9b549bd0bfa1a569971c77eba30cd5a4b87",
+      "decodedNetwork": "testnet"
+    },
+    {
+      "description": "a one-byte script (OP_1), regtest",
+      "network": "regtest",
+      "redeemScript": "51",
+      "scriptHash": "da1745e9b549bd0bfa1a569971c77eba30cd5a4b",
+      "address": "t2SRyAR26tXTnZHfpa3jPqeyYmxCbAZxUnh",
+      "scriptPubKey": "a914da1745e9b549bd0bfa1a569971c77eba30cd5a4b87",
+      "decodedNetwork": "testnet"
+    }
+  ],
+  "invalidAddresses": [
+    {
+      "description": "valid testnet P2PKH address with its last character changed (bad checksum)",
+      "address": "tmAKi2BvfeSVpgKNuUjhcGbvooduucn1tG1",
+      "error": "Invalid checksum"
+    },
+    {
+      "description": "Base58Check payload of 21 bytes (a Bitcoin-style 1-byte version)",
+      "address": "1111111111111111111114oLvT2",
+      "error": "not a transparent address: 1111111111111111111114oLvT2"
+    },
+    {
+      "description": "unknown 2-byte prefix 0x1cb9",
+      "address": "t1hDCzSiRgWFUR5Byxr9ScwNhtAT2c7Xdma",
+      "error": "unknown address prefix: t1hDCzSiRgWFUR5Byxr9ScwNhtAT2c7Xdma"
+    },
+    {
+      "description": "a 23-byte payload with a valid P2PKH prefix",
+      "address": "4t8HUMWUhYBbvFhtXnFEWzVUu83hZv9C9St15",
+      "error": "not a transparent address: 4t8HUMWUhYBbvFhtXnFEWzVUu83hZv9C9St15"
+    },
+    {
+      "description": "a Sapling-style bech32 string",
+      "address": "zs1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "error": "Invalid checksum"
+    },
+    {
+      "description": "empty string",
+      "address": "",
+      "error": "Invalid checksum"
+    }
+  ],
+  "networkChecks": [
+    {
+      "description": "mainnet address in a testnet transaction",
+      "address": "t1UYsZVJkLPeMjxEtACvSxfWuNmddpWfxzs",
+      "network": "testnet",
+      "accepted": false,
+      "scriptPubKey": null
+    },
+    {
+      "description": "testnet address in a mainnet transaction",
+      "address": "tmLPctKo9j49rtCSKpwEBpLBeykiTGomGQs",
+      "network": "mainnet",
+      "accepted": false,
+      "scriptPubKey": null
+    },
+    {
+      "description": "testnet address in a regtest transaction (shared prefixes)",
+      "address": "tmLPctKo9j49rtCSKpwEBpLBeykiTGomGQs",
+      "network": "regtest",
+      "accepted": true,
+      "scriptPubKey": "76a914751e76e8199196d454941c45d1b3a323f1433bd688ac"
+    },
+    {
+      "description": "mainnet address in a mainnet transaction",
+      "address": "t1UYsZVJkLPeMjxEtACvSxfWuNmddpWfxzs",
+      "network": "mainnet",
+      "accepted": true,
+      "scriptPubKey": "76a914751e76e8199196d454941c45d1b3a323f1433bd688ac"
+    }
+  ],
+  "publicKeys": [
+    {
+      "description": "G, compressed",
+      "publicKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "valid": true
+    },
+    {
+      "description": "−G, compressed (prefix 03)",
+      "publicKey": "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "valid": true
+    },
+    {
+      "description": "G, uncompressed (65 bytes): not accepted",
+      "publicKey": "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+      "valid": false
+    },
+    {
+      "description": "G's x with prefix 04 (33 bytes)",
+      "publicKey": "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "valid": false
+    },
+    {
+      "description": "G's x with prefix 01",
+      "publicKey": "0179be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "valid": false
+    },
+    {
+      "description": "x = 0, prefix 02",
+      "publicKey": "020000000000000000000000000000000000000000000000000000000000000000",
+      "valid": false
+    },
+    {
+      "description": "x = p (not a field element), prefix 02",
+      "publicKey": "02fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+      "valid": false
+    },
+    {
+      "description": "32 bytes",
+      "publicKey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "valid": false
+    }
+  ]
+}

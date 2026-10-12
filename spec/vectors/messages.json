@@ -1,0 +1,2594 @@
+{
+  "description": "Maker HTTP API (protocol v1) recorded from the TypeScript maker (makerHandler over a Maker with in-memory chains, deterministic randomness, Date.now() = 1800000000000). Bodies are JSON; the canonical text of a body is its compact JSON.stringify serialization in the key order shown. bigint fields are decimal strings. Only `code` is normative in error bodies; `error` texts are informative.",
+  "environment": {
+    "nowMs": 1800000000000,
+    "zcashTip": 3000000,
+    "branchId": "0x37a5165b",
+    "network": "testnet",
+    "chain": "tempo",
+    "chainId": 42431,
+    "token": "0x20c0000000000000000000006a37DA5C996874BE",
+    "price": 50,
+    "spreadBps": 50,
+    "policy": "MAINNET_POLICY",
+    "limits": "DEFAULT_MAKER_LIMITS",
+    "quoteIds": "randomUUID replaced by 00000000-0000-4000-8000-<12-hex counter>",
+    "randomness": "getRandomValues replaced by the SHA-256 stream seeded \"paralock/vectors/v1/maker-harness\""
+  },
+  "exchanges": [
+    {
+      "description": "Health: the chains served and the maker's long-term (htlc) Zcash key",
+      "request": {
+        "method": "GET",
+        "path": "/health"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "chains": [
+            "tempo"
+          ],
+          "zcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b"
+        }
+      }
+    },
+    {
+      "description": "htlc quote for exactly 1 ZEC (exact-in)",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=100000000&chain=tempo&mode=htlc"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        }
+      }
+    },
+    {
+      "description": "htlc quote paying exactly 25 OUSD (exact-out, ?usd= wins over ?zat=)",
+      "request": {
+        "method": "GET",
+        "path": "/quote?usd=25000000&zat=1&chain=tempo&mode=htlc"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "50261257",
+          "usdAmount": "25000000",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060,
+          "exactOut": true
+        }
+      }
+    },
+    {
+      "description": "adaptor (private mode) quote for 0.5 ZEC: a fresh per-quote maker key",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=50000000&chain=tempo&mode=adaptor"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "direction": "ZEC_TO_USD",
+          "mode": "adaptor",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "50000000",
+          "usdAmount": "24870025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x02f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        }
+      }
+    },
+    {
+      "description": "Another adaptor quote (used for a rejected proposal)",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=20000000&mode=adaptor"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "direction": "ZEC_TO_USD",
+          "mode": "adaptor",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "20000000",
+          "usdAmount": "9945025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x032efae9907037a8c65757f972b1b76c7a3f1a0ad5b0870a3e64f832705dff9e1b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        }
+      }
+    },
+    {
+      "description": "Defaults: chain=tempo, mode=htlc",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=30000000"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "30000000",
+          "usdAmount": "14920025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        }
+      }
+    },
+    {
+      "description": "Amount with a fraction is rejected",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=1.5&chain=tempo&mode=htlc"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "amount must be a positive integer",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Zero amount is rejected",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=0"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "amount must be at least 1",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Missing amount is rejected",
+      "request": {
+        "method": "GET",
+        "path": "/quote?chain=tempo"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "amount must be a positive integer",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Below the maker's minimum swap",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=100000"
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "error": "minimum swap is 1000000 zat",
+          "code": "limit_exceeded"
+        }
+      }
+    },
+    {
+      "description": "Above the maker's maximum swap",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=1000000001"
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "error": "maximum swap is 1000000000 zat",
+          "code": "limit_exceeded"
+        }
+      }
+    },
+    {
+      "description": "Unknown chain name",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=100000000&chain=solana"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "unknown chain",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Known chain the maker does not serve",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=100000000&chain=base"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "this maker does not serve base",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Unknown mode",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=100000000&mode=private"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "mode must be htlc or adaptor",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "htlc accept: the taker's HTLC (refund at tip + 144) for quote 1",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "0x88de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000001",
+            "direction": "ZEC_TO_USD",
+            "mode": "htlc",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "100000000",
+            "usdAmount": "49745025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "htlc",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2H3A1e4TNjy9fzcAxQ8Px1H2JG9bHfWNW8",
+            "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+            "refundHeight": 3000144,
+            "amountZat": "100000000",
+            "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "49745025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "hashlock": "0x88de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04"
+        }
+      }
+    },
+    {
+      "description": "htlc accept repeated byte for byte: same swap (idempotent)",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "0x88de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000001",
+            "direction": "ZEC_TO_USD",
+            "mode": "htlc",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "100000000",
+            "usdAmount": "49745025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "htlc",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2H3A1e4TNjy9fzcAxQ8Px1H2JG9bHfWNW8",
+            "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+            "refundHeight": 3000144,
+            "amountZat": "100000000",
+            "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "49745025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "hashlock": "0x88de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04"
+        }
+      }
+    },
+    {
+      "description": "Same HTLC (same hashlock) with another funding outpoint: conflict",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 1,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "error": "hashlock already used",
+          "code": "conflict"
+        }
+      }
+    },
+    {
+      "description": "Unknown quote id",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-0000000000ff",
+          "redeemScript": "0x6382012088a8209cf2388188e270be99954482023bf8e2c81fed6cec57b19e70c3f9ce00d0d481882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 410,
+        "body": {
+          "error": "unknown or already used quote",
+          "code": "quote_expired"
+        }
+      }
+    },
+    {
+      "description": "fundingTxid with a 0x prefix is malformed (txids are bare display-order hex)",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a8209cf2388188e270be99954482023bf8e2c81fed6cec57b19e70c3f9ce00d0d481882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "0xc8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "fundingTxid must be a 64-character txid",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "redeemScript that is not the Paralock HTLC template",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x51",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "redeemScript is not a Paralock HTLC",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Refund height only 50 blocks away: unsafe windows (and quote 2 is consumed)",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000002",
+          "redeemScript": "0x6382012088a820f8b7794092442aae6b1ddb1421b31ceedef560e876604459433ff03f98e6c1f2882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703f2c62db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "error": "unsafe timeouts: Zcash refund in ~3750s must exceed 2x the EVM lock (3600s)",
+          "code": "unsafe_timeouts"
+        }
+      }
+    },
+    {
+      "description": "Quote 2 again with a safe HTLC: the failed accept already consumed it",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000002",
+          "redeemScript": "0x6382012088a8209cf2388188e270be99954482023bf8e2c81fed6cec57b19e70c3f9ce00d0d481882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 410,
+        "body": {
+          "error": "unknown or already used quote",
+          "code": "quote_expired"
+        }
+      }
+    },
+    {
+      "description": "HTLC whose claim key is not the maker's",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000005",
+          "redeemScript": "0x6382012088a8207140b7763133cc6e324ba4a4cbee3d95fe291350799673049fd14027cf6055b98821020a4f181505c41daf20783ea5e929bc8e215ecc6e18e8a33d4aa1b241e72c1725670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "HTLC does not pay the maker's key",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "htlc quote used for the fundingExpiryHeight checks",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=40000000"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000006",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "40000000",
+          "usdAmount": "19895025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        }
+      }
+    },
+    {
+      "description": "(v1.1) fundingExpiryHeight equal to the tip: rejected, quote not consumed",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000006",
+          "redeemScript": "0x6382012088a820447960621f7f15c1acc65cb1abe05012ce680aad2d03bee16fd3e61c486e1c02882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "2399d26e38ebf28db93789818d864496ecb15767ecdf2dfe7e391e223ee8112e",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000000
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "fundingExpiryHeight 3000000 is not above the tip (3000000)",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "(v1.1) fundingExpiryHeight 46 blocks above the tip: rejected, quote not consumed",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000006",
+          "redeemScript": "0x6382012088a820447960621f7f15c1acc65cb1abe05012ce680aad2d03bee16fd3e61c486e1c02882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "2399d26e38ebf28db93789818d864496ecb15767ecdf2dfe7e391e223ee8112e",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000046
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "fundingExpiryHeight must be at most 45 blocks above the tip (3000000)",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "(v1.1) fundingExpiryHeight exactly 45 blocks above the tip: accepted",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000006",
+          "redeemScript": "0x6382012088a820447960621f7f15c1acc65cb1abe05012ce680aad2d03bee16fd3e61c486e1c02882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "2399d26e38ebf28db93789818d864496ecb15767ecdf2dfe7e391e223ee8112e",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000045
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "0x447960621f7f15c1acc65cb1abe05012ce680aad2d03bee16fd3e61c486e1c02",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000006",
+            "direction": "ZEC_TO_USD",
+            "mode": "htlc",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "40000000",
+            "usdAmount": "19895025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "htlc",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2PSvBZpB3zjnFLgkNh5VCJppmxGHhJAdZR",
+            "redeemScript": "0x6382012088a820447960621f7f15c1acc65cb1abe05012ce680aad2d03bee16fd3e61c486e1c02882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+            "refundHeight": 3000144,
+            "amountZat": "40000000",
+            "fundingTxid": "2399d26e38ebf28db93789818d864496ecb15767ecdf2dfe7e391e223ee8112e",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "19895025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "hashlock": "0x447960621f7f15c1acc65cb1abe05012ce680aad2d03bee16fd3e61c486e1c02"
+        }
+      }
+    },
+    {
+      "description": "htlc quote used for a far refund height",
+      "request": {
+        "method": "GET",
+        "path": "/quote?zat=40000000"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000007",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "40000000",
+          "usdAmount": "19895025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        }
+      }
+    },
+    {
+      "description": "htlc accept without fundingExpiryHeight and a refund 100,000 blocks away: accepted (no upper bound in htlc mode)",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000007",
+          "redeemScript": "0x6382012088a82068655b36fc18b06e360d991296d81118a7850922c3f97ac4b619f1473d5a56ca882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703604d2fb17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "cf58ca2aa2e6b4758e85da726453dcabff1c8e41abcb71bc0a1aadb169dd1a3a",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "0x68655b36fc18b06e360d991296d81118a7850922c3f97ac4b619f1473d5a56ca",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000007",
+            "direction": "ZEC_TO_USD",
+            "mode": "htlc",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "40000000",
+            "usdAmount": "19895025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "htlc",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2BiyXmptCC3fZ8CfaHio1WuWE3Ekxt4tzC",
+            "redeemScript": "0x6382012088a82068655b36fc18b06e360d991296d81118a7850922c3f97ac4b619f1473d5a56ca882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703604d2fb17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+            "refundHeight": 3100000,
+            "amountZat": "40000000",
+            "fundingTxid": "cf58ca2aa2e6b4758e85da726453dcabff1c8e41abcb71bc0a1aadb169dd1a3a",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "19895025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "hashlock": "0x68655b36fc18b06e360d991296d81118a7850922c3f97ac4b619f1473d5a56ca"
+        }
+      }
+    },
+    {
+      "description": "adaptor proposal for quote 3 (funding signed, not broadcast)",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "swapId": "00000000-0000-4000-8000-000000000003",
+          "makerRefundSignature": "0x3045022100ec22871f44a15cd3700b0542f58327a8c0b63d5519041ca5eeea9e70c959120202203961663c320ade7a6906fb23b425a02024a3af287dc879fd9df8e6d52253d68001",
+          "claimTo": "tmDwzLK6xkr1NTD2MAWVvPcEXRD3vFv2xCU",
+          "branchId": 933566043,
+          "signer": "0x4babedc848ab85013eea6619fe0b65ada82c641f",
+          "signerPubkey": "0x038c9c6407e56df297878d47c1db65d2491925e5ca1801e823dccae7b0185ad374"
+        }
+      }
+    },
+    {
+      "description": "Identical proposal again: identical answer (idempotent)",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "swapId": "00000000-0000-4000-8000-000000000003",
+          "makerRefundSignature": "0x3045022100ec22871f44a15cd3700b0542f58327a8c0b63d5519041ca5eeea9e70c959120202203961663c320ade7a6906fb23b425a02024a3af287dc879fd9df8e6d52253d68001",
+          "claimTo": "tmDwzLK6xkr1NTD2MAWVvPcEXRD3vFv2xCU",
+          "branchId": 933566043,
+          "signer": "0x4babedc848ab85013eea6619fe0b65ada82c641f",
+          "signerPubkey": "0x038c9c6407e56df297878d47c1db65d2491925e5ca1801e823dccae7b0185ad374"
+        }
+      }
+    },
+    {
+      "description": "A different proposal for the same quote: conflict",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000150,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "error": "a different proposal was already accepted for this quote",
+          "code": "conflict"
+        }
+      }
+    },
+    {
+      "description": "Proposal whose amount differs from the quote (quote 4 stays usable)",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000004",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "20000001",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "lock amount must equal the quoted amount",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Refund height more than 2 × zcashLockBlocks away",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000004",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "20000000",
+          "refundHeight": 3000289,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "refund height is too far away",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Adaptor point that is not a curve point",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps",
+        "body": {
+          "quoteId": "00000000-0000-4000-8000-000000000004",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x020000000000000000000000000000000000000000000000000000000000000000",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "20000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "adaptorPoint must be a compressed secp256k1 public key",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Pre-signature with a tampered s: rejected",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps/00000000-0000-4000-8000-000000000003/presignature",
+        "body": {
+          "takerPreSignature": "032ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b371b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "invalid pre-signature for the maker's claim",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Valid pre-signature on the maker's claim (encrypted to Y)",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps/00000000-0000-4000-8000-000000000003/presignature",
+        "body": {
+          "takerPreSignature": "032ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b471b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000003",
+            "direction": "ZEC_TO_USD",
+            "mode": "adaptor",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "50000000",
+            "usdAmount": "24870025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x02f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "adaptor",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2JEw4GjCAZHUjnvqCYXb8qZLVfmufE4G6u",
+            "redeemScript": "0x522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b52ae",
+            "refundHeight": 3000144,
+            "amountZat": "50000000",
+            "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "24870025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "adaptor": {
+            "signer": "0x4babedc848ab85013eea6619fe0b65ada82c641f",
+            "signerPubkey": "0x038c9c6407e56df297878d47c1db65d2491925e5ca1801e823dccae7b0185ad374"
+          }
+        }
+      }
+    },
+    {
+      "description": "Pre-signature sent again (0x-prefixed, upper case): same swap (idempotent)",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps/00000000-0000-4000-8000-000000000003/presignature",
+        "body": {
+          "takerPreSignature": "0x032ECD7184BB93D8D3845018F97F0C93D094D9C5685D7C3443C69DA827BCFC528A025CA2B92AEECF1BF09723D6BEC1F3CA037DB19751D2D68BB056843711EABB3803CDC48C45C436BC0BC2F7F95C3472DA5879CECAB3D1AE32001315D88E68C4D1B471B84627C5B0AE9B3CC5E411C7BD0521F9F680ABD48B4EDF8133D251F7763E1B9260BEF45922E4C4CA91F47419B9C63CC8892D7BE83DE1B50400AC7951B64038"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000003",
+            "direction": "ZEC_TO_USD",
+            "mode": "adaptor",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "50000000",
+            "usdAmount": "24870025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x02f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "adaptor",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2JEw4GjCAZHUjnvqCYXb8qZLVfmufE4G6u",
+            "redeemScript": "0x522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b52ae",
+            "refundHeight": 3000144,
+            "amountZat": "50000000",
+            "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "24870025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "adaptor": {
+            "signer": "0x4babedc848ab85013eea6619fe0b65ada82c641f",
+            "signerPubkey": "0x038c9c6407e56df297878d47c1db65d2491925e5ca1801e823dccae7b0185ad374"
+          }
+        }
+      }
+    },
+    {
+      "description": "Pre-signature for an unknown swap",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps/00000000-0000-4000-8000-0000000000ff/presignature",
+        "body": {
+          "takerPreSignature": "032ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b471b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": "unknown swap",
+          "code": "not_found"
+        }
+      }
+    },
+    {
+      "description": "Pre-signature of the wrong length",
+      "request": {
+        "method": "POST",
+        "path": "/adaptor/swaps/00000000-0000-4000-8000-000000000003/presignature",
+        "body": {
+          "takerPreSignature": "2ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b471b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "takerPreSignature must be a 162-byte hex pre-signature",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "The htlc swap by id (0x ‖ hashlock), with a trailing slash",
+      "request": {
+        "method": "GET",
+        "path": "/swaps/0x88de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04/"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "0x88de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000001",
+            "direction": "ZEC_TO_USD",
+            "mode": "htlc",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "100000000",
+            "usdAmount": "49745025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "htlc",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2H3A1e4TNjy9fzcAxQ8Px1H2JG9bHfWNW8",
+            "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+            "refundHeight": 3000144,
+            "amountZat": "100000000",
+            "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xD9B278625B5946B8CD15dad6c0c776095B8D0513",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "49745025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "hashlock": "0x88de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04"
+        }
+      }
+    },
+    {
+      "description": "The adaptor swap by id (the quote id), upper case",
+      "request": {
+        "method": "GET",
+        "path": "/swaps/00000000-0000-4000-8000-000000000003"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "quote": {
+            "id": "00000000-0000-4000-8000-000000000003",
+            "direction": "ZEC_TO_USD",
+            "mode": "adaptor",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "50000000",
+            "usdAmount": "24870025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x02f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          },
+          "mode": "adaptor",
+          "status": "quoted",
+          "zcash": {
+            "htlcAddress": "t2JEw4GjCAZHUjnvqCYXb8qZLVfmufE4G6u",
+            "redeemScript": "0x522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b52ae",
+            "refundHeight": 3000144,
+            "amountZat": "50000000",
+            "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+            "fundingVout": 0
+          },
+          "evm": {
+            "chain": "tempo",
+            "chainId": 42431,
+            "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "amount": "24870025",
+            "recipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+          },
+          "events": [],
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "adaptor": {
+            "signer": "0x4babedc848ab85013eea6619fe0b65ada82c641f",
+            "signerPubkey": "0x038c9c6407e56df297878d47c1db65d2491925e5ca1801e823dccae7b0185ad374"
+          }
+        }
+      }
+    },
+    {
+      "description": "Unknown swap id",
+      "request": {
+        "method": "GET",
+        "path": "/swaps/0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": "not found",
+          "code": "not_found"
+        }
+      }
+    },
+    {
+      "description": "The swap list is off by default",
+      "request": {
+        "method": "GET",
+        "path": "/swaps"
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": "not found",
+          "code": "not_found"
+        }
+      }
+    },
+    {
+      "description": "Unknown route",
+      "request": {
+        "method": "GET",
+        "path": "/v2/quote"
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": "not found",
+          "code": "not_found"
+        }
+      }
+    },
+    {
+      "description": "Body that is not JSON",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "rawBody": "quoteId=1"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "body is not valid JSON",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "Body over the 16 KiB limit",
+      "request": {
+        "method": "POST",
+        "path": "/swaps",
+        "repeatedBody": {
+          "repeat": "a",
+          "times": 16385
+        }
+      },
+      "response": {
+        "status": 413,
+        "body": {
+          "error": "request body too large",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "description": "CORS preflight without CORS configured",
+      "request": {
+        "method": "OPTIONS",
+        "path": "/quote"
+      },
+      "response": {
+        "status": 204,
+        "body": null
+      }
+    }
+  ],
+  "parse": {
+    "quote": [
+      {
+        "description": "htlc quote as served",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "output": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060,
+          "chainId": 42431
+        }
+      },
+      {
+        "description": "adaptor quote as served",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "direction": "ZEC_TO_USD",
+          "mode": "adaptor",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "50000000",
+          "usdAmount": "24870025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x02f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "output": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "direction": "ZEC_TO_USD",
+          "mode": "adaptor",
+          "chain": "tempo",
+          "zecAmountZat": "50000000",
+          "usdAmount": "24870025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x02f7482afeb13e2ae3efefe7dfc2982f692b9742c67c0dd3da29552d6536b0db6b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060,
+          "chainId": 42431
+        }
+      },
+      {
+        "description": "amounts as JSON numbers (safe integers) are accepted",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": 100000000,
+          "usdAmount": 49745025,
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "output": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060,
+          "chainId": 42431
+        }
+      },
+      {
+        "description": "exactOut false is dropped; unknown fields are dropped",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060,
+          "exactOut": false,
+          "extra": "ignored"
+        },
+        "output": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060,
+          "chainId": 42431
+        }
+      },
+      {
+        "description": "no chainId (0.1 makers)",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "output": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        }
+      },
+      {
+        "description": "exactOut true is kept",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060,
+          "exactOut": true
+        },
+        "output": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060,
+          "chainId": 42431,
+          "exactOut": true
+        }
+      },
+      {
+        "description": "not an object",
+        "input": [
+          {
+            "id": "00000000-0000-4000-8000-000000000001",
+            "direction": "ZEC_TO_USD",
+            "mode": "htlc",
+            "chain": "tempo",
+            "chainId": 42431,
+            "zecAmountZat": "100000000",
+            "usdAmount": "49745025",
+            "token": "0x20c0000000000000000000006a37DA5C996874BE",
+            "tokenSymbol": "OUSD",
+            "rate": 49.75,
+            "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+            "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+            "zcashLockBlocks": 144,
+            "evmLockSeconds": 3600,
+            "expiresAt": 1800000060
+          }
+        ],
+        "error": {
+          "code": "invalid_request",
+          "message": "quote must be an object"
+        }
+      },
+      {
+        "description": "id is not a UUID",
+        "input": {
+          "id": "quote-1",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.id must be a quote id"
+        }
+      },
+      {
+        "description": "direction USD_TO_ZEC",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "USD_TO_ZEC",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.direction must be ZEC_TO_USD"
+        }
+      },
+      {
+        "description": "unknown mode",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "private",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.mode must be htlc or adaptor"
+        }
+      },
+      {
+        "description": "unknown chain",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "solana",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.chain is not a known chain"
+        }
+      },
+      {
+        "description": "token of 19 bytes",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.token must be an address"
+        }
+      },
+      {
+        "description": "makerZcashPubkey without 0x",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.makerZcashPubkey must be 33 bytes of hex"
+        }
+      },
+      {
+        "description": "rate 0",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 0,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.rate must be a positive number"
+        }
+      },
+      {
+        "description": "rate as a string",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": "49.75",
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.rate must be a positive number"
+        }
+      },
+      {
+        "description": "zecAmountZat 0",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "0",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.zecAmountZat must be at least 1"
+        }
+      },
+      {
+        "description": "zecAmountZat above 21M ZEC",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "2100000000000001",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.zecAmountZat must be at most 2100000000000000"
+        }
+      },
+      {
+        "description": "zecAmountZat with a fraction",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "1.5",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.zecAmountZat must be a non-negative integer"
+        }
+      },
+      {
+        "description": "zecAmountZat in exponent notation",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "1e8",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.zecAmountZat must be a non-negative integer"
+        }
+      },
+      {
+        "description": "zecAmountZat negative",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "-1",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.zecAmountZat must be a non-negative integer"
+        }
+      },
+      {
+        "description": "usdAmount as an unsafe JSON number",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": 9007199254740992,
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.usdAmount must be a non-negative integer"
+        }
+      },
+      {
+        "description": "tokenSymbol empty",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.tokenSymbol must be a string"
+        }
+      },
+      {
+        "description": "tokenSymbol of 33 characters",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.tokenSymbol must be a string"
+        }
+      },
+      {
+        "description": "zcashLockBlocks 0",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 0,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.zcashLockBlocks is out of range"
+        }
+      },
+      {
+        "description": "zcashLockBlocks 100001",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 100001,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.zcashLockBlocks is out of range"
+        }
+      },
+      {
+        "description": "evmLockSeconds 0",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 0,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.evmLockSeconds is out of range"
+        }
+      },
+      {
+        "description": "expiresAt not an integer",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060.5
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.expiresAt must be an integer"
+        }
+      },
+      {
+        "description": "chainId 0",
+        "input": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 0,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quote.chainId is out of range"
+        }
+      }
+    ],
+    "acceptRequest": [
+      {
+        "description": "accept request as sent",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "output": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      {
+        "description": "upper-case fundingTxid is lower-cased",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "C8184DDAEB9A3CB9962A19072ADB6BCB6ED9D6491548691DB7B6E7199946A4FB",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "output": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      {
+        "description": "without fundingExpiryHeight (protocol v1.0 taker)",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087"
+        },
+        "output": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087"
+        }
+      },
+      {
+        "description": "(v1.1) fundingExpiryHeight 0",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 0
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "fundingExpiryHeight is out of range"
+        }
+      },
+      {
+        "description": "(v1.1) fundingExpiryHeight as a string",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": "3000040"
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "fundingExpiryHeight must be an integer"
+        }
+      },
+      {
+        "description": "(v1.1) fundingExpiryHeight 500000000",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 500000000
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "fundingExpiryHeight is out of range"
+        }
+      },
+      {
+        "description": "quoteId not a UUID",
+        "input": {
+          "quoteId": "1",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "quoteId must be a quote id"
+        }
+      },
+      {
+        "description": "redeemScript without 0x",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "redeemScript must be hex"
+        }
+      },
+      {
+        "description": "redeemScript of odd length",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac0",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "redeemScript must be hex"
+        }
+      },
+      {
+        "description": "redeemScript over 520 bytes",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x5151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "redeemScript must be hex"
+        }
+      },
+      {
+        "description": "fundingTxid with 0x",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "0xc8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "fundingTxid must be a 64-character txid"
+        }
+      },
+      {
+        "description": "fundingTxid of 31 bytes",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "fundingTxid must be a 64-character txid"
+        }
+      },
+      {
+        "description": "fundingVout 10001",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 10001,
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "fundingVout is out of range"
+        }
+      },
+      {
+        "description": "fundingVout as a string",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": "0",
+          "takerEvmAddress": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "fundingVout must be an integer"
+        }
+      },
+      {
+        "description": "takerEvmAddress is the zero address",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000001",
+          "redeemScript": "0x6382012088a82088de036f1f979f35805f1ab1ce856af0b37fa252b06112822176ecbb8a956a04882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+          "fundingTxid": "c8184ddaeb9a3cb9962a19072adb6bcb6ed9d6491548691db7b6e7199946a4fb",
+          "fundingVout": 0,
+          "takerEvmAddress": "0x0000000000000000000000000000000000000000",
+          "fundingExpiryHeight": 3000040
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "takerEvmAddress must be a non-zero 0x address"
+        }
+      }
+    ],
+    "adaptorProposal": [
+      {
+        "description": "adaptor proposal as sent",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "testnet",
+        "output": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      {
+        "description": "upper-case keys and txid are lower-cased; a numeric amountZat becomes a string",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653B44D25FC6E74F42700E46CE336459830366D46E4482E1143C2335AB23C0E2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87BD0F54CB68BA2E19952604BCF2AE300F3686A6536C686D207CBD80915AD4AA",
+          "fundingVout": 0,
+          "amountZat": 50000000,
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "testnet",
+        "output": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      {
+        "description": "same proposal validated for regtest (shared address prefixes)",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "regtest",
+        "output": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        }
+      },
+      {
+        "description": "testnet refund address on a mainnet maker",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "mainnet",
+        "error": {
+          "code": "invalid_request",
+          "message": "refundAddress must be a mainnet transparent address"
+        }
+      },
+      {
+        "description": "takerZcashPubkey not on the curve",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x020000000000000000000000000000000000000000000000000000000000000000",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "testnet",
+        "error": {
+          "code": "invalid_request",
+          "message": "takerZcashPubkey must be a compressed secp256k1 public key"
+        }
+      },
+      {
+        "description": "adaptorPoint uncompressed",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x045e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ade4945fa420ed66c73be9889b519da38d0200fed5c870408f3a6bae47b61fc822",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "testnet",
+        "error": {
+          "code": "invalid_request",
+          "message": "adaptorPoint must be a compressed secp256k1 public key"
+        }
+      },
+      {
+        "description": "without fundingExpiryHeight (protocol v1.0 taker)",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+        },
+        "network": "testnet",
+        "output": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087"
+        }
+      },
+      {
+        "description": "(v1.1) fundingExpiryHeight -1",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": -1
+        },
+        "network": "testnet",
+        "error": {
+          "code": "invalid_request",
+          "message": "fundingExpiryHeight is out of range"
+        }
+      },
+      {
+        "description": "amountZat 0",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "0",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "testnet",
+        "error": {
+          "code": "invalid_request",
+          "message": "amountZat must be at least 1"
+        }
+      },
+      {
+        "description": "refundHeight 0",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 0,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "testnet",
+        "error": {
+          "code": "invalid_request",
+          "message": "refundHeight is out of range"
+        }
+      },
+      {
+        "description": "refundHeight 500000000",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 500000000,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "testnet",
+        "error": {
+          "code": "invalid_request",
+          "message": "refundHeight is out of range"
+        }
+      },
+      {
+        "description": "takerEvmRecipient of 21 bytes",
+        "input": {
+          "quoteId": "00000000-0000-4000-8000-000000000003",
+          "takerZcashPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+          "adaptorPoint": "0x025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+          "fundingTxid": "87bd0f54cb68ba2e19952604bcf2ae300f3686a6536c686d207cbd80915ad4aa",
+          "fundingVout": 0,
+          "amountZat": "50000000",
+          "refundHeight": 3000144,
+          "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+          "takerEvmRecipient": "0x36e33698492d087ee35db0830ba305faf075d08700",
+          "fundingExpiryHeight": 3000040
+        },
+        "network": "testnet",
+        "error": {
+          "code": "invalid_request",
+          "message": "takerEvmRecipient must be a non-zero 0x address"
+        }
+      }
+    ],
+    "preSignatureRequest": [
+      {
+        "description": "pre-signature request as sent",
+        "input": {
+          "takerPreSignature": "032ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b471b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        },
+        "output": {
+          "takerPreSignature": "032ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b471b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        }
+      },
+      {
+        "description": "0x prefix and upper case are normalized away",
+        "input": {
+          "takerPreSignature": "0x032ECD7184BB93D8D3845018F97F0C93D094D9C5685D7C3443C69DA827BCFC528A025CA2B92AEECF1BF09723D6BEC1F3CA037DB19751D2D68BB056843711EABB3803CDC48C45C436BC0BC2F7F95C3472DA5879CECAB3D1AE32001315D88E68C4D1B471B84627C5B0AE9B3CC5E411C7BD0521F9F680ABD48B4EDF8133D251F7763E1B9260BEF45922E4C4CA91F47419B9C63CC8892D7BE83DE1B50400AC7951B64038"
+        },
+        "output": {
+          "takerPreSignature": "032ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b471b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        }
+      },
+      {
+        "description": "161 bytes",
+        "input": {
+          "takerPreSignature": "2ecd7184bb93d8d3845018f97f0c93d094d9c5685d7c3443c69da827bcfc528a025ca2b92aeecf1bf09723d6bec1f3ca037db19751d2d68bb056843711eabb3803cdc48c45c436bc0bc2f7f95c3472da5879cecab3d1ae32001315d88e68c4d1b471b84627c5b0ae9b3cc5e411c7bd0521f9f680abd48b4edf8133d251f7763e1b9260bef45922e4c4ca91f47419b9c63cc8892d7be83de1b50400ac7951b64038"
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "takerPreSignature must be a 162-byte hex pre-signature"
+        }
+      },
+      {
+        "description": "not a string",
+        "input": {
+          "takerPreSignature": 1
+        },
+        "error": {
+          "code": "invalid_request",
+          "message": "takerPreSignature must be a 162-byte hex pre-signature"
+        }
+      }
+    ]
+  }
+}

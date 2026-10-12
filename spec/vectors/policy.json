@@ -1,0 +1,664 @@
+{
+  "description": "Timeout policy and quote validation. assertSafeWindows(policy, blocks, seconds) is safe iff blocks × zcashBlockSeconds ≥ seconds × safetyFactor. validateQuote checks are run against `context` (now = 1800000000).",
+  "policies": {
+    "mainnet": {
+      "zcashLockBlocks": 144,
+      "evmLockSeconds": 3600,
+      "zcashBlockSeconds": 75,
+      "minZcashConfirmations": 2,
+      "safetyFactor": 2
+    },
+    "devnet": {
+      "zcashLockBlocks": 40,
+      "evmLockSeconds": 45,
+      "zcashBlockSeconds": 3,
+      "minZcashConfirmations": 1,
+      "safetyFactor": 2
+    }
+  },
+  "defaults": {
+    "DEFAULT_QUOTE_LIMITS": {
+      "maxZcashLockBlocks": 288,
+      "minZcashLockBlocks": 10,
+      "minEvmLockSeconds": 30,
+      "maxEvmLockSeconds": 86400,
+      "maxZecAmountZat": "100000000000",
+      "expiryMarginSeconds": 5,
+      "maxSlippageBps": 200
+    },
+    "DEFAULT_TAKER_LIMITS": {
+      "maxZcashLockBlocks": 288,
+      "minZcashLockBlocks": 10,
+      "minEvmLockSeconds": 30,
+      "maxEvmLockSeconds": 86400,
+      "maxZecAmountZat": "100000000000",
+      "expiryMarginSeconds": 5,
+      "maxSlippageBps": 200,
+      "minClaimWindowSeconds": 30,
+      "minEvmConfirmations": 1
+    },
+    "DEFAULT_TAKER_TIMEOUTS": {
+      "fundingConfirmationMs": 1800000,
+      "makerLockMs": 1800000,
+      "followMakerMs": 60000,
+      "pollIntervalMs": 2000
+    },
+    "DEFAULT_MAKER_LIMITS": {
+      "minZecAmountZat": "1000000",
+      "maxZecAmountZat": "1000000000",
+      "maxConcurrentSwaps": 10,
+      "maxOpenQuotes": 1000,
+      "quoteTtlSeconds": 60,
+      "maxFundingExpiryBlocks": 45,
+      "zcashFeeZat": "10000",
+      "checkInventory": true
+    },
+    "FUNDING_EXPIRY_DELTA": 40,
+    "STANDARD_AMOUNTS_ZAT": [
+      "10000000",
+      "50000000",
+      "100000000",
+      "500000000"
+    ]
+  },
+  "safeWindows": [
+    {
+      "description": "mainnet defaults at quote time: 144 blocks × 75 s = 10,800 s ≥ 2 × 3,600 s",
+      "policy": "mainnet",
+      "blocksUntilZcashRefund": 144,
+      "evmLockSeconds": 3600,
+      "safe": true
+    },
+    {
+      "description": "mainnet boundary: 96 × 75 = 7,200 = 2 × 3,600 (equality is safe)",
+      "policy": "mainnet",
+      "blocksUntilZcashRefund": 96,
+      "evmLockSeconds": 3600,
+      "safe": true
+    },
+    {
+      "description": "mainnet: 95 blocks is one block short",
+      "policy": "mainnet",
+      "blocksUntilZcashRefund": 95,
+      "evmLockSeconds": 3600,
+      "safe": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "unsafe timeouts: Zcash refund in ~7125s must exceed 2x the EVM lock (3600s)"
+      }
+    },
+    {
+      "description": "mainnet: refund height already reached (0 blocks)",
+      "policy": "mainnet",
+      "blocksUntilZcashRefund": 0,
+      "evmLockSeconds": 3600,
+      "safe": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "unsafe timeouts: Zcash refund in ~0s must exceed 2x the EVM lock (3600s)"
+      }
+    },
+    {
+      "description": "mainnet: refund height passed (negative)",
+      "policy": "mainnet",
+      "blocksUntilZcashRefund": -5,
+      "evmLockSeconds": 3600,
+      "safe": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "unsafe timeouts: Zcash refund in ~-375s must exceed 2x the EVM lock (3600s)"
+      }
+    },
+    {
+      "description": "mainnet, re-check before locking with only 1,800 s of EVM lock: 48 blocks suffice",
+      "policy": "mainnet",
+      "blocksUntilZcashRefund": 48,
+      "evmLockSeconds": 1800,
+      "safe": true
+    },
+    {
+      "description": "devnet defaults: 40 × 3 = 120 s ≥ 2 × 45 s",
+      "policy": "devnet",
+      "blocksUntilZcashRefund": 40,
+      "evmLockSeconds": 45,
+      "safe": true
+    },
+    {
+      "description": "devnet boundary: 30 × 3 = 90 = 2 × 45",
+      "policy": "devnet",
+      "blocksUntilZcashRefund": 30,
+      "evmLockSeconds": 45,
+      "safe": true
+    },
+    {
+      "description": "devnet: 29 blocks",
+      "policy": "devnet",
+      "blocksUntilZcashRefund": 29,
+      "evmLockSeconds": 45,
+      "safe": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "unsafe timeouts: Zcash refund in ~87s must exceed 2x the EVM lock (45s)"
+      }
+    }
+  ],
+  "policyChecks": [
+    {
+      "description": "MAINNET_POLICY",
+      "policy": {
+        "zcashLockBlocks": 144,
+        "evmLockSeconds": 3600,
+        "zcashBlockSeconds": 75,
+        "minZcashConfirmations": 2,
+        "safetyFactor": 2
+      },
+      "valid": true
+    },
+    {
+      "description": "DEVNET_POLICY",
+      "policy": {
+        "zcashLockBlocks": 40,
+        "evmLockSeconds": 45,
+        "zcashBlockSeconds": 3,
+        "minZcashConfirmations": 1,
+        "safetyFactor": 2
+      },
+      "valid": true
+    },
+    {
+      "description": "safetyFactor 1 with an equal window (75 s blocks, 48 blocks, 3600 s)",
+      "policy": {
+        "zcashLockBlocks": 48,
+        "evmLockSeconds": 3600,
+        "zcashBlockSeconds": 75,
+        "minZcashConfirmations": 2,
+        "safetyFactor": 1
+      },
+      "valid": true
+    },
+    {
+      "description": "safetyFactor 0.5",
+      "policy": {
+        "zcashLockBlocks": 144,
+        "evmLockSeconds": 3600,
+        "zcashBlockSeconds": 75,
+        "minZcashConfirmations": 2,
+        "safetyFactor": 0.5
+      },
+      "valid": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "timeout policy values must be positive integers and safetyFactor ≥ 1"
+      }
+    },
+    {
+      "description": "zcashLockBlocks 0",
+      "policy": {
+        "zcashLockBlocks": 0,
+        "evmLockSeconds": 3600,
+        "zcashBlockSeconds": 75,
+        "minZcashConfirmations": 2,
+        "safetyFactor": 2
+      },
+      "valid": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "timeout policy values must be positive integers and safetyFactor ≥ 1"
+      }
+    },
+    {
+      "description": "minZcashConfirmations 0",
+      "policy": {
+        "zcashLockBlocks": 144,
+        "evmLockSeconds": 3600,
+        "zcashBlockSeconds": 75,
+        "minZcashConfirmations": 0,
+        "safetyFactor": 2
+      },
+      "valid": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "timeout policy values must be positive integers and safetyFactor ≥ 1"
+      }
+    },
+    {
+      "description": "fractional zcashBlockSeconds",
+      "policy": {
+        "zcashLockBlocks": 144,
+        "evmLockSeconds": 3600,
+        "zcashBlockSeconds": 75.5,
+        "minZcashConfirmations": 2,
+        "safetyFactor": 2
+      },
+      "valid": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "timeout policy values must be positive integers and safetyFactor ≥ 1"
+      }
+    },
+    {
+      "description": "a window that is unsafe by itself (95 blocks for a 3600 s lock)",
+      "policy": {
+        "zcashLockBlocks": 95,
+        "evmLockSeconds": 3600,
+        "zcashBlockSeconds": 75,
+        "minZcashConfirmations": 2,
+        "safetyFactor": 2
+      },
+      "valid": false,
+      "error": {
+        "code": "unsafe_timeouts",
+        "message": "unsafe timeouts: Zcash refund in ~7125s must exceed 2x the EVM lock (3600s)"
+      }
+    }
+  ],
+  "quoteValidation": {
+    "context": {
+      "limits": {
+        "maxZcashLockBlocks": 288,
+        "minZcashLockBlocks": 10,
+        "minEvmLockSeconds": 30,
+        "maxEvmLockSeconds": 86400,
+        "maxZecAmountZat": "100000000000",
+        "expiryMarginSeconds": 5,
+        "maxSlippageBps": 200
+      },
+      "chains": {
+        "tempo": {
+          "chainId": 42431,
+          "tokens": [
+            "0x20c0000000000000000000006a37DA5C996874BE"
+          ],
+          "adaptor": false,
+          "decimals": 6
+        }
+      },
+      "now": 1800000000
+    },
+    "cases": [
+      {
+        "description": "valid quote",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": true
+      },
+      {
+        "description": "token in another letter case is the same token",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37da5c996874be",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": true
+      },
+      {
+        "description": "no chainId in the quote (0.1 makers): not checked",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": true
+      },
+      {
+        "description": "chain the taker has no account on",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "base",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "you have no base account configured"
+        }
+      },
+      {
+        "description": "chainId differs from the taker's client",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 4217,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "quote is for chain id 4217, your tempo client is on 42431"
+        }
+      },
+      {
+        "description": "adaptor mode where the taker has no adaptor escrow",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "adaptor",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "private mode is not configured on tempo"
+        }
+      },
+      {
+        "description": "token the taker does not accept",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000000000000000000000",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "quote pays OUSD at 0x20c0000000000000000000000000000000000000, which is not an accepted stablecoin on tempo"
+        }
+      },
+      {
+        "description": "maker Zcash key not on the curve",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x020000000000000000000000000000000000000000000000000000000000000000",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "maker's Zcash public key is not a valid curve point"
+        }
+      },
+      {
+        "description": "maker EVM address zero",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x0000000000000000000000000000000000000000",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "maker's EVM address is invalid"
+        }
+      },
+      {
+        "description": "amount over the taker's 1,000 ZEC maximum",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000001",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "quote exceeds your maximum of 100000000000 zat"
+        }
+      },
+      {
+        "description": "Zcash window of 9 blocks (minimum 10)",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 9,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "Zcash lock of 9 blocks is outside 10–288"
+        }
+      },
+      {
+        "description": "Zcash window of 289 blocks (maximum 288)",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 289,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "Zcash lock of 289 blocks is outside 10–288"
+        }
+      },
+      {
+        "description": "EVM lock of 29 s (minimum 30)",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 29,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "EVM lock of 29s is outside 30–86400s"
+        }
+      },
+      {
+        "description": "EVM lock of 86,401 s (maximum 86,400)",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 86401,
+          "expiresAt": 1800000060
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "EVM lock of 86401s is outside 30–86400s"
+        }
+      },
+      {
+        "description": "expires exactly 5 s from now: accepted",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000005
+        },
+        "accepted": true
+      },
+      {
+        "description": "expires 4 s from now: rejected (5 s margin)",
+        "quote": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "direction": "ZEC_TO_USD",
+          "mode": "htlc",
+          "chain": "tempo",
+          "chainId": 42431,
+          "zecAmountZat": "100000000",
+          "usdAmount": "49745025",
+          "token": "0x20c0000000000000000000006a37DA5C996874BE",
+          "tokenSymbol": "OUSD",
+          "rate": 49.75,
+          "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+          "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+          "zcashLockBlocks": 144,
+          "evmLockSeconds": 3600,
+          "expiresAt": 1800000004
+        },
+        "accepted": false,
+        "error": {
+          "code": "quote_rejected",
+          "message": "quote has expired"
+        }
+      }
+    ]
+  }
+}

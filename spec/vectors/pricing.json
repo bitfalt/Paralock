@@ -1,0 +1,445 @@
+{
+  "description": "Pricing (all amounts integers; the price is an IEEE-754 double). microRate = floor(f64(usdPerZec × 1e6)) must be ≥ 1; zatToUsdUnits rounds down; usdUnitsToZat rounds up. The maker's rate is f64(price × (1 − spreadBps / 10000)) and every quote prices in the maker's own claim fee (zcashFeeZat).",
+  "microRate": [
+    {
+      "description": "an integer price",
+      "usdPerZec": 50,
+      "usdPerZecBits": "0x4049000000000000",
+      "productF64": 50000000,
+      "microRate": "50000000"
+    },
+    {
+      "description": "50 USD less a 50 bps spread",
+      "usdPerZec": 49.75,
+      "usdPerZecBits": "0x4048e00000000000",
+      "productF64": 49750000,
+      "microRate": "49750000"
+    },
+    {
+      "description": "0.57 × 1e6 rounds to exactly 570000 in binary64",
+      "usdPerZec": 0.57,
+      "usdPerZecBits": "0x3fe23d70a3d70a3d",
+      "productF64": 570000,
+      "microRate": "570000"
+    },
+    {
+      "description": "8.2 × 1e6 = 8199999.999999999 in binary64: floor gives 8,199,999",
+      "usdPerZec": 8.2,
+      "usdPerZecBits": "0x4020666666666666",
+      "productF64": 8199999.999999999,
+      "microRate": "8199999"
+    },
+    {
+      "description": "1.005 × 1e6 = 1004999.9999999999 in binary64: floor gives 1,004,999",
+      "usdPerZec": 1.005,
+      "usdPerZecBits": "0x3ff0147ae147ae14",
+      "productF64": 1004999.9999999999,
+      "microRate": "1004999"
+    },
+    {
+      "description": "six decimals, exact",
+      "usdPerZec": 123.456789,
+      "usdPerZecBits": "0x405edd3c07ee0b0b",
+      "productF64": 123456789,
+      "microRate": "123456789"
+    },
+    {
+      "description": "the smallest price with a micro-rate of 1",
+      "usdPerZec": 0.000001,
+      "usdPerZecBits": "0x3eb0c6f7a0b5ed8d",
+      "productF64": 1,
+      "microRate": "1"
+    },
+    {
+      "description": "micro-rate 0: refused as too small",
+      "usdPerZec": 9e-7,
+      "usdPerZecBits": "0x3eae32f0ee144531",
+      "error": {
+        "code": "invalid_request",
+        "message": "price 9e-7 is too small"
+      }
+    },
+    {
+      "description": "zero: refused",
+      "usdPerZec": 0,
+      "usdPerZecBits": "0x0000000000000000",
+      "error": {
+        "code": "invalid_request",
+        "message": "invalid price 0"
+      }
+    },
+    {
+      "description": "negative: refused",
+      "usdPerZec": -1,
+      "usdPerZecBits": "0xbff0000000000000",
+      "error": {
+        "code": "invalid_request",
+        "message": "invalid price -1"
+      }
+    },
+    {
+      "description": "NaN: refused (encoded as the string \"NaN\")",
+      "usdPerZec": "NaN",
+      "usdPerZecBits": "0x7ff8000000000000",
+      "error": {
+        "code": "invalid_request",
+        "message": "invalid price NaN"
+      }
+    },
+    {
+      "description": "Infinity: refused (encoded as the string \"Infinity\")",
+      "usdPerZec": "Infinity",
+      "usdPerZecBits": "0x7ff0000000000000",
+      "error": {
+        "code": "invalid_request",
+        "message": "invalid price Infinity"
+      }
+    }
+  ],
+  "zatToUsdUnits": [
+    {
+      "description": "100000000 zat at 50 USD/ZEC, 6 decimals (rounds down)",
+      "zat": "100000000",
+      "usdPerZec": 50,
+      "decimals": 6,
+      "usdUnits": "50000000"
+    },
+    {
+      "description": "99990000 zat at 49.75 USD/ZEC, 6 decimals (rounds down)",
+      "zat": "99990000",
+      "usdPerZec": 49.75,
+      "decimals": 6,
+      "usdUnits": "49745025"
+    },
+    {
+      "description": "1 zat at 50 USD/ZEC, 6 decimals (rounds down)",
+      "zat": "1",
+      "usdPerZec": 50,
+      "decimals": 6,
+      "usdUnits": "0"
+    },
+    {
+      "description": "2 zat at 50 USD/ZEC, 6 decimals (rounds down)",
+      "zat": "2",
+      "usdPerZec": 50,
+      "decimals": 6,
+      "usdUnits": "1"
+    },
+    {
+      "description": "100000000 zat at 8.2 USD/ZEC, 6 decimals (rounds down)",
+      "zat": "100000000",
+      "usdPerZec": 8.2,
+      "decimals": 6,
+      "usdUnits": "8199999"
+    },
+    {
+      "description": "2100000000000000 zat at 123.456789 USD/ZEC, 6 decimals (rounds down)",
+      "zat": "2100000000000000",
+      "usdPerZec": 123.456789,
+      "decimals": 6,
+      "usdUnits": "2592592569000000"
+    },
+    {
+      "description": "123456789 zat at 33.33 USD/ZEC, 18 decimals (rounds down)",
+      "zat": "123456789",
+      "usdPerZec": 33.33,
+      "decimals": 18,
+      "usdUnits": "41148147773700000000"
+    },
+    {
+      "description": "100000000 zat at 50 USD/ZEC, 0 decimals (rounds down)",
+      "zat": "100000000",
+      "usdPerZec": 50,
+      "decimals": 0,
+      "usdUnits": "50"
+    }
+  ],
+  "usdUnitsToZat": [
+    {
+      "description": "25000000 units at 50 USD/ZEC, 6 decimals (rounds up)",
+      "usdUnits": "25000000",
+      "usdPerZec": 50,
+      "decimals": 6,
+      "zat": "50000000"
+    },
+    {
+      "description": "25000000 units at 49.75 USD/ZEC, 6 decimals (rounds up)",
+      "usdUnits": "25000000",
+      "usdPerZec": 49.75,
+      "decimals": 6,
+      "zat": "50251257"
+    },
+    {
+      "description": "1 units at 50 USD/ZEC, 6 decimals (rounds up)",
+      "usdUnits": "1",
+      "usdPerZec": 50,
+      "decimals": 6,
+      "zat": "2"
+    },
+    {
+      "description": "1 units at 1000000 USD/ZEC, 6 decimals (rounds up)",
+      "usdUnits": "1",
+      "usdPerZec": 1000000,
+      "decimals": 6,
+      "zat": "1"
+    },
+    {
+      "description": "10000000 units at 8.2 USD/ZEC, 6 decimals (rounds up)",
+      "usdUnits": "10000000",
+      "usdPerZec": 8.2,
+      "decimals": 6,
+      "zat": "121951235"
+    },
+    {
+      "description": "1000000000000000000 units at 33.33 USD/ZEC, 18 decimals (rounds up)",
+      "usdUnits": "1000000000000000000",
+      "usdPerZec": 33.33,
+      "decimals": 18,
+      "zat": "3000301"
+    }
+  ],
+  "makerQuotes": [
+    {
+      "description": "exact-in 1 ZEC at 50 USD, 50 bps spread",
+      "price": 50,
+      "spreadBps": 50,
+      "zat": "100000000",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 49.75,
+      "rateBits": "0x4048e00000000000",
+      "microRate": "49750000",
+      "zecAmountZat": "100000000",
+      "usdAmount": "49745025",
+      "exactOut": false
+    },
+    {
+      "description": "exact-in 0.5 ZEC",
+      "price": 50,
+      "spreadBps": 50,
+      "zat": "50000000",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 49.75,
+      "rateBits": "0x4048e00000000000",
+      "microRate": "49750000",
+      "zecAmountZat": "50000000",
+      "usdAmount": "24870025",
+      "exactOut": false
+    },
+    {
+      "description": "exact-in, zero spread",
+      "price": 50,
+      "spreadBps": 0,
+      "zat": "100000000",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 50,
+      "rateBits": "0x4049000000000000",
+      "microRate": "50000000",
+      "zecAmountZat": "100000000",
+      "usdAmount": "49995000",
+      "exactOut": false
+    },
+    {
+      "description": "exact-in at a price whose ×10⁶ product rounds below the integer (8.2)",
+      "price": 8.2,
+      "spreadBps": 0,
+      "zat": "100000000",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 8.2,
+      "rateBits": "0x4020666666666666",
+      "microRate": "8199999",
+      "zecAmountZat": "100000000",
+      "usdAmount": "8199179",
+      "exactOut": false
+    },
+    {
+      "description": "exact-in, spread rounding in the f64 rate (37.77 × (1 − 33/10000))",
+      "price": 37.77,
+      "spreadBps": 33,
+      "zat": "123456789",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 37.645359000000006,
+      "rateBits": "0x4042d29b1fab96f3",
+      "microRate": "37645359",
+      "zecAmountZat": "123456789",
+      "usdAmount": "46471986",
+      "exactOut": false
+    },
+    {
+      "description": "exact-in of 10,001 zat: 1 zat after the fee is worth 0 units, so the maker refuses (amount too small)",
+      "price": 50,
+      "spreadBps": 50,
+      "zat": "10001",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "error": {
+        "code": "limit_exceeded",
+        "message": "amount too small"
+      }
+    },
+    {
+      "description": "exact-in of 10,003 zat: 3 zat after the fee round down to 1 unit",
+      "price": 50,
+      "spreadBps": 50,
+      "zat": "10003",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 49.75,
+      "rateBits": "0x4048e00000000000",
+      "microRate": "49750000",
+      "zecAmountZat": "10003",
+      "usdAmount": "1",
+      "exactOut": false
+    },
+    {
+      "description": "exact-out 25 USD at 50 USD, 50 bps spread",
+      "price": 50,
+      "spreadBps": 50,
+      "usd": "25000000",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 49.75,
+      "rateBits": "0x4048e00000000000",
+      "microRate": "49750000",
+      "zecAmountZat": "50261257",
+      "usdAmount": "25000000",
+      "exactOut": true
+    },
+    {
+      "description": "exact-out 1 unit (1e-6 USD): ZEC rounds up",
+      "price": 50,
+      "spreadBps": 50,
+      "usd": "1",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 49.75,
+      "rateBits": "0x4048e00000000000",
+      "microRate": "49750000",
+      "zecAmountZat": "10003",
+      "usdAmount": "1",
+      "exactOut": true
+    },
+    {
+      "description": "exact-out with a remainder (rounds up)",
+      "price": 37.77,
+      "spreadBps": 33,
+      "usd": "10000001",
+      "zcashFeeZat": "10000",
+      "decimals": 6,
+      "rate": 37.645359000000006,
+      "rateBits": "0x4042d29b1fab96f3",
+      "microRate": "37645359",
+      "zecAmountZat": "26573703",
+      "usdAmount": "10000001",
+      "exactOut": true
+    }
+  ],
+  "slippage": [
+    {
+      "description": "exact-in: 49.000000 USD for 1 ZEC at a 50 USD price is exactly 200 bps short: accepted",
+      "quote": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "direction": "ZEC_TO_USD",
+        "mode": "htlc",
+        "chain": "tempo",
+        "chainId": 42431,
+        "zecAmountZat": "100000000",
+        "usdAmount": "49000000",
+        "token": "0x20c0000000000000000000006a37DA5C996874BE",
+        "tokenSymbol": "OUSD",
+        "rate": 49,
+        "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+        "zcashLockBlocks": 144,
+        "evmLockSeconds": 3600,
+        "expiresAt": 1800000060
+      },
+      "price": 50,
+      "maxSlippageBps": 200,
+      "accepted": true
+    },
+    {
+      "description": "exact-in: one unit less: rejected",
+      "quote": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "direction": "ZEC_TO_USD",
+        "mode": "htlc",
+        "chain": "tempo",
+        "chainId": 42431,
+        "zecAmountZat": "100000000",
+        "usdAmount": "48999999",
+        "token": "0x20c0000000000000000000006a37DA5C996874BE",
+        "tokenSymbol": "OUSD",
+        "rate": 49,
+        "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+        "zcashLockBlocks": 144,
+        "evmLockSeconds": 3600,
+        "expiresAt": 1800000060
+      },
+      "price": 50,
+      "maxSlippageBps": 200,
+      "accepted": false,
+      "error": {
+        "code": "quote_rejected",
+        "message": "quote pays more than 200 bps below your price"
+      }
+    },
+    {
+      "description": "exact-out: 51,000,000 zat for 25 USD at 50 USD is exactly 200 bps over: accepted",
+      "quote": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "direction": "ZEC_TO_USD",
+        "mode": "htlc",
+        "chain": "tempo",
+        "chainId": 42431,
+        "zecAmountZat": "51000000",
+        "usdAmount": "25000000",
+        "token": "0x20c0000000000000000000006a37DA5C996874BE",
+        "tokenSymbol": "OUSD",
+        "rate": 49,
+        "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+        "zcashLockBlocks": 144,
+        "evmLockSeconds": 3600,
+        "expiresAt": 1800000060,
+        "exactOut": true
+      },
+      "price": 50,
+      "maxSlippageBps": 200,
+      "accepted": true
+    },
+    {
+      "description": "exact-out: one zat more: rejected",
+      "quote": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "direction": "ZEC_TO_USD",
+        "mode": "htlc",
+        "chain": "tempo",
+        "chainId": 42431,
+        "zecAmountZat": "51000001",
+        "usdAmount": "25000000",
+        "token": "0x20c0000000000000000000006a37DA5C996874BE",
+        "tokenSymbol": "OUSD",
+        "rate": 49,
+        "makerZcashPubkey": "0x03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "makerEvmAddress": "0x6709a9c834a22dd371d447278641001f98811690",
+        "zcashLockBlocks": 144,
+        "evmLockSeconds": 3600,
+        "expiresAt": 1800000060,
+        "exactOut": true
+      },
+      "price": 50,
+      "maxSlippageBps": 200,
+      "accepted": false,
+      "error": {
+        "code": "quote_rejected",
+        "message": "quote costs more than 200 bps above your price"
+      }
+    }
+  ]
+}

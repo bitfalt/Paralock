@@ -1,0 +1,1213 @@
+{
+  "description": "Paralock HTLC (htlc mode): redeem script template, P2SH encoding, and the funding, claim and refund transactions exactly as @paralock/zcash builds them. Signatures are RFC 6979 deterministic, so every signed transaction is reproducible byte for byte.",
+  "fixtures": {
+    "derivation": "privateKey = sha256(utf8(\"paralock/vectors/v1/\" + label))",
+    "keys": {
+      "takerFunding": {
+        "label": "taker-funding-key",
+        "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+        "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+      },
+      "makerZcash": {
+        "label": "maker-zcash-key",
+        "privateKey": "ebb8d84a96acfb21e1e4a431b4e5152ca98a92c66946b7cea7fea546ba442820",
+        "publicKey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b"
+      },
+      "makerPayout": {
+        "label": "maker-payout-key",
+        "privateKey": "41fe156109a0a934d4cba744dbe362875a1ad71f0e9567c4b51b215d33085c4f",
+        "publicKey": "0298b9882303c94ee13486a4f466d076a942294642563e54bc863dc06be894f83c"
+      },
+      "takerMultisig": {
+        "label": "taker-multisig-key",
+        "privateKey": "3a47b643341dce5e76d0de13e3e6ccde1a071bddfe872d350fe6aa6e1969c445",
+        "publicKey": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2"
+      },
+      "makerQuoteKey": {
+        "label": "maker-quote-key",
+        "privateKey": "2f21698e2447b34b16cdd73246892f695dd1a64727fac4e8df41b0aa2648f554",
+        "publicKey": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08"
+      },
+      "evmSigner": {
+        "label": "evm-signer-key",
+        "privateKey": "6d2f4d288168a44295397167747a2dd09d2ae4ebe68de1736e73cdb93fa1a08f",
+        "publicKey": "037c7ed5385827aa1fdf5e58453b8c8963c5af60c464d699698e9a62fa25df1fb6"
+      }
+    },
+    "htlcSecret": {
+      "label": "htlc-secret",
+      "secret": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+      "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23"
+    },
+    "adaptorSecret": {
+      "label": "adaptor-secret",
+      "secret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "point": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad"
+    },
+    "tip": 3000000,
+    "refundHeight": 3000144,
+    "fundingExpiryHeight": 3000040
+  },
+  "constants": {
+    "PREIMAGE_SIZE": 32,
+    "DUST_LIMIT": "1000",
+    "MIN_CHANGE": "1000",
+    "MAX_MONEY": "2100000000000000",
+    "FUNDING_EXPIRY_DELTA": 40,
+    "MAX_SCRIPT_ELEMENT_SIZE": 520,
+    "MAX_STANDARD_SCRIPTSIG_SIZE": 1650,
+    "SEQUENCE_FINAL": 4294967295,
+    "SEQUENCE_ENABLE_LOCKTIME": 4294967294,
+    "SIGHASH_ALL": 1,
+    "MARGINAL_FEE": "5000",
+    "GRACE_ACTIONS": 2,
+    "P2PKH_STANDARD_INPUT_SIZE": 150,
+    "P2PKH_STANDARD_OUTPUT_SIZE": 34,
+    "BRANCH_ID_NU6_3": "0x37a5165b",
+    "placeholderSignatureBytes": 73
+  },
+  "scripts": [
+    {
+      "description": "fixture HTLC: maker claims with the secret, taker refunds at tip + 144",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 3000144
+      },
+      "refundHeightPush": "0350c72d",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 117,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <50c72d> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "62fc5367913c1fbc354c216cedc9b81ce14d93d4",
+      "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487",
+      "addresses": {
+        "mainnet": "t3Tb1RahKz9GJnXTAXX5GzAfPAEfjscu4K5",
+        "testnet": "t2FaCUFoTrbsgLE2uTG5KXnr2GitukjJxdo"
+      }
+    },
+    {
+      "description": "refund height 1: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 1
+      },
+      "refundHeightPush": "51",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6751b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 114,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE OP_1 OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "d96ad8f44ae870ec2353947e1e45c9a210515203",
+      "scriptPubKey": "a914d96ad8f44ae870ec2353947e1e45c9a21051520387",
+      "addresses": {
+        "mainnet": "t3ePDZQ5BHcQWRpHrc8y4VMtjpVcSeke2aA",
+        "testnet": "t2SNQc5BKA51syWsbXsy72z5NvyqcZqQqUr"
+      }
+    },
+    {
+      "description": "refund height 16: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 16
+      },
+      "refundHeightPush": "60",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6760b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 114,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE OP_16 OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "760aaa6422e394314f40cf9664463a93b1a7d450",
+      "scriptPubKey": "a914760aaa6422e394314f40cf9664463a93b1a7d45087",
+      "addresses": {
+        "mainnet": "t3VKmSaAtUqa18PkGGyb9A4YC1Sbfx6rc8B",
+        "testnet": "t2HJxVFH2MJBNg6L1CibBhgiq7vpqo9LuoM"
+      }
+    },
+    {
+      "description": "refund height 17: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 17
+      },
+      "refundHeightPush": "0111",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670111b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 115,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <11> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "6ad3211442fa29b982a2c573fc690a023588e746",
+      "scriptPubKey": "a9146ad3211442fa29b982a2c573fc690a023588e74687",
+      "addresses": {
+        "mainnet": "t3UJTUj9uJxC786YN4K1Lkbb7CH3rLi5NLf",
+        "testnet": "t2GHeXQG3BQoUfo86z41PJDmkJmH2AUtVwG"
+      }
+    },
+    {
+      "description": "refund height 127: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 127
+      },
+      "refundHeightPush": "017f",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b67017fb17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 115,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <7f> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "77793b77889ee5e9986f8b121d79a726cbceaa3b",
+      "scriptPubKey": "a91477793b77889ee5e9986f8b121d79a726cbceaa3b87",
+      "addresses": {
+        "mainnet": "t3VTLa5EBx6LJeBr9QC9eeoqdmH6h4fvLJk",
+        "testnet": "t2HSXckLKpYwgBtRtKw9hCS2GsmKrxYHJyd"
+      }
+    },
+    {
+      "description": "refund height 128: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 128
+      },
+      "refundHeightPush": "028000",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b67028000b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 116,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <8000> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "a1ad8ef423b94ccf9fac259371bde7f56372e7ab",
+      "scriptPubKey": "a914a1ad8ef423b94ccf9fac259371bde7f56372e7ab87",
+      "addresses": {
+        "mainnet": "t3ZJVdp7fMXcUvxU6nydHxKFEmVTtDNDn7a",
+        "testnet": "t2MHggVDoDzDrUf3qiidLVwRssyh43xrjMh"
+      }
+    },
+    {
+      "description": "refund height 255: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 255
+      },
+      "refundHeightPush": "02ff00",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6702ff00b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 116,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <ff00> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "d53528b717a2022fef0112a0f3fae2f9215349ca",
+      "scriptPubKey": "a914d53528b717a2022fef0112a0f3fae2f9215349ca87",
+      "addresses": {
+        "mainnet": "t3dzxYHycaJLacTfFUYgmbJMxwTjgNAP92x",
+        "testnet": "t2Rz9ay5kSkwxAAEzQHgp8vYc3wxrH77yuj"
+      }
+    },
+    {
+      "description": "refund height 256: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 256
+      },
+      "refundHeightPush": "020001",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b67020001b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 116,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <0001> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "845c1d72d1f89e74e438a53d32993a72a953980e",
+      "scriptPubKey": "a914845c1d72d1f89e74e438a53d32993a72a953980e87",
+      "addresses": {
+        "mainnet": "t3WdUUTuzjN3JoCkJ3YPdU7Qcch5SM4anDF",
+        "testnet": "t2JcfX928bpegLuL2yHPg1jbFjBJcJKzDSR"
+      }
+    },
+    {
+      "description": "refund height 32767: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 32767
+      },
+      "refundHeightPush": "02ff7f",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6702ff7fb17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 116,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <ff7f> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "04be9f3142ed7f9223997ef08876862b71d7a16a",
+      "scriptPubKey": "a91404be9f3142ed7f9223997ef08876862b71d7a16a87",
+      "addresses": {
+        "mainnet": "t3JzhzHR8MPRXaSBUCZCPWAYz1C2i3CEEJj",
+        "testnet": "t26yu2xXGDr2u88mD8JCS3njd7gFst2Avyz"
+      }
+    },
+    {
+      "description": "refund height 32768: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 32768
+      },
+      "refundHeightPush": "03008000",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703008000b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 117,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <008000> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "bd71f3a50a76cedbc12091f6467bd28d40c3be4b",
+      "scriptPubKey": "a914bd71f3a50a76cedbc12091f6467bd28d40c3be4b87",
+      "addresses": {
+        "mainnet": "t3bqK9e55TkLDGwiQRGz7T9a2YAxm4E4Gjv",
+        "testnet": "t2PpWCKBDLCwapeJ9M1z9zmkfefBvyHDam3"
+      }
+    },
+    {
+      "description": "refund height 65535: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 65535
+      },
+      "refundHeightPush": "03ffff00",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703ffff00b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 117,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <ffff00> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "dd4a3fd1420ee4d3b8587495fd3cdfea7767c30f",
+      "scriptPubKey": "a914dd4a3fd1420ee4d3b8587495fd3cdfea7767c30f87",
+      "addresses": {
+        "mainnet": "t3ejhDCnFudiau557rADdbN5Q8YAPRCd1aU",
+        "testnet": "t2SitFstPn6KxSmermuDg8zG3F2PZFzT7Ei"
+      }
+    },
+    {
+      "description": "refund height 65536: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 65536
+      },
+      "refundHeightPush": "03000001",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703000001b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 117,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <000001> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "9440b9670d0315a69b7ca2309bcacf1896da2e12",
+      "scriptPubKey": "a9149440b9670d0315a69b7ca2309bcacf1896da2e1287",
+      "addresses": {
+        "mainnet": "t3Y5WUPSMvJQ2ZaHmRqZNzvHxnxVt5ftVyQ",
+        "testnet": "t2L4hX4YVnm1Q7GsWMaZRYYUbuSj3vQ3b4B"
+      }
+    },
+    {
+      "description": "refund height 8388607: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 8388607
+      },
+      "refundHeightPush": "03ffff7f",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6703ffff7fb17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 117,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <ffff7f> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "8767298dba58b102adbcec595adfb8a602520a5d",
+      "scriptPubKey": "a9148767298dba58b102adbcec595adfb8a602520a5d87",
+      "addresses": {
+        "mainnet": "t3WuZjcsEEwYkgwTKa3Dy4LCABXBQgmzUTP",
+        "testnet": "t2JtknHyN7QA8Ee34VnE1bxNoJ1QacQfzwR"
+      }
+    },
+    {
+      "description": "refund height 8388608: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 8388608
+      },
+      "refundHeightPush": "0400008000",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670400008000b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 118,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <00008000> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "88e621b718d5ea4e62c185cdf1f2bc819114479c",
+      "scriptPubKey": "a91488e621b718d5ea4e62c185cdf1f2bc819114479c87",
+      "addresses": {
+        "mainnet": "t3X3UWoFibeTf2TD7qwh8zNMzyLCP3C5w1s",
+        "testnet": "t2K2fZUMrU752a9nrmghBXzYe5pRYroecVj"
+      }
+    },
+    {
+      "description": "refund height 499999999: minimal CScriptNum push",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 499999999
+      },
+      "refundHeightPush": "04ff64cd1d",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b6704ff64cd1db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "redeemScriptLength": 118,
+      "asm": "OP_IF OP_SIZE <20> OP_EQUALVERIFY OP_SHA256 <b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23> OP_EQUALVERIFY <03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b> OP_ELSE <ff64cd1d> OP_CHECKLOCKTIMEVERIFY OP_DROP <033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f> OP_ENDIF OP_CHECKSIG",
+      "scriptHash": "976304de3ca184d8a2ebac29a07ace4ec335a6be",
+      "scriptPubKey": "a914976304de3ca184d8a2ebac29a07ace4ec335a6be87",
+      "addresses": {
+        "mainnet": "t3YN5aokBww42oUYrtGVzNUtJd7zZXvrW1i",
+        "testnet": "t2LMGdUrKpPfQMB8bp1W2v74wjcDjNYBM1t"
+      }
+    }
+  ],
+  "invalidScripts": [
+    {
+      "description": "trailing byte after OP_CHECKSIG",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac00",
+      "error": "not a Paralock HTLC script"
+    },
+    {
+      "description": "truncated (last byte missing)",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68",
+      "error": "not a Paralock HTLC script"
+    },
+    {
+      "description": "OP_HASH160 instead of OP_SHA256",
+      "redeemScript": "6382012088a920b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "error": "not a Paralock HTLC script"
+    },
+    {
+      "description": "size check of 33 instead of 32",
+      "redeemScript": "6382012188a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "error": "not a Paralock HTLC script"
+    },
+    {
+      "description": "refund height 16 pushed as data (0x01 0x10) instead of OP_16 (non-minimal)",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670110b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "error": "not a Paralock HTLC script"
+    },
+    {
+      "description": "refund height with a redundant zero byte (non-minimal CScriptNum)",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670450c72d00b17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "error": "not a Paralock HTLC script"
+    },
+    {
+      "description": "hashlock pushed with OP_PUSHDATA1 (non-minimal push)",
+      "redeemScript": "6382012088a84c20b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "error": "not a Paralock HTLC script"
+    },
+    {
+      "description": "branches swapped (refund branch first)",
+      "redeemScript": "630350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f6782012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b68ac",
+      "error": "not a Paralock HTLC script"
+    },
+    {
+      "description": "claim key is not a curve point (x = 0)",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da238821020000000000000000000000000000000000000000000000000000000000000000670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "error": "claim pubkey is not a compressed secp256k1 point: 020000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "description": "claim key equals refund key",
+      "redeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da238821033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "error": "claim and refund keys must differ"
+    },
+    {
+      "description": "a P2PKH script",
+      "redeemScript": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+      "error": "not a Paralock HTLC script"
+    }
+  ],
+  "invalidParams": [
+    {
+      "description": "refund height 0",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 0
+      },
+      "error": "refundHeight must be a block height"
+    },
+    {
+      "description": "refund height 500000000 (a timestamp, not a height)",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 500000000
+      },
+      "error": "refundHeight must be a block height"
+    },
+    {
+      "description": "non-integer refund height",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 1.5
+      },
+      "error": "refundHeight must be a block height"
+    },
+    {
+      "description": "31-byte hashlock",
+      "params": {
+        "hashlock": "d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 3000144
+      },
+      "error": "hashlock must be 32 bytes"
+    },
+    {
+      "description": "claim key equals refund key",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 3000144
+      },
+      "error": "claim and refund keys must differ"
+    },
+    {
+      "description": "uncompressed claim key",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "04eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b5c3bf25b9855355540e5485a32455bb89235501b9c3db53c165c012e8a95d053",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 3000144
+      },
+      "error": "claim pubkey is not a compressed secp256k1 point: 04eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b5c3bf25b985535"
+    },
+    {
+      "description": "claim key not on the curve",
+      "params": {
+        "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "claimPubkey": "020000000000000000000000000000000000000000000000000000000000000000",
+        "refundPubkey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+        "refundHeight": 3000144
+      },
+      "error": "claim pubkey is not a compressed secp256k1 point: 020000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "transactions": {
+    "funding": [
+      {
+        "description": "1 UTXO → HTLC output 0 + change output 1",
+        "network": "testnet",
+        "branchId": "0x37a5165b",
+        "expiryHeight": 3000040,
+        "key": {
+          "label": "taker-funding-key",
+          "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+          "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+        },
+        "utxos": [
+          {
+            "txid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+            "vout": 1,
+            "value": "150000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "htlcRedeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+        "amount": "100000000",
+        "changeScriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+        "expected": {
+          "signatures": [
+            "30450221009946b1e7e52b386a6a12f870e37b07be0b7523206778125c7ca2097c84fb8ba40220264863d7967878dc2a266d7ee1519daa04680d5d4ba0afa7b93bac1ccbb41de101"
+          ],
+          "fee": "10000",
+          "feeComputation": {
+            "placeholderScriptSigLengths": [
+              108
+            ],
+            "placeholderOutputCount": 2,
+            "inputBytes": 149,
+            "outputBytes": 66,
+            "logicalActions": 2,
+            "conventionalFee": "10000",
+            "dustAddedToFee": "0"
+          },
+          "sighashes": [
+            "797eda189437293e15fd39bae6a1c6717aa7813f4e290db11105764d068492da"
+          ],
+          "tx": {
+            "header": "0x80000005",
+            "versionGroupId": "0x26a7270a",
+            "branchId": "0x37a5165b",
+            "lockTime": 0,
+            "expiryHeight": 3000040,
+            "inputs": [
+              {
+                "prevTxid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+                "vout": 1,
+                "scriptSig": "4830450221009946b1e7e52b386a6a12f870e37b07be0b7523206778125c7ca2097c84fb8ba40220264863d7967878dc2a266d7ee1519daa04680d5d4ba0afa7b93bac1ccbb41de10121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+                "sequence": 4294967295
+              }
+            ],
+            "outputs": [
+              {
+                "value": "100000000",
+                "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+              },
+              {
+                "value": "49990000",
+                "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+              }
+            ]
+          },
+          "hex": "050000800a27a7265b16a53700000000e8c62d0001b6dcfd27c1030c3e7ce98296c365805b37bf967fd1ea96ea962a0fa1e120dc46010000006b4830450221009946b1e7e52b386a6a12f870e37b07be0b7523206778125c7ca2097c84fb8ba40220264863d7967878dc2a266d7ee1519daa04680d5d4ba0afa7b93bac1ccbb41de10121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0200e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d48770c9fa02000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+          "sizeBytes": 239,
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "txidInternalOrder": "c60a5f88f8d2fce506c3675cc24a1f4559f9f763b0acef48cc4983c3bc3dd448"
+        }
+      },
+      {
+        "description": "3 UTXOs (3 logical actions: 15,000 zat) → HTLC + change",
+        "network": "testnet",
+        "branchId": "0x37a5165b",
+        "expiryHeight": 3000040,
+        "key": {
+          "label": "taker-funding-key",
+          "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+          "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+        },
+        "utxos": [
+          {
+            "txid": "0a96f6dbf161228ad9bc59b202653d351838bbe19782752dc78e2bfbbf9ca4a0",
+            "vout": 0,
+            "value": "40000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          },
+          {
+            "txid": "cfab0a20df32fda28e09dcbb3aa53ff4744d2800c6ec0f4f371b0ef095b87475",
+            "vout": 3,
+            "value": "35000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          },
+          {
+            "txid": "6997fbb7666e9314a2f7f20eed178e678da86b409f7af5399180c27f754009a7",
+            "vout": 0,
+            "value": "30000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "htlcRedeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+        "amount": "100000000",
+        "changeScriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+        "expected": {
+          "signatures": [
+            "3045022100fd8fb067a05b9871db64e59e5c29513506d9445d1f8509748be643bb5364554902201d74ca01f6b2effa71fcf5bafba55e4e30d0dd1fff3e1db5990f09e46dda759f01",
+            "3045022100ec9cf3c3c67fa001a0258da07e0e1678a1fd43dcd0e91d18b931161d9469f52e0220455dbbffa83512a336975e29efb52183f82ee4525b9a94890abdcafa8f71c73001",
+            "3045022100bd1aa3b230ca6e8139c721de1de53da630108f07da873c691387438c2bb4434f02206a7efc7b113640744b47e2c3c688bd98e3093d5ef0fd9fdde25f20726dbedf1401"
+          ],
+          "fee": "15000",
+          "feeComputation": {
+            "placeholderScriptSigLengths": [
+              108,
+              108,
+              108
+            ],
+            "placeholderOutputCount": 2,
+            "inputBytes": 447,
+            "outputBytes": 66,
+            "logicalActions": 3,
+            "conventionalFee": "15000",
+            "dustAddedToFee": "0"
+          },
+          "sighashes": [
+            "6af2b2a5e18ee4b4eb4550b9814a547bfb7f327cdaf353e069f101059f73a89e",
+            "ba931c8d846bba43cfb9c7c6a0024a674fecd4da53ea6f71536f7cc4672333e8",
+            "182f9cbae46fcfabffde15b420155ec08cbd3e1748b39bf1a42ddf5e048a64f7"
+          ],
+          "tx": {
+            "header": "0x80000005",
+            "versionGroupId": "0x26a7270a",
+            "branchId": "0x37a5165b",
+            "lockTime": 0,
+            "expiryHeight": 3000040,
+            "inputs": [
+              {
+                "prevTxid": "0a96f6dbf161228ad9bc59b202653d351838bbe19782752dc78e2bfbbf9ca4a0",
+                "vout": 0,
+                "scriptSig": "483045022100fd8fb067a05b9871db64e59e5c29513506d9445d1f8509748be643bb5364554902201d74ca01f6b2effa71fcf5bafba55e4e30d0dd1fff3e1db5990f09e46dda759f0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+                "sequence": 4294967295
+              },
+              {
+                "prevTxid": "cfab0a20df32fda28e09dcbb3aa53ff4744d2800c6ec0f4f371b0ef095b87475",
+                "vout": 3,
+                "scriptSig": "483045022100ec9cf3c3c67fa001a0258da07e0e1678a1fd43dcd0e91d18b931161d9469f52e0220455dbbffa83512a336975e29efb52183f82ee4525b9a94890abdcafa8f71c7300121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+                "sequence": 4294967295
+              },
+              {
+                "prevTxid": "6997fbb7666e9314a2f7f20eed178e678da86b409f7af5399180c27f754009a7",
+                "vout": 0,
+                "scriptSig": "483045022100bd1aa3b230ca6e8139c721de1de53da630108f07da873c691387438c2bb4434f02206a7efc7b113640744b47e2c3c688bd98e3093d5ef0fd9fdde25f20726dbedf140121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+                "sequence": 4294967295
+              }
+            ],
+            "outputs": [
+              {
+                "value": "100000000",
+                "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+              },
+              {
+                "value": "4985000",
+                "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+              }
+            ]
+          },
+          "hex": "050000800a27a7265b16a53700000000e8c62d0003a0a49cbffb2b8ec72d758297e1bb3818353d6502b259bcd98a2261f1dbf6960a000000006b483045022100fd8fb067a05b9871db64e59e5c29513506d9445d1f8509748be643bb5364554902201d74ca01f6b2effa71fcf5bafba55e4e30d0dd1fff3e1db5990f09e46dda759f0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff7574b895f00e1b374f0fecc600284d74f43fa53abbdc098ea2fd32df200aabcf030000006b483045022100ec9cf3c3c67fa001a0258da07e0e1678a1fd43dcd0e91d18b931161d9469f52e0220455dbbffa83512a336975e29efb52183f82ee4525b9a94890abdcafa8f71c7300121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffffa70940757fc2809139f57a9f406ba88d678e17ed0ef2f7a214936e66b7fb9769000000006b483045022100bd1aa3b230ca6e8139c721de1de53da630108f07da873c691387438c2bb4434f02206a7efc7b113640744b47e2c3c688bd98e3093d5ef0fd9fdde25f20726dbedf140121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0200e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d487a8104c00000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+          "sizeBytes": 535,
+          "txid": "0aff473ac9f6eabb84e78418c1e61603906698665cbd763112fe8440452e6994",
+          "txidInternalOrder": "94692e454084fe123176bd5c669866900316e6c11884e784bbeaf6c93a47ff0a"
+        }
+      },
+      {
+        "description": "change of 999 zat is below the dust limit: dropped into the fee (fee 10,999)",
+        "network": "testnet",
+        "branchId": "0x37a5165b",
+        "expiryHeight": 3000040,
+        "key": {
+          "label": "taker-funding-key",
+          "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+          "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+        },
+        "utxos": [
+          {
+            "txid": "10d084f4ea24711f5b41ca0c22c9ea4d08280a82d1e1fa601a093ee99e72c856",
+            "vout": 0,
+            "value": "100010999",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "htlcRedeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+        "amount": "100000000",
+        "changeScriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+        "expected": {
+          "signatures": [
+            "304402206d26703555c81342dcde732af14b1167500ff3d88022294d8b366c99db964a0b02202557d2865aa8dafb6d9262c89f1cae91e6f59c8517b651d512dd8d357f656e6a01"
+          ],
+          "fee": "10999",
+          "feeComputation": {
+            "placeholderScriptSigLengths": [
+              108
+            ],
+            "placeholderOutputCount": 1,
+            "inputBytes": 149,
+            "outputBytes": 32,
+            "logicalActions": 1,
+            "conventionalFee": "10000",
+            "dustAddedToFee": "999"
+          },
+          "sighashes": [
+            "05f1ff446f9f0906249f81bb6adcb2089b9c863e2112f9c2a175c149fe236ab0"
+          ],
+          "tx": {
+            "header": "0x80000005",
+            "versionGroupId": "0x26a7270a",
+            "branchId": "0x37a5165b",
+            "lockTime": 0,
+            "expiryHeight": 3000040,
+            "inputs": [
+              {
+                "prevTxid": "10d084f4ea24711f5b41ca0c22c9ea4d08280a82d1e1fa601a093ee99e72c856",
+                "vout": 0,
+                "scriptSig": "47304402206d26703555c81342dcde732af14b1167500ff3d88022294d8b366c99db964a0b02202557d2865aa8dafb6d9262c89f1cae91e6f59c8517b651d512dd8d357f656e6a0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+                "sequence": 4294967295
+              }
+            ],
+            "outputs": [
+              {
+                "value": "100000000",
+                "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+              }
+            ]
+          },
+          "hex": "050000800a27a7265b16a53700000000e8c62d000156c8729ee93e091a60fae1d1820a28084deac9220cca415b1f7124eaf484d010000000006a47304402206d26703555c81342dcde732af14b1167500ff3d88022294d8b366c99db964a0b02202557d2865aa8dafb6d9262c89f1cae91e6f59c8517b651d512dd8d357f656e6a0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0100e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d487000000",
+          "sizeBytes": 204,
+          "txid": "6f8b196e1da8ef4c180f66c7afacefd4ab26fcc9ba98485ac1cdfe4be5754545",
+          "txidInternalOrder": "454575e54bfecdc15a4898bac9fc26abd4efacafc7660f184cefa81d6e198b6f"
+        }
+      },
+      {
+        "description": "change of exactly 1,000 zat (the dust limit) is kept",
+        "network": "testnet",
+        "branchId": "0x37a5165b",
+        "expiryHeight": 3000040,
+        "key": {
+          "label": "taker-funding-key",
+          "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+          "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+        },
+        "utxos": [
+          {
+            "txid": "79b05421b7ce14cdae3565e219b77bab98e7588a6cd3aed761867c0c8e727491",
+            "vout": 0,
+            "value": "100011000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "htlcRedeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+        "amount": "100000000",
+        "changeScriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+        "expected": {
+          "signatures": [
+            "3044022078bdfb0daa18c675c411dab6edbfc3095e128ed8a709b073bdc4a41a49d12b3f02204f1fbea87f3501d50dc1c20b9584289274a7f2483659e13d6591e55dcf20831b01"
+          ],
+          "fee": "10000",
+          "feeComputation": {
+            "placeholderScriptSigLengths": [
+              108
+            ],
+            "placeholderOutputCount": 2,
+            "inputBytes": 149,
+            "outputBytes": 66,
+            "logicalActions": 2,
+            "conventionalFee": "10000",
+            "dustAddedToFee": "0"
+          },
+          "sighashes": [
+            "0eab8e310907d66e2fe45c8c32a4855b9b7a12b4ebf8f53f69967d06ac5f9cbd"
+          ],
+          "tx": {
+            "header": "0x80000005",
+            "versionGroupId": "0x26a7270a",
+            "branchId": "0x37a5165b",
+            "lockTime": 0,
+            "expiryHeight": 3000040,
+            "inputs": [
+              {
+                "prevTxid": "79b05421b7ce14cdae3565e219b77bab98e7588a6cd3aed761867c0c8e727491",
+                "vout": 0,
+                "scriptSig": "473044022078bdfb0daa18c675c411dab6edbfc3095e128ed8a709b073bdc4a41a49d12b3f02204f1fbea87f3501d50dc1c20b9584289274a7f2483659e13d6591e55dcf20831b0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+                "sequence": 4294967295
+              }
+            ],
+            "outputs": [
+              {
+                "value": "100000000",
+                "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+              },
+              {
+                "value": "1000",
+                "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+              }
+            ]
+          },
+          "hex": "050000800a27a7265b16a53700000000e8c62d00019174728e0c7c8661d7aed36c8a58e798ab7bb719e26535aecd14ceb72154b079000000006a473044022078bdfb0daa18c675c411dab6edbfc3095e128ed8a709b073bdc4a41a49d12b3f02204f1fbea87f3501d50dc1c20b9584289274a7f2483659e13d6591e55dcf20831b0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0200e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d487e8030000000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+          "sizeBytes": 238,
+          "txid": "a650545e931af6fef1d1d8b79af90bda88590b8eb11c6fdf1a51f1db674a83aa",
+          "txidInternalOrder": "aa834a67dbf1511adf6f1cb18e0b5988da0bf99ab7d8d1f1fef61a935e5450a6"
+        }
+      },
+      {
+        "description": "same as the first funding but signed for NU5 (branch id 0xc2d6d0b4): sighash and txid change",
+        "network": "testnet",
+        "branchId": "0xc2d6d0b4",
+        "expiryHeight": 3000040,
+        "key": {
+          "label": "taker-funding-key",
+          "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+          "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+        },
+        "utxos": [
+          {
+            "txid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+            "vout": 1,
+            "value": "150000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "htlcRedeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+        "amount": "100000000",
+        "changeScriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+        "expected": {
+          "signatures": [
+            "304402203d4e70b82e4367d36543bced5771db539f342d6b3d301f2409aae10f8fb91a4f0220739954d389755e19bfbb81c6ca31a164b75e5d11971798f5a772722e1e33165a01"
+          ],
+          "fee": "10000",
+          "feeComputation": {
+            "placeholderScriptSigLengths": [
+              108
+            ],
+            "placeholderOutputCount": 2,
+            "inputBytes": 149,
+            "outputBytes": 66,
+            "logicalActions": 2,
+            "conventionalFee": "10000",
+            "dustAddedToFee": "0"
+          },
+          "sighashes": [
+            "84865ae0a9b9163c92ce52b4a055cfc78f76df6ab272ea6450861f268fcc7adb"
+          ],
+          "tx": {
+            "header": "0x80000005",
+            "versionGroupId": "0x26a7270a",
+            "branchId": "0xc2d6d0b4",
+            "lockTime": 0,
+            "expiryHeight": 3000040,
+            "inputs": [
+              {
+                "prevTxid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+                "vout": 1,
+                "scriptSig": "47304402203d4e70b82e4367d36543bced5771db539f342d6b3d301f2409aae10f8fb91a4f0220739954d389755e19bfbb81c6ca31a164b75e5d11971798f5a772722e1e33165a0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+                "sequence": 4294967295
+              }
+            ],
+            "outputs": [
+              {
+                "value": "100000000",
+                "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+              },
+              {
+                "value": "49990000",
+                "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+              }
+            ]
+          },
+          "hex": "050000800a27a726b4d0d6c200000000e8c62d0001b6dcfd27c1030c3e7ce98296c365805b37bf967fd1ea96ea962a0fa1e120dc46010000006a47304402203d4e70b82e4367d36543bced5771db539f342d6b3d301f2409aae10f8fb91a4f0220739954d389755e19bfbb81c6ca31a164b75e5d11971798f5a772722e1e33165a0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0200e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d48770c9fa02000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+          "sizeBytes": 238,
+          "txid": "a70b7fbafd96f11bc069a20c15ac8c316220812bed99ecee10f291e4f9acad69",
+          "txidInternalOrder": "69adacf9e491f210eeec99ed2b812062318cac150ca269c01bf196fdba7f0ba7"
+        }
+      }
+    ],
+    "claim": [
+      {
+        "description": "maker claims the funded HTLC with the secret (lock_time 0, sequence final, expiry 0)",
+        "network": "testnet",
+        "branchId": "0x37a5165b",
+        "key": {
+          "label": "maker-zcash-key",
+          "privateKey": "ebb8d84a96acfb21e1e4a431b4e5152ca98a92c66946b7cea7fea546ba442820",
+          "publicKey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b"
+        },
+        "htlcRedeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "preimage": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+        "to": "tmDwzLK6xkr1NTD2MAWVvPcEXRD3vFv2xCU",
+        "expected": {
+          "signatures": [
+            "3044022026ca4cad0d7e2d397507a7c13c9a1cd6dc232075994c31e04404da90fc5f405202205100febbc60d5ff0dffc9f7a336ec1700e891a06cb896f187fbdbe797946379801"
+          ],
+          "scriptSigAsm": "<3044022026ca4cad0d7e2d397507a7c13c9a1cd6dc232075994c31e04404da90fc5f405202205100febbc60d5ff0dffc9f7a336ec1700e891a06cb896f187fbdbe797946379801> <4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5> OP_1 <6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac>",
+          "extractedPreimage": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+          "fee": "10000",
+          "feeComputation": {
+            "placeholderScriptSigLengths": [
+              227
+            ],
+            "placeholderOutputCount": 1,
+            "inputBytes": 268,
+            "outputBytes": 34,
+            "logicalActions": 2,
+            "conventionalFee": "10000",
+            "dustAddedToFee": "0"
+          },
+          "sighashes": [
+            "f7b610b0dbcf6fde5271fe4020079fe6d4b8f2c8a34a1d896861522a501e6c21"
+          ],
+          "tx": {
+            "header": "0x80000005",
+            "versionGroupId": "0x26a7270a",
+            "branchId": "0x37a5165b",
+            "lockTime": 0,
+            "expiryHeight": 0,
+            "inputs": [
+              {
+                "prevTxid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+                "vout": 0,
+                "scriptSig": "473044022026ca4cad0d7e2d397507a7c13c9a1cd6dc232075994c31e04404da90fc5f405202205100febbc60d5ff0dffc9f7a336ec1700e891a06cb896f187fbdbe797946379801204326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5514c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+                "sequence": 4294967295
+              }
+            ],
+            "outputs": [
+              {
+                "value": "99990000",
+                "scriptPubKey": "76a9142e74cc78b741d17d1e3f88db8aec347513f1cb3c88ac"
+              }
+            ]
+          },
+          "hex": "050000800a27a7265b16a537000000000000000001c60a5f88f8d2fce506c3675cc24a1f4559f9f763b0acef48cc4983c3bc3dd44800000000e1473044022026ca4cad0d7e2d397507a7c13c9a1cd6dc232075994c31e04404da90fc5f405202205100febbc60d5ff0dffc9f7a336ec1700e891a06cb896f187fbdbe797946379801204326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5514c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68acffffffff01f0b9f505000000001976a9142e74cc78b741d17d1e3f88db8aec347513f1cb3c88ac000000",
+          "sizeBytes": 325,
+          "txid": "1b630b772f843559166e8dd0b1a19a94cd3fcced88ab80cbc159f0f94fbdbb36",
+          "txidInternalOrder": "36bbbd4ff9f059c1cb80ab88edcc3fcd949aa1b1d08d6e165935842f770b631b"
+        }
+      },
+      {
+        "description": "claim of an 11,000 zat HTLC: the output is exactly the 1,000 zat dust limit",
+        "network": "testnet",
+        "branchId": "0x37a5165b",
+        "key": {
+          "label": "maker-zcash-key",
+          "privateKey": "ebb8d84a96acfb21e1e4a431b4e5152ca98a92c66946b7cea7fea546ba442820",
+          "publicKey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b"
+        },
+        "htlcRedeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "11000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "preimage": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+        "to": "tmDwzLK6xkr1NTD2MAWVvPcEXRD3vFv2xCU",
+        "expected": {
+          "signatures": [
+            "3045022100d2b9be66eb8105314a48f7d5a45ac7e89b6144c65ecd89ad0cdc989656ad2e630220301e59187539869850d742bd4385d61ef664a0daf6e4178b4515fb4a9afbe5ec01"
+          ],
+          "scriptSigAsm": "<3045022100d2b9be66eb8105314a48f7d5a45ac7e89b6144c65ecd89ad0cdc989656ad2e630220301e59187539869850d742bd4385d61ef664a0daf6e4178b4515fb4a9afbe5ec01> <4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5> OP_1 <6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac>",
+          "extractedPreimage": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+          "fee": "10000",
+          "feeComputation": {
+            "placeholderScriptSigLengths": [
+              227
+            ],
+            "placeholderOutputCount": 1,
+            "inputBytes": 268,
+            "outputBytes": 34,
+            "logicalActions": 2,
+            "conventionalFee": "10000",
+            "dustAddedToFee": "0"
+          },
+          "sighashes": [
+            "4ea7823f28f12ba6fffc6d8cc0b6e76c4730fc45f6581c38d9ce62b4f0f6a8d6"
+          ],
+          "tx": {
+            "header": "0x80000005",
+            "versionGroupId": "0x26a7270a",
+            "branchId": "0x37a5165b",
+            "lockTime": 0,
+            "expiryHeight": 0,
+            "inputs": [
+              {
+                "prevTxid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+                "vout": 0,
+                "scriptSig": "483045022100d2b9be66eb8105314a48f7d5a45ac7e89b6144c65ecd89ad0cdc989656ad2e630220301e59187539869850d742bd4385d61ef664a0daf6e4178b4515fb4a9afbe5ec01204326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5514c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+                "sequence": 4294967295
+              }
+            ],
+            "outputs": [
+              {
+                "value": "1000",
+                "scriptPubKey": "76a9142e74cc78b741d17d1e3f88db8aec347513f1cb3c88ac"
+              }
+            ]
+          },
+          "hex": "050000800a27a7265b16a537000000000000000001c60a5f88f8d2fce506c3675cc24a1f4559f9f763b0acef48cc4983c3bc3dd44800000000e2483045022100d2b9be66eb8105314a48f7d5a45ac7e89b6144c65ecd89ad0cdc989656ad2e630220301e59187539869850d742bd4385d61ef664a0daf6e4178b4515fb4a9afbe5ec01204326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5514c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68acffffffff01e8030000000000001976a9142e74cc78b741d17d1e3f88db8aec347513f1cb3c88ac000000",
+          "sizeBytes": 326,
+          "txid": "657e8fbb0b2baa693ed1dd79d65ecb36acd9832a88f5492eaf0d37d5e3619afd",
+          "txidInternalOrder": "fd9a61e3d5370daf2e49f5882a83d9ac36cb5ed679ddd13e69aa2b0bbb8f7e65"
+        }
+      }
+    ],
+    "refund": [
+      {
+        "description": "taker refunds the HTLC (lock_time = refund height, sequence 0xfffffffe, expiry 0)",
+        "network": "testnet",
+        "branchId": "0x37a5165b",
+        "key": {
+          "label": "taker-funding-key",
+          "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+          "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+        },
+        "htlcRedeemScript": "6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "to": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+        "expected": {
+          "signatures": [
+            "30440220345dae47ddfb15f301f6dc09c06fefa8b94f88498b05ce2eb21f5d4db3499fe102207329c1630b9de3262e1866ed7e63f3542d0f4089875aa8130b313b2afec02c1501"
+          ],
+          "scriptSigAsm": "<30440220345dae47ddfb15f301f6dc09c06fefa8b94f88498b05ce2eb21f5d4db3499fe102207329c1630b9de3262e1866ed7e63f3542d0f4089875aa8130b313b2afec02c1501> OP_0 <6382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac>",
+          "fee": "10000",
+          "feeComputation": {
+            "placeholderScriptSigLengths": [
+              194
+            ],
+            "placeholderOutputCount": 1,
+            "inputBytes": 235,
+            "outputBytes": 34,
+            "logicalActions": 2,
+            "conventionalFee": "10000",
+            "dustAddedToFee": "0"
+          },
+          "sighashes": [
+            "1441706c07a025903422d2fd143b40271d5ed32d158836504b3df882fae57817"
+          ],
+          "tx": {
+            "header": "0x80000005",
+            "versionGroupId": "0x26a7270a",
+            "branchId": "0x37a5165b",
+            "lockTime": 3000144,
+            "expiryHeight": 0,
+            "inputs": [
+              {
+                "prevTxid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+                "vout": 0,
+                "scriptSig": "4730440220345dae47ddfb15f301f6dc09c06fefa8b94f88498b05ce2eb21f5d4db3499fe102207329c1630b9de3262e1866ed7e63f3542d0f4089875aa8130b313b2afec02c1501004c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+                "sequence": 4294967294
+              }
+            ],
+            "outputs": [
+              {
+                "value": "99990000",
+                "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+              }
+            ]
+          },
+          "hex": "050000800a27a7265b16a53750c72d000000000001c60a5f88f8d2fce506c3675cc24a1f4559f9f763b0acef48cc4983c3bc3dd44800000000c04730440220345dae47ddfb15f301f6dc09c06fefa8b94f88498b05ce2eb21f5d4db3499fe102207329c1630b9de3262e1866ed7e63f3542d0f4089875aa8130b313b2afec02c1501004c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68acfeffffff01f0b9f505000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+          "sizeBytes": 292,
+          "txid": "8720ca748ca9f53729c47b30c6cb6ae380c330537cdab8ba3b9db05156f2f9a2",
+          "txidInternalOrder": "a2f9f25651b09d3bbab8da7c5330c380e36acbc6307bc42937f5a98c74ca2087"
+        }
+      }
+    ],
+    "errors": [
+      {
+        "description": "funding: inputs do not cover amount + fee",
+        "kind": "funding",
+        "key": "taker-funding-key",
+        "utxos": [
+          {
+            "txid": "c45738b8d4fa237bbc8a404118ef77ed15bd4d765eddec32f5a82df80579b1df",
+            "vout": 0,
+            "value": "100005000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "amount": "100000000",
+        "error": "insufficient funds: have 100005000, need 100010000"
+      },
+      {
+        "description": "funding: HTLC amount below the dust limit",
+        "kind": "funding",
+        "key": "taker-funding-key",
+        "utxos": [
+          {
+            "txid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+            "vout": 1,
+            "value": "150000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "amount": "999",
+        "error": "output of 999 zat is below the dust limit (1000)"
+      },
+      {
+        "description": "funding: the same outpoint listed twice",
+        "kind": "funding",
+        "key": "taker-funding-key",
+        "utxos": [
+          {
+            "txid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+            "vout": 1,
+            "value": "150000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          },
+          {
+            "txid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+            "vout": 1,
+            "value": "150000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "amount": "100000000",
+        "error": "UTXO 46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6:1 is listed twice"
+      },
+      {
+        "description": "funding: a UTXO not owned by the signing key",
+        "kind": "funding",
+        "key": "maker-zcash-key",
+        "utxos": [
+          {
+            "txid": "46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6",
+            "vout": 1,
+            "value": "150000000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ],
+        "amount": "100000000",
+        "error": "UTXO 46dc20e1a10f2a96ea96ead17f96bf375b8065c39682e97c3e0c03c127fddcb6:1 is not owned by this key"
+      },
+      {
+        "description": "claim: HTLC value 10,999 zat leaves less than the dust limit after the 10,000 zat fee",
+        "kind": "claim",
+        "key": "maker-zcash-key",
+        "utxoValue": "10999",
+        "preimage": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "10999",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "HTLC amount does not cover the fee"
+      },
+      {
+        "description": "claim: signing key is not the claim key",
+        "kind": "claim",
+        "key": "taker-funding-key",
+        "utxoValue": "100000000",
+        "preimage": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "key is not the HTLC claimer"
+      },
+      {
+        "description": "claim: 31-byte preimage",
+        "kind": "claim",
+        "key": "maker-zcash-key",
+        "utxoValue": "100000000",
+        "preimage": "26ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "preimage must be 32 bytes"
+      },
+      {
+        "description": "refund: signing key is not the refund key",
+        "kind": "refund",
+        "key": "maker-zcash-key",
+        "utxoValue": "100000000",
+        "utxo": {
+          "txid": "48d43dbcc38349cc48efacb063f7f959451f4ac25c67c306e5fcd2f8885f0ac6",
+          "vout": 0,
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        },
+        "error": "key is not the HTLC refunder"
+      }
+    ]
+  },
+  "preimageExtraction": [
+    {
+      "description": "claim scriptSig of the fixture HTLC",
+      "scriptSig": "473044022026ca4cad0d7e2d397507a7c13c9a1cd6dc232075994c31e04404da90fc5f405202205100febbc60d5ff0dffc9f7a336ec1700e891a06cb896f187fbdbe797946379801204326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5514c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+      "preimage": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5"
+    },
+    {
+      "description": "refund scriptSig: no preimage",
+      "scriptSig": "4730440220345dae47ddfb15f301f6dc09c06fefa8b94f88498b05ce2eb21f5d4db3499fe102207329c1630b9de3262e1866ed7e63f3542d0f4089875aa8130b313b2afec02c1501004c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+      "preimage": null
+    },
+    {
+      "description": "claim scriptSig checked against another hashlock",
+      "scriptSig": "473044022026ca4cad0d7e2d397507a7c13c9a1cd6dc232075994c31e04404da90fc5f405202205100febbc60d5ff0dffc9f7a336ec1700e891a06cb896f187fbdbe797946379801204326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5514c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68ac",
+      "hashlock": "d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+      "preimage": null
+    }
+  ]
+}

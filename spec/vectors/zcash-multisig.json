@@ -1,0 +1,433 @@
+{
+  "description": "2-of-2 multisig lock (adaptor mode): sorted-key redeem script, the taker's funding, and the two spends (time-locked refund, claim) exactly as adaptorSpends() builds them. The claim's taker signature is an adaptor pre-signature completed with the adaptor secret.",
+  "fixtures": {
+    "derivation": "privateKey = sha256(utf8(\"paralock/vectors/v1/\" + label))",
+    "keys": {
+      "takerFunding": {
+        "label": "taker-funding-key",
+        "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+        "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+      },
+      "makerZcash": {
+        "label": "maker-zcash-key",
+        "privateKey": "ebb8d84a96acfb21e1e4a431b4e5152ca98a92c66946b7cea7fea546ba442820",
+        "publicKey": "03eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b"
+      },
+      "makerPayout": {
+        "label": "maker-payout-key",
+        "privateKey": "41fe156109a0a934d4cba744dbe362875a1ad71f0e9567c4b51b215d33085c4f",
+        "publicKey": "0298b9882303c94ee13486a4f466d076a942294642563e54bc863dc06be894f83c"
+      },
+      "takerMultisig": {
+        "label": "taker-multisig-key",
+        "privateKey": "3a47b643341dce5e76d0de13e3e6ccde1a071bddfe872d350fe6aa6e1969c445",
+        "publicKey": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2"
+      },
+      "makerQuoteKey": {
+        "label": "maker-quote-key",
+        "privateKey": "2f21698e2447b34b16cdd73246892f695dd1a64727fac4e8df41b0aa2648f554",
+        "publicKey": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08"
+      },
+      "evmSigner": {
+        "label": "evm-signer-key",
+        "privateKey": "6d2f4d288168a44295397167747a2dd09d2ae4ebe68de1736e73cdb93fa1a08f",
+        "publicKey": "037c7ed5385827aa1fdf5e58453b8c8963c5af60c464d699698e9a62fa25df1fb6"
+      }
+    },
+    "htlcSecret": {
+      "label": "htlc-secret",
+      "secret": "4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+      "hashlock": "b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23"
+    },
+    "adaptorSecret": {
+      "label": "adaptor-secret",
+      "secret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "point": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad"
+    },
+    "tip": 3000000,
+    "refundHeight": 3000144,
+    "fundingExpiryHeight": 3000040
+  },
+  "scripts": [
+    {
+      "description": "fixture lock: taker multisig key + maker per-quote key",
+      "pubkeyA": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+      "pubkeyB": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08",
+      "sortedPubkeys": [
+        "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+        "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08"
+      ],
+      "redeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+      "asm": "OP_2 <02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2> <02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08> OP_2 OP_CHECKMULTISIG",
+      "scriptHash": "45f4250be1166196e51b2ce3155904e0dd82f22f",
+      "scriptPubKey": "a91445f4250be1166196e51b2ce3155904e0dd82f22f87",
+      "addresses": {
+        "mainnet": "t3QwW2azM5iWR1g8ViSbXETAKp9Pfzcqi7K",
+        "testnet": "t2Cvh5G6UxB7nZNiEeBbZn5LxvdcqtoapQC"
+      }
+    },
+    {
+      "description": "same keys in the other order: identical script (keys are sorted)",
+      "pubkeyA": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08",
+      "pubkeyB": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+      "sortedPubkeys": [
+        "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+        "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08"
+      ],
+      "redeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+      "asm": "OP_2 <02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2> <02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08> OP_2 OP_CHECKMULTISIG",
+      "scriptHash": "45f4250be1166196e51b2ce3155904e0dd82f22f",
+      "scriptPubKey": "a91445f4250be1166196e51b2ce3155904e0dd82f22f87",
+      "addresses": {
+        "mainnet": "t3QwW2azM5iWR1g8ViSbXETAKp9Pfzcqi7K",
+        "testnet": "t2Cvh5G6UxB7nZNiEeBbZn5LxvdcqtoapQC"
+      }
+    },
+    {
+      "description": "G and −G: same x, sorted by prefix (02 before 03)",
+      "pubkeyA": "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "pubkeyB": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "sortedPubkeys": [
+        "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+      ],
+      "redeemScript": "52210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798210379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f8179852ae",
+      "asm": "OP_2 <0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798> <0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798> OP_2 OP_CHECKMULTISIG",
+      "scriptHash": "3fb5b5fbb96ad2b002a5ab6f3e05da931641c0f4",
+      "scriptPubKey": "a9143fb5b5fbb96ad2b002a5ab6f3e05da931641c0f487",
+      "addresses": {
+        "mainnet": "t3QNVBTSB6RGJbDspXQKirVwkBaVqTYxmA9",
+        "testnet": "t2CMgE8YJxssg8vTZT9KmQ88PJ4j1Rz8ahU"
+      }
+    }
+  ],
+  "invalidScripts": [
+    {
+      "description": "keys not sorted",
+      "redeemScript": "522102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e082102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e252ae",
+      "error": "multisig keys are not sorted"
+    },
+    {
+      "description": "1-of-2",
+      "redeemScript": "512102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+      "error": "not a 2-of-2 multisig script"
+    },
+    {
+      "description": "2-of-3",
+      "redeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f8179853ae",
+      "error": "not a 2-of-2 multisig script"
+    },
+    {
+      "description": "the same key twice",
+      "redeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e252ae",
+      "error": "multisig keys must differ"
+    },
+    {
+      "description": "a key that is not a curve point",
+      "redeemScript": "52210200000000000000000000000000000000000000000000000000000000000000002102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e252ae",
+      "error": "multisig pubkey is not a compressed secp256k1 point: 020000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "description": "trailing byte",
+      "redeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae00",
+      "error": "not a 2-of-2 multisig script"
+    }
+  ],
+  "funding": {
+    "description": "taker funds the 2-of-2 (output 0) from one P2PKH UTXO, change to output 1, expiry tip + 40",
+    "network": "testnet",
+    "branchId": "0x37a5165b",
+    "expiryHeight": 3000040,
+    "key": {
+      "label": "taker-funding-key",
+      "privateKey": "e55442870ccced430a63fbd637b18cb5c440c33b2bddb5a0687ec7f0710ff813",
+      "publicKey": "033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f"
+    },
+    "utxos": [
+      {
+        "txid": "2365b50a8904fe4b381ade0f02b67d5e6a5098f2c129af4fbf0485f86ee6d6f2",
+        "vout": 2,
+        "value": "80000000",
+        "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+      }
+    ],
+    "multisigRedeemScript": "522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+    "amount": "50000000",
+    "changeScriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac",
+    "expected": {
+      "signatures": [
+        "3045022100b884b0947407b624716a3e22e924dc84b2ef893fca20f7f9267d52b5c1e8406602205ba533a14e1d97b1116d44cd1667a6fda09b373a2158b4d5dda046e51e13fd4401"
+      ],
+      "fee": "10000",
+      "feeComputation": {
+        "placeholderScriptSigLengths": [
+          108
+        ],
+        "placeholderOutputCount": 2,
+        "inputBytes": 149,
+        "outputBytes": 66,
+        "logicalActions": 2,
+        "conventionalFee": "10000",
+        "dustAddedToFee": "0"
+      },
+      "sighashes": [
+        "05d96ffaa40e53407952fe96bf4ec5ad78698f908efc15e2f2fc9b700133f14b"
+      ],
+      "tx": {
+        "header": "0x80000005",
+        "versionGroupId": "0x26a7270a",
+        "branchId": "0x37a5165b",
+        "lockTime": 0,
+        "expiryHeight": 3000040,
+        "inputs": [
+          {
+            "prevTxid": "2365b50a8904fe4b381ade0f02b67d5e6a5098f2c129af4fbf0485f86ee6d6f2",
+            "vout": 2,
+            "scriptSig": "483045022100b884b0947407b624716a3e22e924dc84b2ef893fca20f7f9267d52b5c1e8406602205ba533a14e1d97b1116d44cd1667a6fda09b373a2158b4d5dda046e51e13fd440121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f",
+            "sequence": 4294967295
+          }
+        ],
+        "outputs": [
+          {
+            "value": "50000000",
+            "scriptPubKey": "a91445f4250be1166196e51b2ce3155904e0dd82f22f87"
+          },
+          {
+            "value": "29990000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ]
+      },
+      "hex": "050000800a27a7265b16a53700000000e8c62d0001f2d6e66ef88504bf4faf29c1f298506a5e7db6020fde1a384bfe04890ab56523020000006b483045022100b884b0947407b624716a3e22e924dc84b2ef893fca20f7f9267d52b5c1e8406602205ba533a14e1d97b1116d44cd1667a6fda09b373a2158b4d5dda046e51e13fd440121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0280f0fa020000000017a91445f4250be1166196e51b2ce3155904e0dd82f22f87709cc901000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+      "sizeBytes": 239,
+      "txid": "7b44370bdd6ecfcd7d62608a1a82f877edbfe9dd50bfb00290fafa8bcae9a089",
+      "txidInternalOrder": "89a0e9ca8bfafa9002b0bf50dde9bfed77f8821a8a60627dcdcf6edd0b37447b"
+    }
+  },
+  "adaptorSpends": {
+    "description": "adaptorSpends(args): both parties build these independently and must get identical sighashes",
+    "args": {
+      "network": "testnet",
+      "takerPubkey": "0x02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+      "makerPubkey": "0x02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08",
+      "fundingTxid": "7b44370bdd6ecfcd7d62608a1a82f877edbfe9dd50bfb00290fafa8bcae9a089",
+      "fundingVout": 0,
+      "amountZat": "50000000",
+      "refundHeight": 3000144,
+      "refundAddress": "tmUCC3S8chYxAxN5QJ6QtN5JVejPu38zvUU",
+      "claimTo": "tmDwzLK6xkr1NTD2MAWVvPcEXRD3vFv2xCU",
+      "branchId": 933566043
+    },
+    "refund": {
+      "description": "refund to the taker: lock_time = refundHeight, sequence 0xfffffffe, expiry 0, fee 10,000",
+      "signatures": {
+        "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08": "3045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf1401",
+        "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2": "30440220601e15096069f949f24d220b9999e79d062a947e6f56e67ef2ad3fc4714ad1b3022023653447d87483ae090c0414ca46ceaf7fbadbce6d890f784b3c66400a63046301"
+      },
+      "sighash": "46a2bacac01ffefc58814306df76b3154b91e9c0abc392f36eddfa4360817405",
+      "unsignedTx": {
+        "header": "0x80000005",
+        "versionGroupId": "0x26a7270a",
+        "branchId": "0x37a5165b",
+        "lockTime": 3000144,
+        "expiryHeight": 0,
+        "inputs": [
+          {
+            "prevTxid": "7b44370bdd6ecfcd7d62608a1a82f877edbfe9dd50bfb00290fafa8bcae9a089",
+            "vout": 0,
+            "scriptSig": "004900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000490000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000047522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+            "sequence": 4294967294
+          }
+        ],
+        "outputs": [
+          {
+            "value": "49990000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ]
+      },
+      "fee": "10000",
+      "feeComputation": {
+        "placeholderScriptSigLengths": [
+          221
+        ],
+        "placeholderOutputCount": 1,
+        "inputBytes": 262,
+        "outputBytes": 34,
+        "logicalActions": 2,
+        "conventionalFee": "10000",
+        "dustAddedToFee": "0"
+      },
+      "sighashes": [
+        "46a2bacac01ffefc58814306df76b3154b91e9c0abc392f36eddfa4360817405"
+      ],
+      "tx": {
+        "header": "0x80000005",
+        "versionGroupId": "0x26a7270a",
+        "branchId": "0x37a5165b",
+        "lockTime": 3000144,
+        "expiryHeight": 0,
+        "inputs": [
+          {
+            "prevTxid": "7b44370bdd6ecfcd7d62608a1a82f877edbfe9dd50bfb00290fafa8bcae9a089",
+            "vout": 0,
+            "scriptSig": "004730440220601e15096069f949f24d220b9999e79d062a947e6f56e67ef2ad3fc4714ad1b3022023653447d87483ae090c0414ca46ceaf7fbadbce6d890f784b3c66400a63046301483045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf140147522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+            "sequence": 4294967294
+          }
+        ],
+        "outputs": [
+          {
+            "value": "49990000",
+            "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+          }
+        ]
+      },
+      "hex": "050000800a27a7265b16a53750c72d00000000000189a0e9ca8bfafa9002b0bf50dde9bfed77f8821a8a60627dcdcf6edd0b37447b00000000da004730440220601e15096069f949f24d220b9999e79d062a947e6f56e67ef2ad3fc4714ad1b3022023653447d87483ae090c0414ca46ceaf7fbadbce6d890f784b3c66400a63046301483045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf140147522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852aefeffffff0170c9fa02000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+      "sizeBytes": 318,
+      "txid": "8516c3494f6a0f80776c90ad889a8ebaa0080ae776cd3df9d5be9fe1b3bceac1",
+      "txidInternalOrder": "c1eabcb3e19fbed5f93dcd76e70a08a0ba8e9a88ad906c77800f6a4f49c31685",
+      "signaturesFromScriptSig": [
+        "30440220601e15096069f949f24d220b9999e79d062a947e6f56e67ef2ad3fc4714ad1b3022023653447d87483ae090c0414ca46ceaf7fbadbce6d890f784b3c66400a63046301",
+        "3045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf1401"
+      ],
+      "scriptSigAsm": "OP_0 <30440220601e15096069f949f24d220b9999e79d062a947e6f56e67ef2ad3fc4714ad1b3022023653447d87483ae090c0414ca46ceaf7fbadbce6d890f784b3c66400a63046301> <3045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf1401> <522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae>"
+    },
+    "claim": {
+      "description": "claim to the maker's claimTo: lock_time 0, sequence 0xffffffff, expiry 0, fee 10,000",
+      "takerPreSignature": "0329aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd0388d873edaf6d4a0776694d90c704da49ccf0007fac086f00b4214cb75a3a5a901997f54c673fb4e13f1f00db97d7d518358b994c8d2e03aaab4221e3f4a01734152793510865d02ae8578b4e2e25df31de9c52863e7cfd35e46f868850d2b961956577474c8662181134593d5dde1ea8915ded331a9aca2abab68852ad4d1e0f",
+      "takerPreSignatureNonceRandomness": [
+        "0b35d577a70fb464c663be65085d9a05d42128604f5cfd21d6875ee974181b1f",
+        "e9eb66bb9d40d3f8e2e6c2693cc76bdd94358fa2ccf9d83d5819e89dbe1c149a"
+      ],
+      "signatures": {
+        "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2": "3044022029aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd02203de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f01",
+        "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08": "304402201d42cf1986e97fe12417d6e7a5c7aaa64845c0736bac27ce3e593b91af41b3f3022041f69a200a30b20fb58f476e72e1ad74b7815f145fdccc12376a00f11355d5d301"
+      },
+      "sighash": "b7a2ed1c2bf804e47f359debcd7c258fb3be6412bd3478447169ccf083a009ff",
+      "unsignedTx": {
+        "header": "0x80000005",
+        "versionGroupId": "0x26a7270a",
+        "branchId": "0x37a5165b",
+        "lockTime": 0,
+        "expiryHeight": 0,
+        "inputs": [
+          {
+            "prevTxid": "7b44370bdd6ecfcd7d62608a1a82f877edbfe9dd50bfb00290fafa8bcae9a089",
+            "vout": 0,
+            "scriptSig": "004900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000490000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000047522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+            "sequence": 4294967295
+          }
+        ],
+        "outputs": [
+          {
+            "value": "49990000",
+            "scriptPubKey": "76a9142e74cc78b741d17d1e3f88db8aec347513f1cb3c88ac"
+          }
+        ]
+      },
+      "fee": "10000",
+      "feeComputation": {
+        "placeholderScriptSigLengths": [
+          221
+        ],
+        "placeholderOutputCount": 1,
+        "inputBytes": 262,
+        "outputBytes": 34,
+        "logicalActions": 2,
+        "conventionalFee": "10000",
+        "dustAddedToFee": "0"
+      },
+      "sighashes": [
+        "b7a2ed1c2bf804e47f359debcd7c258fb3be6412bd3478447169ccf083a009ff"
+      ],
+      "tx": {
+        "header": "0x80000005",
+        "versionGroupId": "0x26a7270a",
+        "branchId": "0x37a5165b",
+        "lockTime": 0,
+        "expiryHeight": 0,
+        "inputs": [
+          {
+            "prevTxid": "7b44370bdd6ecfcd7d62608a1a82f877edbfe9dd50bfb00290fafa8bcae9a089",
+            "vout": 0,
+            "scriptSig": "00473044022029aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd02203de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f0147304402201d42cf1986e97fe12417d6e7a5c7aaa64845c0736bac27ce3e593b91af41b3f3022041f69a200a30b20fb58f476e72e1ad74b7815f145fdccc12376a00f11355d5d30147522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae",
+            "sequence": 4294967295
+          }
+        ],
+        "outputs": [
+          {
+            "value": "49990000",
+            "scriptPubKey": "76a9142e74cc78b741d17d1e3f88db8aec347513f1cb3c88ac"
+          }
+        ]
+      },
+      "hex": "050000800a27a7265b16a53700000000000000000189a0e9ca8bfafa9002b0bf50dde9bfed77f8821a8a60627dcdcf6edd0b37447b00000000d900473044022029aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd02203de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f0147304402201d42cf1986e97fe12417d6e7a5c7aaa64845c0736bac27ce3e593b91af41b3f3022041f69a200a30b20fb58f476e72e1ad74b7815f145fdccc12376a00f11355d5d30147522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852aeffffffff0170c9fa02000000001976a9142e74cc78b741d17d1e3f88db8aec347513f1cb3c88ac000000",
+      "sizeBytes": 317,
+      "txid": "3f781b5906a3e39edb7e97b764fc473262800a6ab650941e7b57db3c8eda5a7d",
+      "txidInternalOrder": "7d5ada8e3cdb577b1e9450b66a0a80623247fc64b7977edb9ee3a306591b783f",
+      "signaturesFromScriptSig": [
+        "3044022029aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd02203de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f01",
+        "304402201d42cf1986e97fe12417d6e7a5c7aaa64845c0736bac27ce3e593b91af41b3f3022041f69a200a30b20fb58f476e72e1ad74b7815f145fdccc12376a00f11355d5d301"
+      ],
+      "scriptSigAsm": "OP_0 <3044022029aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd02203de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f01> <304402201d42cf1986e97fe12417d6e7a5c7aaa64845c0736bac27ce3e593b91af41b3f3022041f69a200a30b20fb58f476e72e1ad74b7815f145fdccc12376a00f11355d5d301> <522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852ae>"
+    }
+  },
+  "signatureChecks": [
+    {
+      "description": "maker's refund signature: valid",
+      "spend": "refund",
+      "pubkey": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08",
+      "signature": "3045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf1401",
+      "valid": true
+    },
+    {
+      "description": "the same signature with s replaced by n − s (high-S): rejected",
+      "spend": "refund",
+      "pubkey": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08",
+      "signature": "3046022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b022100b5118cf41856b500c9d26f06931318d90483a80ce94abf667192b6115573822d01",
+      "valid": false
+    },
+    {
+      "description": "sighash type byte 0x81 (ALL|ANYONECANPAY): rejected",
+      "spend": "refund",
+      "pubkey": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08",
+      "signature": "3045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf1481",
+      "valid": false
+    },
+    {
+      "description": "sighash type byte 0x02 (NONE): rejected",
+      "spend": "refund",
+      "pubkey": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08",
+      "signature": "3045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf1402",
+      "valid": false
+    },
+    {
+      "description": "checked against the other multisig key: rejected",
+      "spend": "refund",
+      "pubkey": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+      "signature": "3045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf1401",
+      "valid": false
+    },
+    {
+      "description": "maker's claim signature checked against the refund: rejected",
+      "spend": "refund",
+      "pubkey": "02beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e08",
+      "signature": "304402201d42cf1986e97fe12417d6e7a5c7aaa64845c0736bac27ce3e593b91af41b3f3022041f69a200a30b20fb58f476e72e1ad74b7815f145fdccc12376a00f11355d5d301",
+      "valid": false
+    },
+    {
+      "description": "adaptor-completed taker claim signature: valid",
+      "spend": "claim",
+      "pubkey": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+      "signature": "3044022029aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd02203de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f01",
+      "valid": true
+    },
+    {
+      "description": "8-byte garbage: rejected",
+      "spend": "claim",
+      "pubkey": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+      "signature": "3006020101020101",
+      "valid": false
+    }
+  ]
+}

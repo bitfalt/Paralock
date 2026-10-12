@@ -1,0 +1,267 @@
+{
+  "description": "ZIP 244 transparent signature digests for all six hash types on Paralock-built transactions (Paralock itself only signs SIGHASH_ALL). For a P2SH input the scriptPubKey hashed is the P2SH script, not the redeem script. scriptSigs are not committed, so the digest of a signed transaction equals that of its unsigned form.",
+  "hashTypes": {
+    "SIGHASH_ALL": 1,
+    "SIGHASH_NONE": 2,
+    "SIGHASH_SINGLE": 3,
+    "SIGHASH_ALL|ANYONECANPAY": 129,
+    "SIGHASH_NONE|ANYONECANPAY": 130,
+    "SIGHASH_SINGLE|ANYONECANPAY": 131
+  },
+  "vectors": [
+    {
+      "description": "HTLC funding with 3 P2PKH inputs and 2 outputs (input 2 has no output at its index: SIGHASH_SINGLE commits to no output)",
+      "hex": "050000800a27a7265b16a53700000000e8c62d0003a0a49cbffb2b8ec72d758297e1bb3818353d6502b259bcd98a2261f1dbf6960a000000006b483045022100fd8fb067a05b9871db64e59e5c29513506d9445d1f8509748be643bb5364554902201d74ca01f6b2effa71fcf5bafba55e4e30d0dd1fff3e1db5990f09e46dda759f0121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff7574b895f00e1b374f0fecc600284d74f43fa53abbdc098ea2fd32df200aabcf030000006b483045022100ec9cf3c3c67fa001a0258da07e0e1678a1fd43dcd0e91d18b931161d9469f52e0220455dbbffa83512a336975e29efb52183f82ee4525b9a94890abdcafa8f71c7300121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffffa70940757fc2809139f57a9f406ba88d678e17ed0ef2f7a214936e66b7fb9769000000006b483045022100bd1aa3b230ca6e8139c721de1de53da630108f07da873c691387438c2bb4434f02206a7efc7b113640744b47e2c3c688bd98e3093d5ef0fd9fdde25f20726dbedf140121033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9fffffffff0200e1f5050000000017a91462fc5367913c1fbc354c216cedc9b81ce14d93d487a8104c00000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+      "prevouts": [
+        {
+          "value": "40000000",
+          "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+        },
+        {
+          "value": "35000000",
+          "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+        },
+        {
+          "value": "30000000",
+          "scriptPubKey": "76a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac"
+        }
+      ],
+      "cases": [
+        {
+          "description": "input 0, SIGHASH_ALL",
+          "input": 0,
+          "hashType": 1,
+          "name": "SIGHASH_ALL",
+          "sighash": "6af2b2a5e18ee4b4eb4550b9814a547bfb7f327cdaf353e069f101059f73a89e"
+        },
+        {
+          "description": "input 0, SIGHASH_NONE",
+          "input": 0,
+          "hashType": 2,
+          "name": "SIGHASH_NONE",
+          "sighash": "f0a67dd5f3937b3aa26bec7b22552cc385eacad68e389f9984e2ab24e2ff5052"
+        },
+        {
+          "description": "input 0, SIGHASH_SINGLE",
+          "input": 0,
+          "hashType": 3,
+          "name": "SIGHASH_SINGLE",
+          "sighash": "87843e1138b382d85a4c45ae7efc4d7eeed4fe95cf9f6da24f84b51dad9e2c45"
+        },
+        {
+          "description": "input 0, SIGHASH_ALL|ANYONECANPAY",
+          "input": 0,
+          "hashType": 129,
+          "name": "SIGHASH_ALL|ANYONECANPAY",
+          "sighash": "e42c79c9f3d459552e585bac2b4beb4a018df7d2d09d1ee3accda127e6df9b04"
+        },
+        {
+          "description": "input 0, SIGHASH_NONE|ANYONECANPAY",
+          "input": 0,
+          "hashType": 130,
+          "name": "SIGHASH_NONE|ANYONECANPAY",
+          "sighash": "1a36a48ca8267cc8029dd07f440eec42e9ab5377f6f6c4205b5259fc5163c5a9"
+        },
+        {
+          "description": "input 0, SIGHASH_SINGLE|ANYONECANPAY",
+          "input": 0,
+          "hashType": 131,
+          "name": "SIGHASH_SINGLE|ANYONECANPAY",
+          "sighash": "3b47d37106854919d2fe78e2be066e0094f2ca1849ca57b8bc0f3620dfe167ba"
+        },
+        {
+          "description": "input 1, SIGHASH_ALL",
+          "input": 1,
+          "hashType": 1,
+          "name": "SIGHASH_ALL",
+          "sighash": "ba931c8d846bba43cfb9c7c6a0024a674fecd4da53ea6f71536f7cc4672333e8"
+        },
+        {
+          "description": "input 1, SIGHASH_NONE",
+          "input": 1,
+          "hashType": 2,
+          "name": "SIGHASH_NONE",
+          "sighash": "cd4d69fc172310545ff149131f724d6546dc7e70f5c3d11d5c4b99861eaf8b4a"
+        },
+        {
+          "description": "input 1, SIGHASH_SINGLE",
+          "input": 1,
+          "hashType": 3,
+          "name": "SIGHASH_SINGLE",
+          "sighash": "da1df18893574d39a171ef957fb25a99314902b0b8134367c1090d4cde708a75"
+        },
+        {
+          "description": "input 1, SIGHASH_ALL|ANYONECANPAY",
+          "input": 1,
+          "hashType": 129,
+          "name": "SIGHASH_ALL|ANYONECANPAY",
+          "sighash": "885237980d462ca3590b82769a8929fc252c65781c7d1b22565606067b2f02e4"
+        },
+        {
+          "description": "input 1, SIGHASH_NONE|ANYONECANPAY",
+          "input": 1,
+          "hashType": 130,
+          "name": "SIGHASH_NONE|ANYONECANPAY",
+          "sighash": "10bbc57fbe8004ce440f4a50873d8981e0634c67db1ef8f24866e9bea329a963"
+        },
+        {
+          "description": "input 1, SIGHASH_SINGLE|ANYONECANPAY",
+          "input": 1,
+          "hashType": 131,
+          "name": "SIGHASH_SINGLE|ANYONECANPAY",
+          "sighash": "3149a9b19ba69a5bcf05f37551b10da81a1bfa06718c81d12b7843d1dcc8407a"
+        },
+        {
+          "description": "input 2, SIGHASH_ALL",
+          "input": 2,
+          "hashType": 1,
+          "name": "SIGHASH_ALL",
+          "sighash": "182f9cbae46fcfabffde15b420155ec08cbd3e1748b39bf1a42ddf5e048a64f7"
+        },
+        {
+          "description": "input 2, SIGHASH_NONE",
+          "input": 2,
+          "hashType": 2,
+          "name": "SIGHASH_NONE",
+          "sighash": "e4abe4e2c0feadb34d2d4c74d02b03e4449739f34ba4b713472431869cbf16a4"
+        },
+        {
+          "description": "input 2, SIGHASH_SINGLE",
+          "input": 2,
+          "hashType": 3,
+          "name": "SIGHASH_SINGLE",
+          "sighash": "4bdb27eeeb05e1862a7522b4acc1803f129f7f6a5e3cbd5fc0f06ea1cd730ffc"
+        },
+        {
+          "description": "input 2, SIGHASH_ALL|ANYONECANPAY",
+          "input": 2,
+          "hashType": 129,
+          "name": "SIGHASH_ALL|ANYONECANPAY",
+          "sighash": "36a00e11eb6519063173a7e24ba4886fcbfed4de30e09bcf4070f9ac2f864bfd"
+        },
+        {
+          "description": "input 2, SIGHASH_NONE|ANYONECANPAY",
+          "input": 2,
+          "hashType": 130,
+          "name": "SIGHASH_NONE|ANYONECANPAY",
+          "sighash": "a24396bc3a3b0545b916ba3fe7bbe29822bfeec02a4ef901d57a791ba8063b35"
+        },
+        {
+          "description": "input 2, SIGHASH_SINGLE|ANYONECANPAY",
+          "input": 2,
+          "hashType": 131,
+          "name": "SIGHASH_SINGLE|ANYONECANPAY",
+          "sighash": "245b0c7244409faac8625f9fd0f35d6e8a41f62832a1b7c570abfab046db3c38"
+        }
+      ]
+    },
+    {
+      "description": "HTLC claim: one P2SH input (prevout scriptPubKey is the P2SH script)",
+      "hex": "050000800a27a7265b16a537000000000000000001c60a5f88f8d2fce506c3675cc24a1f4559f9f763b0acef48cc4983c3bc3dd44800000000e1473044022026ca4cad0d7e2d397507a7c13c9a1cd6dc232075994c31e04404da90fc5f405202205100febbc60d5ff0dffc9f7a336ec1700e891a06cb896f187fbdbe797946379801204326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5514c756382012088a820b4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23882103eb0baa70f100e2708046df49d5024114a826f9028b9288c0f41ee2d84aa5583b670350c72db17521033242c65ad329883d4a0dfcb81f717e648f02a60efd4f99226deb8e9aa1854f9f68acffffffff01f0b9f505000000001976a9142e74cc78b741d17d1e3f88db8aec347513f1cb3c88ac000000",
+      "prevouts": [
+        {
+          "value": "100000000",
+          "scriptPubKey": "a91462fc5367913c1fbc354c216cedc9b81ce14d93d487"
+        }
+      ],
+      "cases": [
+        {
+          "description": "input 0, SIGHASH_ALL",
+          "input": 0,
+          "hashType": 1,
+          "name": "SIGHASH_ALL",
+          "sighash": "f7b610b0dbcf6fde5271fe4020079fe6d4b8f2c8a34a1d896861522a501e6c21"
+        },
+        {
+          "description": "input 0, SIGHASH_NONE",
+          "input": 0,
+          "hashType": 2,
+          "name": "SIGHASH_NONE",
+          "sighash": "6f956e4765257ba8be73a6d9b9d4785b474a0e4a4a85b58a724ae32774474b79"
+        },
+        {
+          "description": "input 0, SIGHASH_SINGLE",
+          "input": 0,
+          "hashType": 3,
+          "name": "SIGHASH_SINGLE",
+          "sighash": "f6a683fe52ae9d447c02f812060295cb442241e637506d9b53ad87cf2ce1227a"
+        },
+        {
+          "description": "input 0, SIGHASH_ALL|ANYONECANPAY",
+          "input": 0,
+          "hashType": 129,
+          "name": "SIGHASH_ALL|ANYONECANPAY",
+          "sighash": "200555a8dfd12f2d22e22e5ca0fb54f9b8af9a15fd899722693ac5bb7fa98ef1"
+        },
+        {
+          "description": "input 0, SIGHASH_NONE|ANYONECANPAY",
+          "input": 0,
+          "hashType": 130,
+          "name": "SIGHASH_NONE|ANYONECANPAY",
+          "sighash": "4cd4b271792ae3612ac31f5f1367283ba6b4bde1c4855d26f5f5bc7eb4c466c3"
+        },
+        {
+          "description": "input 0, SIGHASH_SINGLE|ANYONECANPAY",
+          "input": 0,
+          "hashType": 131,
+          "name": "SIGHASH_SINGLE|ANYONECANPAY",
+          "sighash": "acac7e506e40cf9b3bd22ebcf216051e9b96a191182cfdb64d6509272a37fcb5"
+        }
+      ]
+    },
+    {
+      "description": "2-of-2 refund: one P2SH input with lock_time and sequence 0xfffffffe",
+      "hex": "050000800a27a7265b16a53750c72d00000000000189a0e9ca8bfafa9002b0bf50dde9bfed77f8821a8a60627dcdcf6edd0b37447b00000000da004730440220601e15096069f949f24d220b9999e79d062a947e6f56e67ef2ad3fc4714ad1b3022023653447d87483ae090c0414ca46ceaf7fbadbce6d890f784b3c66400a63046301483045022100816d8d2063682429a2c5fdbdeeb71882b1f33bebe05a40b1c3cb5f5651c0823b02204aee730be7a94aff362d90f96cece725b62b34d9c5fde0d54e3fa87b7ac2bf140147522102653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e22102beb0b45e9dc00789dcc014bcc0fcdf0ff2eae1a3a061c783bdfa791625dc0e0852aefeffffff0170c9fa02000000001976a914cab62846648ae700776eedc2db0ff75e9d5e3f8b88ac000000",
+      "prevouts": [
+        {
+          "value": "50000000",
+          "scriptPubKey": "a91445f4250be1166196e51b2ce3155904e0dd82f22f87"
+        }
+      ],
+      "cases": [
+        {
+          "description": "input 0, SIGHASH_ALL",
+          "input": 0,
+          "hashType": 1,
+          "name": "SIGHASH_ALL",
+          "sighash": "46a2bacac01ffefc58814306df76b3154b91e9c0abc392f36eddfa4360817405"
+        },
+        {
+          "description": "input 0, SIGHASH_NONE",
+          "input": 0,
+          "hashType": 2,
+          "name": "SIGHASH_NONE",
+          "sighash": "60504a3266ec143a1fb299169b25b9d9af9cf0b97f8495b2010659001f12fda5"
+        },
+        {
+          "description": "input 0, SIGHASH_SINGLE",
+          "input": 0,
+          "hashType": 3,
+          "name": "SIGHASH_SINGLE",
+          "sighash": "87a461ad95b56aa6e4ff79e466104ad726e4e06735e7c64c7da27f2cc21de17b"
+        },
+        {
+          "description": "input 0, SIGHASH_ALL|ANYONECANPAY",
+          "input": 0,
+          "hashType": 129,
+          "name": "SIGHASH_ALL|ANYONECANPAY",
+          "sighash": "3418c6e739f70012930aa19f1069a4e0aca471adae3f6080641ab18123a283b3"
+        },
+        {
+          "description": "input 0, SIGHASH_NONE|ANYONECANPAY",
+          "input": 0,
+          "hashType": 130,
+          "name": "SIGHASH_NONE|ANYONECANPAY",
+          "sighash": "24fcfdd39bc129cad9b2a814d9ff66972df19003a4a8715bd84a049f81a07c13"
+        },
+        {
+          "description": "input 0, SIGHASH_SINGLE|ANYONECANPAY",
+          "input": 0,
+          "hashType": 131,
+          "name": "SIGHASH_SINGLE|ANYONECANPAY",
+          "sighash": "58b74e22de7f6e2be24d8e12f84fc71d7d5aac33eaed889d99aa16dff142dff6"
+        }
+      ]
+    }
+  ]
+}

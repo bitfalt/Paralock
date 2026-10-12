@@ -1,0 +1,585 @@
+{
+  "description": "EVM leg: ParalockHTLC commitments, ParalockAdaptorEscrow ids and claim digests, claim signatures (v ∈ {27, 28}, low s), and the ABI surface (selectors and event topics) of both contracts. Amounts and expiries are decimal strings.",
+  "constants": {
+    "CLAIM_TYPEHASH": "0x76496552a5d892c5ce0b63bf3f569357dd16c2400ac05d3c20bcabb45b6a64ca",
+    "CLAIM_TYPEHASH_preimage": "ParalockAdaptorClaim",
+    "HTLC_SETTLED": "0x0000000000000000000000000000000000000000000000000000000000000001",
+    "HTLC_EMPTY": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "SECP256K1_N_HALF": "0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0",
+    "adaptorStatus": {
+      "empty": 0,
+      "active": 1,
+      "settled": 2
+    },
+    "htlcStatus": {
+      "empty": 0,
+      "active": 1,
+      "settled": 2
+    }
+  },
+  "hashlocks": [
+    {
+      "description": "sha256 of the fixture secret",
+      "preimage": "0x4326ab9e073aa5a956ede618f03596bd0bd70bac24842758534483f7a39ff2c5",
+      "hashlock": "0xb4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23"
+    },
+    {
+      "description": "sha256 of an all-zero preimage",
+      "preimage": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "hashlock": "0x66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+    },
+    {
+      "description": "sha256 of an all-0xff preimage",
+      "preimage": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "hashlock": "0xaf9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051"
+    }
+  ],
+  "htlcSwaps": [
+    {
+      "description": "25 OUSD on Tempo, expiry 1800003600",
+      "swap": {
+        "hashlock": "0xb4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "token": "0x20c0000000000000000000006a37DA5C996874BE",
+        "sender": "0x6709a9c834a22dd371d447278641001f98811690",
+        "recipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+        "amount": "25000000",
+        "expiry": "1800003600"
+      },
+      "abiEncoded": "0xb4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da2300000000000000000000000020c0000000000000000000006a37da5c996874be0000000000000000000000006709a9c834a22dd371d447278641001f9881169000000000000000000000000036e33698492d087ee35db0830ba305faf075d08700000000000000000000000000000000000000000000000000000000017d7840000000000000000000000000000000000000000000000000000000006b49e010",
+      "commitment": "0xea571b5d4d78234cc2103f76dfaac6e0f456e463ae47caf6d723f8baf9dfbb4e"
+    },
+    {
+      "description": "same swap with lower-case addresses: identical commitment",
+      "swap": {
+        "hashlock": "0xb4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da23",
+        "token": "0x20c0000000000000000000006a37da5c996874be",
+        "sender": "0x6709a9c834a22dd371d447278641001f98811690",
+        "recipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+        "amount": "25000000",
+        "expiry": "1800003600"
+      },
+      "abiEncoded": "0xb4d7401b7a414202764d88c658a3b26e2ea8d80bf3280a9f9b43895f19e5da2300000000000000000000000020c0000000000000000000006a37da5c996874be0000000000000000000000006709a9c834a22dd371d447278641001f9881169000000000000000000000000036e33698492d087ee35db0830ba305faf075d08700000000000000000000000000000000000000000000000000000000017d7840000000000000000000000000000000000000000000000000000000006b49e010",
+      "commitment": "0xea571b5d4d78234cc2103f76dfaac6e0f456e463ae47caf6d723f8baf9dfbb4e"
+    },
+    {
+      "description": "maximum amount and expiry",
+      "swap": {
+        "hashlock": "0xaf9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+        "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "sender": "0x6709a9c834a22dd371d447278641001f98811690",
+        "recipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+        "amount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        "expiry": "18446744073709551615"
+      },
+      "abiEncoded": "0xaf9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000006709a9c834a22dd371d447278641001f9881169000000000000000000000000036e33698492d087ee35db0830ba305faf075d087ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000ffffffffffffffff",
+      "commitment": "0xb1cb700cca4b0a2f88ed012816707d0a82d404af36f8113976b6d10201dfde3f"
+    }
+  ],
+  "adaptorSwaps": [
+    {
+      "description": "25 OUSD on Tempo released by the one-time signer",
+      "swap": {
+        "token": "0x20c0000000000000000000006a37DA5C996874BE",
+        "sender": "0x6709a9c834a22dd371d447278641001f98811690",
+        "recipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+        "signer": "0x8a8adb6e64311361f6f980090fb1c011ce2f813c",
+        "amount": "25000000",
+        "expiry": "1800003600",
+        "salt": "0x5a7dc4e888b3d0ff65abc077a0ef312182a5f966fe6e06c76af542b28729662e"
+      },
+      "abiEncoded": "0x00000000000000000000000020c0000000000000000000006a37da5c996874be0000000000000000000000006709a9c834a22dd371d447278641001f9881169000000000000000000000000036e33698492d087ee35db0830ba305faf075d0870000000000000000000000008a8adb6e64311361f6f980090fb1c011ce2f813c00000000000000000000000000000000000000000000000000000000017d7840000000000000000000000000000000000000000000000000000000006b49e0105a7dc4e888b3d0ff65abc077a0ef312182a5f966fe6e06c76af542b28729662e",
+      "id": "0x906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6"
+    },
+    {
+      "description": "same with another salt: a different id",
+      "swap": {
+        "token": "0x20c0000000000000000000006a37DA5C996874BE",
+        "sender": "0x6709a9c834a22dd371d447278641001f98811690",
+        "recipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+        "signer": "0x8a8adb6e64311361f6f980090fb1c011ce2f813c",
+        "amount": "25000000",
+        "expiry": "1800003600",
+        "salt": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "abiEncoded": "0x00000000000000000000000020c0000000000000000000006a37da5c996874be0000000000000000000000006709a9c834a22dd371d447278641001f9881169000000000000000000000000036e33698492d087ee35db0830ba305faf075d0870000000000000000000000008a8adb6e64311361f6f980090fb1c011ce2f813c00000000000000000000000000000000000000000000000000000000017d7840000000000000000000000000000000000000000000000000000000006b49e0100000000000000000000000000000000000000000000000000000000000000000",
+      "id": "0x29f1df5e696a76e61e84d68ea5c21db8adb88bc98a12e6cf54a08423ec3a3a8d"
+    },
+    {
+      "description": "maximum amount and expiry",
+      "swap": {
+        "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "sender": "0x6709a9c834a22dd371d447278641001f98811690",
+        "recipient": "0x36e33698492d087ee35db0830ba305faf075d087",
+        "signer": "0x8a8adb6e64311361f6f980090fb1c011ce2f813c",
+        "amount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        "expiry": "18446744073709551615",
+        "salt": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "abiEncoded": "0x000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000006709a9c834a22dd371d447278641001f9881169000000000000000000000000036e33698492d087ee35db0830ba305faf075d0870000000000000000000000008a8adb6e64311361f6f980090fb1c011ce2f813cffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "id": "0x6bfa2de08e9a31440f99ef35100579756f074c71d97c1e639a30dbd856a87efa"
+    }
+  ],
+  "claimDigests": [
+    {
+      "description": "Tempo Moderato (42431), Paralock testnet deployment",
+      "chainId": 42431,
+      "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+      "id": "0x906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6",
+      "abiEncoded": "0x76496552a5d892c5ce0b63bf3f569357dd16c2400ac05d3c20bcabb45b6a64ca000000000000000000000000000000000000000000000000000000000000a5bf000000000000000000000000d2f352fa313d23b3536daa3d783263c03ced2673906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6",
+      "digest": "0x17187a2ea337df65cae37e211305270cbb18f1a9d230ec0ff2e9ff134149eca0"
+    },
+    {
+      "description": "Base Sepolia (84532), same contract address: a different digest",
+      "chainId": 84532,
+      "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+      "id": "0x906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6",
+      "abiEncoded": "0x76496552a5d892c5ce0b63bf3f569357dd16c2400ac05d3c20bcabb45b6a64ca0000000000000000000000000000000000000000000000000000000000014a34000000000000000000000000d2f352fa313d23b3536daa3d783263c03ced2673906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6",
+      "digest": "0x4ddb5e4dbcf97ade030b188d1f0a905cf4959099eb0a103772e4874f4070d38a"
+    },
+    {
+      "description": "local anvil (31337) devnet contract",
+      "chainId": 31337,
+      "contract": "0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575",
+      "id": "0x906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6",
+      "abiEncoded": "0x76496552a5d892c5ce0b63bf3f569357dd16c2400ac05d3c20bcabb45b6a64ca0000000000000000000000000000000000000000000000000000000000007a69000000000000000000000000b7278a61aa25c888815afc32ad3cc52ff24fe575906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6",
+      "digest": "0x1812a3078e44569cbd545ba1c3c9c0c105124f3ee216751db211038508f5d094"
+    },
+    {
+      "description": "Ethereum mainnet (1), another id",
+      "chainId": 1,
+      "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+      "id": "0x29f1df5e696a76e61e84d68ea5c21db8adb88bc98a12e6cf54a08423ec3a3a8d",
+      "abiEncoded": "0x76496552a5d892c5ce0b63bf3f569357dd16c2400ac05d3c20bcabb45b6a64ca0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000d2f352fa313d23b3536daa3d783263c03ced267329f1df5e696a76e61e84d68ea5c21db8adb88bc98a12e6cf54a08423ec3a3a8d",
+      "digest": "0x1158f2603e68bd9dbde7fd2a14e277f81537e5c233e5ec673a9332b0b9c84150"
+    }
+  ],
+  "claimSignatures": [
+    {
+      "description": "adaptor-completed signature (what the taker submits)",
+      "source": "adaptor",
+      "r": "0x2b5f983f51f15c2394e2adee5f50b3e744c03b54719899446f0fb603ae8310da",
+      "s": "0x5c5dfd773bdecfa7aeb63727e86ee379cd227f3296d5b4786aa503961e0ccc17",
+      "v": 28,
+      "preSignature": "022b5f983f51f15c2394e2adee5f50b3e744c03b54719899446f0fb603ae8310da036962a26517b297ca8a8ce6db8f11a9e7ec7d5f4470968ed4a7c68ace1e79e750ec255b8107e6d0128f1fccffe6a25e1ae6ed05d53208d99e47278ffb4e6acc8d6a8bd8e4565287e5b1b75e9d1458464cc6948dc7f05d2d1754e0c040a42a22c824df49505c4c65514ca5ca94da1daaa4042311ac2b24ec99477f49dba9b69422",
+      "adaptorSecret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "chainId": 42431,
+      "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+      "id": "0x906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6",
+      "digest": "0x17187a2ea337df65cae37e211305270cbb18f1a9d230ec0ff2e9ff134149eca0",
+      "signer": "0x8a8adb6e64311361f6f980090fb1c011ce2f813c",
+      "signerPublicKey": "037c7ed5385827aa1fdf5e58453b8c8963c5af60c464d699698e9a62fa25df1fb6",
+      "recovered": "0x8a8adb6e64311361f6f980090fb1c011ce2f813c"
+    },
+    {
+      "description": "plain RFC 6979 ECDSA signature by the signer over the same digest",
+      "source": "ecdsa",
+      "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+      "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089",
+      "v": 28,
+      "chainId": 42431,
+      "contract": "0xd2f352Fa313d23b3536dAA3d783263C03CED2673",
+      "id": "0x906d0a5243f83a10e3ac3ef07c6f1a2b9315a121721db26c52aadc01851fd1f6",
+      "digest": "0x17187a2ea337df65cae37e211305270cbb18f1a9d230ec0ff2e9ff134149eca0",
+      "signer": "0x8a8adb6e64311361f6f980090fb1c011ce2f813c",
+      "signerPublicKey": "037c7ed5385827aa1fdf5e58453b8c8963c5af60c464d699698e9a62fa25df1fb6",
+      "recovered": "0x8a8adb6e64311361f6f980090fb1c011ce2f813c"
+    }
+  ],
+  "extractedFromClaim": {
+    "description": "maker: extract(evmPreSignature, (r, s) from Claimed, Y) = y",
+    "adaptorSecret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50"
+  },
+  "normalizeClaimSignature": [
+    {
+      "description": "v = 27 + recovery",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089",
+        "v": 28
+      },
+      "output": {
+        "v": 28,
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089"
+      }
+    },
+    {
+      "description": "v = recovery (0/1)",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089",
+        "v": 1
+      },
+      "output": {
+        "v": 28,
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089"
+      }
+    },
+    {
+      "description": "yParity",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089",
+        "yParity": 1
+      },
+      "output": {
+        "v": 28,
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089"
+      }
+    },
+    {
+      "description": "v as a bigint",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089",
+        "v": "28n"
+      },
+      "output": {
+        "v": 28,
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089"
+      }
+    },
+    {
+      "description": "high s with the same v: normalized to n − s and the parity flipped",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0xf1b992a19f3e8f6df5b3cc0e27ba0c623cbbe6270a3457b66018b324a91270b8",
+        "v": 27
+      },
+      "output": {
+        "v": 28,
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089"
+      }
+    },
+    {
+      "description": "s = 0",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "v": 27
+      },
+      "error": "signature s is out of range"
+    },
+    {
+      "description": "s = n",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+        "v": 27
+      },
+      "error": "signature s is out of range"
+    },
+    {
+      "description": "v = 29",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089",
+        "v": 29
+      },
+      "error": "invalid signature recovery value 29"
+    },
+    {
+      "description": "v = 2",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089",
+        "v": 2
+      },
+      "error": "invalid signature recovery value 2"
+    },
+    {
+      "description": "no v or yParity",
+      "input": {
+        "r": "0x5a48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089"
+      },
+      "error": "signature needs v or yParity"
+    },
+    {
+      "description": "r of 31 bytes",
+      "input": {
+        "r": "0x48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601",
+        "s": "0x0e466d5e60c170920a4c33f1d845f39c7df2f6bfa51448855fb9ab682723d089",
+        "v": 27
+      },
+      "error": "r must be 32 bytes of hex, got 0x48b771ac72badb07723627380e2bf0721af3f8ec44d7f907f68f79a930f601"
+    }
+  ],
+  "evmAddresses": [
+    {
+      "description": "public key G (private key 1)",
+      "publicKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+    },
+    {
+      "description": "uncompressed public key G",
+      "publicKey": "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+      "address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+    },
+    {
+      "description": "fixture evm-signer-key",
+      "publicKey": "037c7ed5385827aa1fdf5e58453b8c8963c5af60c464d699698e9a62fa25df1fb6",
+      "address": "0x8a8adb6e64311361f6f980090fb1c011ce2f813c"
+    }
+  ],
+  "abi": {
+    "ParalockHTLC": [
+      {
+        "kind": "error",
+        "signature": "HashlockUsed(bytes32)",
+        "selector": "0xa6907e9e"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidAmount()",
+        "selector": "0x2c5211c6"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidExpiry()",
+        "selector": "0xd36c8500"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidHashlock()",
+        "selector": "0x2e0755ab"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidPreimage()",
+        "selector": "0x1968a902"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidRecipient()",
+        "selector": "0x9c8d2cd2"
+      },
+      {
+        "kind": "error",
+        "signature": "NotSender()",
+        "selector": "0xb2c3aa6b"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapExpired(uint64)",
+        "selector": "0x57ad7ab5"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapMismatch(bytes32)",
+        "selector": "0x08ef4c9f"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapNotExpired(uint64)",
+        "selector": "0x169193ed"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapNotFound(bytes32)",
+        "selector": "0x93bb9d4e"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapSettled(bytes32)",
+        "selector": "0x577a31cf"
+      },
+      {
+        "kind": "error",
+        "signature": "TokenTransferFailed(address)",
+        "selector": "0x2b596cb7"
+      },
+      {
+        "kind": "error",
+        "signature": "UnsupportedToken(address)",
+        "selector": "0xbf16aab6"
+      },
+      {
+        "kind": "event",
+        "signature": "Claimed(bytes32,bytes32)",
+        "selector": "0x38d6042dbdae8e73a7f6afbabd3fbe0873f9f5ed3cd71294591c3908c2e65fee"
+      },
+      {
+        "kind": "event",
+        "signature": "Locked(bytes32,address,address,address,uint256,uint64)",
+        "selector": "0x3c82f98320c6ede47fa87a3b589eac360326f7093b6c6e9701748cee34209171"
+      },
+      {
+        "kind": "event",
+        "signature": "Refunded(bytes32)",
+        "selector": "0xfe509803c09416b28ff3d8f690c8b0c61462a892c46d5430c8fb20abe472daf0"
+      },
+      {
+        "kind": "function",
+        "signature": "claim((bytes32,address,address,address,uint256,uint64),bytes32)",
+        "selector": "0xed5c9a1a"
+      },
+      {
+        "kind": "function",
+        "signature": "commitment((bytes32,address,address,address,uint256,uint64))",
+        "selector": "0xa117217a"
+      },
+      {
+        "kind": "function",
+        "signature": "isActive(bytes32)",
+        "selector": "0x5c36901c"
+      },
+      {
+        "kind": "function",
+        "signature": "lock((bytes32,address,address,address,uint256,uint64))",
+        "selector": "0x848ba268"
+      },
+      {
+        "kind": "function",
+        "signature": "refund((bytes32,address,address,address,uint256,uint64))",
+        "selector": "0x9790166d"
+      },
+      {
+        "kind": "function",
+        "signature": "SETTLED()",
+        "selector": "0x80bdaf03"
+      },
+      {
+        "kind": "function",
+        "signature": "stateOf(bytes32)",
+        "selector": "0x64482ac4"
+      },
+      {
+        "kind": "function",
+        "signature": "statusOf(bytes32)",
+        "selector": "0xc7df14e2"
+      }
+    ],
+    "ParalockAdaptorEscrow": [
+      {
+        "kind": "error",
+        "signature": "InvalidAmount()",
+        "selector": "0x2c5211c6"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidExpiry()",
+        "selector": "0xd36c8500"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidRecipient()",
+        "selector": "0x9c8d2cd2"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidSignature()",
+        "selector": "0x8baa579f"
+      },
+      {
+        "kind": "error",
+        "signature": "InvalidSigner()",
+        "selector": "0x815e1d64"
+      },
+      {
+        "kind": "error",
+        "signature": "MalleableSignature()",
+        "selector": "0xf0ad0d09"
+      },
+      {
+        "kind": "error",
+        "signature": "NotSender()",
+        "selector": "0xb2c3aa6b"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapExists(bytes32)",
+        "selector": "0xafa955b9"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapExpired(uint64)",
+        "selector": "0x57ad7ab5"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapNotExpired(uint64)",
+        "selector": "0x169193ed"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapNotFound(bytes32)",
+        "selector": "0x93bb9d4e"
+      },
+      {
+        "kind": "error",
+        "signature": "SwapSettled(bytes32)",
+        "selector": "0x577a31cf"
+      },
+      {
+        "kind": "error",
+        "signature": "TokenTransferFailed(address)",
+        "selector": "0x2b596cb7"
+      },
+      {
+        "kind": "error",
+        "signature": "UnsupportedToken(address)",
+        "selector": "0xbf16aab6"
+      },
+      {
+        "kind": "event",
+        "signature": "Claimed(bytes32,uint8,bytes32,bytes32)",
+        "selector": "0x6fe88bc7558fbf0d7debb34b80a25e5cb98d5828138fd508b759157172ee7a65"
+      },
+      {
+        "kind": "event",
+        "signature": "Locked(bytes32,address,address,address,address,uint256,uint64,bytes32)",
+        "selector": "0x8781f586a430d1c64efe3c62f79f9c8c25ab9355279cdc4f97b298f6a73290ff"
+      },
+      {
+        "kind": "event",
+        "signature": "Refunded(bytes32)",
+        "selector": "0xfe509803c09416b28ff3d8f690c8b0c61462a892c46d5430c8fb20abe472daf0"
+      },
+      {
+        "kind": "function",
+        "signature": "CLAIM_TYPEHASH()",
+        "selector": "0x6b0509b1"
+      },
+      {
+        "kind": "function",
+        "signature": "claim((address,address,address,address,uint256,uint64,bytes32),uint8,bytes32,bytes32)",
+        "selector": "0xe8497f39"
+      },
+      {
+        "kind": "function",
+        "signature": "claimDigest(bytes32)",
+        "selector": "0x72bd2385"
+      },
+      {
+        "kind": "function",
+        "signature": "idOf((address,address,address,address,uint256,uint64,bytes32))",
+        "selector": "0x2e4db096"
+      },
+      {
+        "kind": "function",
+        "signature": "isActive(bytes32)",
+        "selector": "0x5c36901c"
+      },
+      {
+        "kind": "function",
+        "signature": "lock((address,address,address,address,uint256,uint64,bytes32))",
+        "selector": "0xf5e1abf8"
+      },
+      {
+        "kind": "function",
+        "signature": "refund((address,address,address,address,uint256,uint64,bytes32))",
+        "selector": "0xf7e8f04b"
+      },
+      {
+        "kind": "function",
+        "signature": "statusOf(bytes32)",
+        "selector": "0xc7df14e2"
+      }
+    ]
+  }
+}

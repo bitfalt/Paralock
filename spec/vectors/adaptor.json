@@ -1,0 +1,458 @@
+{
+  "description": "ECDSA adaptor signatures on secp256k1 with Chaum–Pedersen DLEQ proofs (@paralock/adaptor). Pre-signatures use fresh randomness in production; each vector records the two 32-byte random draws (nonceRandomness[0] for k, [1] for the DLEQ nonce t) that produced it, so an implementation with an injectable RNG can reproduce it exactly. Everything after the pre-signature (preVerify, adapt, extract) is deterministic.",
+  "constants": {
+    "n": "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+    "nHalf": "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0",
+    "dleqTag": {
+      "utf8": "paralock/adaptor/dleq/v1",
+      "hex": "706172616c6f636b2f61646170746f722f646c65712f7631"
+    },
+    "nonceTag": {
+      "utf8": "paralock/adaptor/nonce/v1",
+      "hex": "706172616c6f636b2f61646170746f722f6e6f6e63652f7631"
+    },
+    "dleqNonceTag": {
+      "utf8": "paralock/adaptor/dleq-nonce/v1",
+      "hex": "706172616c6f636b2f61646170746f722f646c65712d6e6f6e63652f7631"
+    },
+    "preSignatureBytes": 162,
+    "layout": "R(33) ‖ R'(33) ‖ s'(32) ‖ c(32) ‖ z(32), compressed points, big-endian scalars"
+  },
+  "cases": [
+    {
+      "description": "adapt keeps s (s'·y⁻¹ ≤ n/2)",
+      "privateKey": "e48410c7d7202389d08195994b97c41ef66d708768e332b2f04fd73687fd8a3f",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "digestScalar": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorSecret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "nonceRandomness": [
+        "ea6ed0f36cff3355856a9162ea8835bffc939aa0941f326f56607bd34ec3084e",
+        "5f5df1adecf167d72d33dca3bb79bc2cd91aa62081ce51d56799ecefe86dd62a"
+      ],
+      "derived": {
+        "k": "5aa4cb03fd9d37c96855174236cd7944c362a0af80ec5bc55134e018a8367ef2",
+        "t": "2bc736c1d7bff29329ea8ec896d017c7fc4d106bfa80bb57823598b17a73862a"
+      },
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "decoded": {
+        "R": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df6",
+        "Rp": "02641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc5697",
+        "s": "31cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445",
+        "c": "822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844",
+        "z": "407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53"
+      },
+      "dleq": {
+        "T1": "0364c092227afc0e7335da39196d5f6e668c7362324b9bdfedca7157246172e4da",
+        "T2": "0262f8e517c1f90c0a1d1de7ad0bbb1e94c203d52818a046208833d55bcaad66c5",
+        "challengePreimage": "706172616c6f636b2f61646170746f722f646c65712f76310279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad02641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc5697039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df60364c092227afc0e7335da39196d5f6e668c7362324b9bdfedca7157246172e4da0262f8e517c1f90c0a1d1de7ad0bbb1e94c203d52818a046208833d55bcaad66c5",
+        "challenge": "822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844"
+      },
+      "preVerify": true,
+      "adapted": {
+        "r": "9e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df6",
+        "s": "1b5ea1775a7bdf5a3511a84554bd94c5d1f8196e4a7bffde35d6275c7d70528d",
+        "sBeforeNormalization": "1b5ea1775a7bdf5a3511a84554bd94c5d1f8196e4a7bffde35d6275c7d70528d",
+        "lowSNormalized": false,
+        "compact": "9e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df61b5ea1775a7bdf5a3511a84554bd94c5d1f8196e4a7bffde35d6275c7d70528d",
+        "der": "30450221009e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602201b5ea1775a7bdf5a3511a84554bd94c5d1f8196e4a7bffde35d6275c7d70528d",
+        "recoveryId": 1,
+        "ecdsaVerify": true
+      },
+      "extracted": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50"
+    },
+    {
+      "description": "adapt negates s (s'·y⁻¹ > n/2): extract must try both ±s'·s⁻¹",
+      "privateKey": "e48410c7d7202389d08195994b97c41ef66d708768e332b2f04fd73687fd8a3f",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "digestScalar": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorSecret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "nonceRandomness": [
+        "a4264377b9dec45c42e5be0c64fd2c236b1a039495de80c049a5c65b1a1861c4",
+        "9a63aab80417a31155f2e3deb952f7586bad1b50bdf988b15cef942cebc96bc4"
+      ],
+      "derived": {
+        "k": "39a8cf297ce9f192bf578c904b4865243fb923fbe49ff7aba4f4cc3966497c3c",
+        "t": "12dd30d59ece5d27db022492a0d946d775a6ab59d9f08a55a9e9890d6d6216db"
+      },
+      "preSignature": "0387da620813d74b321de84650c9d33520429ab8e9bb538d81072c06f05efb1d0a0309c4c70cd0219899cbd17be50c56adae18fc3f53ea6287c78d50c24756ef82e3f44525a2f8e488d6683dfa2c4dc29c316c672081e3e2c1c007d44f19ff3748294d73bd7f69979021f4fb190ca58552fdfaf67c86aa6c692202aceead9a9befac4c10267b002f79e108353baf4eb58c85d8de30b81b9c3f8bf2f28fa08fd3f487",
+      "decoded": {
+        "R": "0387da620813d74b321de84650c9d33520429ab8e9bb538d81072c06f05efb1d0a",
+        "Rp": "0309c4c70cd0219899cbd17be50c56adae18fc3f53ea6287c78d50c24756ef82e3",
+        "s": "f44525a2f8e488d6683dfa2c4dc29c316c672081e3e2c1c007d44f19ff374829",
+        "c": "4d73bd7f69979021f4fb190ca58552fdfaf67c86aa6c692202aceead9a9befac",
+        "z": "4c10267b002f79e108353baf4eb58c85d8de30b81b9c3f8bf2f28fa08fd3f487"
+      },
+      "dleq": {
+        "T1": "030ce4c18ec93bffd07769db5a3b01fc7f200c2698e70cd7a376017bcb30d2b36b",
+        "T2": "02f168c1131f00c2f12e98c58a55476a6ddd058955ddd9bbf270c18048842a388e",
+        "challengePreimage": "706172616c6f636b2f61646170746f722f646c65712f76310279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad0309c4c70cd0219899cbd17be50c56adae18fc3f53ea6287c78d50c24756ef82e30387da620813d74b321de84650c9d33520429ab8e9bb538d81072c06f05efb1d0a030ce4c18ec93bffd07769db5a3b01fc7f200c2698e70cd7a376017bcb30d2b36b02f168c1131f00c2f12e98c58a55476a6ddd058955ddd9bbf270c18048842a388e",
+        "challenge": "4d73bd7f69979021f4fb190ca58552fdfaf67c86aa6c692202aceead9a9befac"
+      },
+      "preVerify": true,
+      "adapted": {
+        "r": "87da620813d74b321de84650c9d33520429ab8e9bb538d81072c06f05efb1d0a",
+        "s": "5a0ae15b2dfd1b622f54241c6c9db83952ec1a8101f888fe51d0af0549c69a33",
+        "sBeforeNormalization": "a5f51ea4d202e49dd0abdbe3936247c567c2c265ad50173d6e01af87866fa70e",
+        "lowSNormalized": true,
+        "compact": "87da620813d74b321de84650c9d33520429ab8e9bb538d81072c06f05efb1d0a5a0ae15b2dfd1b622f54241c6c9db83952ec1a8101f888fe51d0af0549c69a33",
+        "der": "304502210087da620813d74b321de84650c9d33520429ab8e9bb538d81072c06f05efb1d0a02205a0ae15b2dfd1b622f54241c6c9db83952ec1a8101f888fe51d0af0549c69a33",
+        "recoveryId": 0,
+        "ecdsaVerify": true
+      },
+      "extracted": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50"
+    },
+    {
+      "description": "digest 0xff…ff ≥ n: reduced mod n before use (and in the nonce context)",
+      "privateKey": "e48410c7d7202389d08195994b97c41ef66d708768e332b2f04fd73687fd8a3f",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "digestScalar": "000000000000000000000000000000014551231950b75fc4402da1732fc9bebe",
+      "adaptorSecret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "nonceRandomness": [
+        "6290c3080f85a2c110768c824fae9baaa6d47b64108e12aaaf1879d8b2637e7d",
+        "8678213290e3017ee756658d5bd46ab67fcb54e0e1f23f18b90314f2c277f81e"
+      ],
+      "derived": {
+        "k": "2691040e0a75e8240ff94bc3e4485f0dc8250a4c1b37bcb8ded724b920a86aaa",
+        "t": "11baf7fd6f2617c748fb5e39762f5b97205bd44ae1609f275aa462004cbc87d0"
+      },
+      "preSignature": "022ecc719b7a65b831bf7137f88d5a17cd28f3e860637bba9c0f126f9a74807d77038d6049df59803766e5d4bd47d73eaea01dd48c817504f08bab1bfd246d272c4660ecd02420418da4320c41743d2368829be90a0b4f8c685d75b9882ece9e0cd006609470b0e60472c1690409a166ec6c70fd3b38f3f193a7b1b38b9c39b8c5644ea9ceafb3804edf7c4d62ba538711dbf93755f990b71cde06abb0b92e70f9ab",
+      "decoded": {
+        "R": "022ecc719b7a65b831bf7137f88d5a17cd28f3e860637bba9c0f126f9a74807d77",
+        "Rp": "038d6049df59803766e5d4bd47d73eaea01dd48c817504f08bab1bfd246d272c46",
+        "s": "60ecd02420418da4320c41743d2368829be90a0b4f8c685d75b9882ece9e0cd0",
+        "c": "06609470b0e60472c1690409a166ec6c70fd3b38f3f193a7b1b38b9c39b8c564",
+        "z": "4ea9ceafb3804edf7c4d62ba538711dbf93755f990b71cde06abb0b92e70f9ab"
+      },
+      "dleq": {
+        "T1": "02e46640cac359e2a77cc8b714805bf1f77665b2edcf41e9ef5305c5e25578c84a",
+        "T2": "02d4691f65970adf05f2a9e7d582921616e85eb40b0e5a9dd0cdc5d73d03560f95",
+        "challengePreimage": "706172616c6f636b2f61646170746f722f646c65712f76310279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad038d6049df59803766e5d4bd47d73eaea01dd48c817504f08bab1bfd246d272c46022ecc719b7a65b831bf7137f88d5a17cd28f3e860637bba9c0f126f9a74807d7702e46640cac359e2a77cc8b714805bf1f77665b2edcf41e9ef5305c5e25578c84a02d4691f65970adf05f2a9e7d582921616e85eb40b0e5a9dd0cdc5d73d03560f95",
+        "challenge": "06609470b0e60472c1690409a166ec6c70fd3b38f3f193a7b1b38b9c39b8c564"
+      },
+      "preVerify": true,
+      "adapted": {
+        "r": "2ecc719b7a65b831bf7137f88d5a17cd28f3e860637bba9c0f126f9a74807d77",
+        "s": "28c5dbeebb795293f844110bb920083ffe72b32b5dfb7ee3544fad4dd7685678",
+        "sBeforeNormalization": "d73a24114486ad6c07bbeef446dff7bebc3c29bb514d21586b82b13ef8cdeac9",
+        "lowSNormalized": true,
+        "compact": "2ecc719b7a65b831bf7137f88d5a17cd28f3e860637bba9c0f126f9a74807d7728c5dbeebb795293f844110bb920083ffe72b32b5dfb7ee3544fad4dd7685678",
+        "der": "304402202ecc719b7a65b831bf7137f88d5a17cd28f3e860637bba9c0f126f9a74807d77022028c5dbeebb795293f844110bb920083ffe72b32b5dfb7ee3544fad4dd7685678",
+        "recoveryId": 1,
+        "ecdsaVerify": true
+      },
+      "extracted": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50"
+    },
+    {
+      "description": "adaptor secret y = 1 (Y = G): R = R'",
+      "privateKey": "e48410c7d7202389d08195994b97c41ef66d708768e332b2f04fd73687fd8a3f",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "digestScalar": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorSecret": "0000000000000000000000000000000000000000000000000000000000000001",
+      "adaptorPoint": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "nonceRandomness": [
+        "6ecabcf85a0a6329c5f90fb3f93df87a0757a4df19bb9099a24177884c4a14da",
+        "dd01cfc3d271a25fff765e28021ca47d890ae465cbe4ac50ad612fc94e846bc1"
+      ],
+      "derived": {
+        "k": "dd69ab91929202640352fc1601fadcf6f2d17e999d9b3314a2ee9b222e2c7120",
+        "t": "8f9bddd68c011668e23d39878a55931d5930d7f77504a488811aebac36d6c010"
+      },
+      "preSignature": "03800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b103800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b168edd5531c21de65e18e4c3e1af25071e7537e4aa5923ac7f6ee8bf18922bb19274e75abc09d07089e5773aa57fcbf6fc5dc36cf481c4b07c96417b342ee8274f9a1e4d2501824ff513e243df92a9fbaf7dee6b483389f7a014750d9a042c44a",
+      "decoded": {
+        "R": "03800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b1",
+        "Rp": "03800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b1",
+        "s": "68edd5531c21de65e18e4c3e1af25071e7537e4aa5923ac7f6ee8bf18922bb19",
+        "c": "274e75abc09d07089e5773aa57fcbf6fc5dc36cf481c4b07c96417b342ee8274",
+        "z": "f9a1e4d2501824ff513e243df92a9fbaf7dee6b483389f7a014750d9a042c44a"
+      },
+      "dleq": {
+        "T1": "039d47b425be5921c74f0d056184e5ae2b77f50856a1c893bdbcc61f74618785dd",
+        "T2": "039d47b425be5921c74f0d056184e5ae2b77f50856a1c893bdbcc61f74618785dd",
+        "challengePreimage": "706172616c6f636b2f61646170746f722f646c65712f76310279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f8179803800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b103800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b1039d47b425be5921c74f0d056184e5ae2b77f50856a1c893bdbcc61f74618785dd039d47b425be5921c74f0d056184e5ae2b77f50856a1c893bdbcc61f74618785dd",
+        "challenge": "274e75abc09d07089e5773aa57fcbf6fc5dc36cf481c4b07c96417b342ee8274"
+      },
+      "preVerify": true,
+      "adapted": {
+        "r": "800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b1",
+        "s": "68edd5531c21de65e18e4c3e1af25071e7537e4aa5923ac7f6ee8bf18922bb19",
+        "sBeforeNormalization": "68edd5531c21de65e18e4c3e1af25071e7537e4aa5923ac7f6ee8bf18922bb19",
+        "lowSNormalized": false,
+        "compact": "800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b168edd5531c21de65e18e4c3e1af25071e7537e4aa5923ac7f6ee8bf18922bb19",
+        "der": "3045022100800a21f7910b179f00ee1c8dd1df679850f29ba75810c3b3b446a27d27dd90b1022068edd5531c21de65e18e4c3e1af25071e7537e4aa5923ac7f6ee8bf18922bb19",
+        "recoveryId": 1,
+        "ecdsaVerify": true
+      },
+      "extracted": "0000000000000000000000000000000000000000000000000000000000000001"
+    },
+    {
+      "description": "taker pre-signature on the maker's 2-of-2 claim, encrypted to Y (zcash-multisig.json)",
+      "privateKey": "3a47b643341dce5e76d0de13e3e6ccde1a071bddfe872d350fe6aa6e1969c445",
+      "publicKey": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+      "digest": "b7a2ed1c2bf804e47f359debcd7c258fb3be6412bd3478447169ccf083a009ff",
+      "digestScalar": "b7a2ed1c2bf804e47f359debcd7c258fb3be6412bd3478447169ccf083a009ff",
+      "adaptorSecret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "nonceRandomness": [
+        "0b35d577a70fb464c663be65085d9a05d42128604f5cfd21d6875ee974181b1f",
+        "e9eb66bb9d40d3f8e2e6c2693cc76bdd94358fa2ccf9d83d5819e89dbe1c149a"
+      ],
+      "derived": {
+        "k": "4e873384c64a76e3b2efa273dd70a2d0cca77d5cf145b3239209012c4b10d6a6",
+        "t": "fe64353613923040f64f0e95e3a99ebdfcc68367da3d6539de0196e11a934ad3"
+      },
+      "preSignature": "0329aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd0388d873edaf6d4a0776694d90c704da49ccf0007fac086f00b4214cb75a3a5a901997f54c673fb4e13f1f00db97d7d518358b994c8d2e03aaab4221e3f4a01734152793510865d02ae8578b4e2e25df31de9c52863e7cfd35e46f868850d2b961956577474c8662181134593d5dde1ea8915ded331a9aca2abab68852ad4d1e0f",
+      "decoded": {
+        "R": "0329aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd",
+        "Rp": "0388d873edaf6d4a0776694d90c704da49ccf0007fac086f00b4214cb75a3a5a90",
+        "s": "1997f54c673fb4e13f1f00db97d7d518358b994c8d2e03aaab4221e3f4a01734",
+        "c": "152793510865d02ae8578b4e2e25df31de9c52863e7cfd35e46f868850d2b961",
+        "z": "956577474c8662181134593d5dde1ea8915ded331a9aca2abab68852ad4d1e0f"
+      },
+      "dleq": {
+        "T1": "029d70b389be3adfeeaf0809ab49f971645e6347c93bfb90fcab615ce0630bd176",
+        "T2": "03cde5ddae98a370635309816f8bcc74b7212fbe440f231795f0f86597f6a92f78",
+        "challengePreimage": "706172616c6f636b2f61646170746f722f646c65712f76310279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad0388d873edaf6d4a0776694d90c704da49ccf0007fac086f00b4214cb75a3a5a900329aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd029d70b389be3adfeeaf0809ab49f971645e6347c93bfb90fcab615ce0630bd17603cde5ddae98a370635309816f8bcc74b7212fbe440f231795f0f86597f6a92f78",
+        "challenge": "152793510865d02ae8578b4e2e25df31de9c52863e7cfd35e46f868850d2b961"
+      },
+      "preVerify": true,
+      "adapted": {
+        "r": "29aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd",
+        "s": "3de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f",
+        "sBeforeNormalization": "c2183b7c352a5e2eb2085289468a421ebdd2ff66cf42efc1ade2f1cc9307d1e2",
+        "lowSNormalized": true,
+        "compact": "29aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd3de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f",
+        "der": "3044022029aff05c1e3b85d78d2c85e935e823c02fda80951d2828ee6a586805ae1369dd02203de7c483cad5a1d14df7ad76b975bddffcdbdd7fe005b07a11ef6cc03d2e6f5f",
+        "recoveryId": 0,
+        "ecdsaVerify": true
+      },
+      "extracted": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50"
+    },
+    {
+      "description": "maker's (one-time signer's) pre-signature on the escrow claim digest, encrypted to Y (evm.json)",
+      "privateKey": "6d2f4d288168a44295397167747a2dd09d2ae4ebe68de1736e73cdb93fa1a08f",
+      "publicKey": "037c7ed5385827aa1fdf5e58453b8c8963c5af60c464d699698e9a62fa25df1fb6",
+      "digest": "17187a2ea337df65cae37e211305270cbb18f1a9d230ec0ff2e9ff134149eca0",
+      "digestScalar": "17187a2ea337df65cae37e211305270cbb18f1a9d230ec0ff2e9ff134149eca0",
+      "adaptorSecret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "nonceRandomness": [
+        "1ea57395187fd403406f1c9e701dbf2e1cd0e026e54f6f9b2ad06dcc4b0f86ff",
+        "ee5107768350b255a0ed82c801311e8aa51a72197a3ba884ad741fd0d5b7e5dc"
+      ],
+      "derived": {
+        "k": "d6bd53107b157cc9a18fa9c94ccd63acb0a4d64beec7fbe7ca188be72a04bfc1",
+        "t": "aa110f4db99af3bcddfc5bdaf8e5fb840f902e37689e19b3559f1251a1ffc0ef"
+      },
+      "preSignature": "022b5f983f51f15c2394e2adee5f50b3e744c03b54719899446f0fb603ae8310da036962a26517b297ca8a8ce6db8f11a9e7ec7d5f4470968ed4a7c68ace1e79e750ec255b8107e6d0128f1fccffe6a25e1ae6ed05d53208d99e47278ffb4e6acc8d6a8bd8e4565287e5b1b75e9d1458464cc6948dc7f05d2d1754e0c040a42a22c824df49505c4c65514ca5ca94da1daaa4042311ac2b24ec99477f49dba9b69422",
+      "decoded": {
+        "R": "022b5f983f51f15c2394e2adee5f50b3e744c03b54719899446f0fb603ae8310da",
+        "Rp": "036962a26517b297ca8a8ce6db8f11a9e7ec7d5f4470968ed4a7c68ace1e79e750",
+        "s": "ec255b8107e6d0128f1fccffe6a25e1ae6ed05d53208d99e47278ffb4e6acc8d",
+        "c": "6a8bd8e4565287e5b1b75e9d1458464cc6948dc7f05d2d1754e0c040a42a22c8",
+        "z": "24df49505c4c65514ca5ca94da1daaa4042311ac2b24ec99477f49dba9b69422"
+      },
+      "dleq": {
+        "T1": "026633e85efc622733fe422b494322bef08a7a4a4583a6331483f411f73f96c1ee",
+        "T2": "02230a8a13569fd1952fc2a8a4baf339164763c3f8f5d23dd1bbe355f59193f4ed",
+        "challengePreimage": "706172616c6f636b2f61646170746f722f646c65712f76310279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad036962a26517b297ca8a8ce6db8f11a9e7ec7d5f4470968ed4a7c68ace1e79e750022b5f983f51f15c2394e2adee5f50b3e744c03b54719899446f0fb603ae8310da026633e85efc622733fe422b494322bef08a7a4a4583a6331483f411f73f96c1ee02230a8a13569fd1952fc2a8a4baf339164763c3f8f5d23dd1bbe355f59193f4ed",
+        "challenge": "6a8bd8e4565287e5b1b75e9d1458464cc6948dc7f05d2d1754e0c040a42a22c8"
+      },
+      "preVerify": true,
+      "adapted": {
+        "r": "2b5f983f51f15c2394e2adee5f50b3e744c03b54719899446f0fb603ae8310da",
+        "s": "5c5dfd773bdecfa7aeb63727e86ee379cd227f3296d5b4786aa503961e0ccc17",
+        "sBeforeNormalization": "a3a20288c42130585149c8d817911c84ed8c5db41872ebc3552d5af6b229752a",
+        "lowSNormalized": true,
+        "compact": "2b5f983f51f15c2394e2adee5f50b3e744c03b54719899446f0fb603ae8310da5c5dfd773bdecfa7aeb63727e86ee379cd227f3296d5b4786aa503961e0ccc17",
+        "der": "304402202b5f983f51f15c2394e2adee5f50b3e744c03b54719899446f0fb603ae8310da02205c5dfd773bdecfa7aeb63727e86ee379cd227f3296d5b4786aa503961e0ccc17",
+        "recoveryId": 1,
+        "ecdsaVerify": true
+      },
+      "extracted": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50"
+    }
+  ],
+  "invalid": [
+    {
+      "description": "s + 1",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17446822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "s = 0",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc56970000000000000000000000000000000000000000000000000000000000000000822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "s = n",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc5697fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "c + 1",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5845407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "c = n (out of range)",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "z + 1",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d54",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "z = n (out of range)",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "z = 0",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c58440000000000000000000000000000000000000000000000000000000000000000",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "R and R' swapped",
+      "preSignature": "02641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc5697039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df631cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "R with the other y parity (prefix flipped)",
+      "preSignature": "029e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "R not on the curve (x = 0)",
+      "preSignature": "02000000000000000000000000000000000000000000000000000000000000000002641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "R' with prefix 04",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df604641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "wrong adaptor point (2·Y)",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "03c5b1264b53b9cd05badfa74bace503ad4c6c243a03ac94946ba662638d0e963d",
+      "preVerify": false
+    },
+    {
+      "description": "wrong public key",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "02653b44d25fc6e74f42700e46ce336459830366d46e4482e1143c2335ab23c0e2",
+      "digest": "5ca64c48535f338eaa33e9bed5b7a2900240c26f2bee7ccec68a8297a9408b57",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    },
+    {
+      "description": "wrong digest",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "publicKey": "0355a21d77da650921c8470b445f7db9fbe440ab1d007fc6843dc9d651f497a831",
+      "digest": "a0cc8349c039912a27a1b605e61e76c9299a82e0960f059be0c9a5af438cf173",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "preVerify": false
+    }
+  ],
+  "decodeErrors": [
+    {
+      "description": "161 bytes",
+      "preSignature": "9e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "error": "pre-signature must be 162 bytes"
+    },
+    {
+      "description": "163 bytes",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d5300",
+      "error": "pre-signature must be 162 bytes"
+    },
+    {
+      "description": "not hex",
+      "preSignature": "zz9e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "error": "Input string must contain hex characters in even length"
+    }
+  ],
+  "adaptErrors": [
+    {
+      "description": "adaptor secret 0",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "adaptorSecret": "0000000000000000000000000000000000000000000000000000000000000000",
+      "error": "adaptor secret is out of range"
+    },
+    {
+      "description": "adaptor secret n",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "adaptorSecret": "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "error": "adaptor secret is out of range"
+    },
+    {
+      "description": "pre-signature s = 0",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc56970000000000000000000000000000000000000000000000000000000000000000822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "adaptorSecret": "8dd3f846417d79f1332e1222af6363ff711215e03adbd9d199bc6d98d8d10a50",
+      "error": "pre-signature s is out of range"
+    }
+  ],
+  "extractErrors": [
+    {
+      "description": "signature r does not match R.x",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "r": "9e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df7",
+      "s": "1b5ea1775a7bdf5a3511a84554bd94c5d1f8196e4a7bffde35d6275c7d70528d",
+      "adaptorPoint": "025e75694d4fa5f1e70cf9835652875b50ee5ef3de9ddaf49bdbf06bb1e909c5ad",
+      "error": "signature does not match the pre-signature"
+    },
+    {
+      "description": "wrong adaptor point",
+      "preSignature": "039e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df602641e0314a1a4b276ca05f11b492d4ee3b6aea195224c6a625559441511cc569731cc13b04e08bce118302aa3dc8dd8086b39e9de28fbac15630d2737b5e17445822691c3bd1bc96c41f4d937543c6cdffc8d76665b938d42c970d1fbb80c5844407cae65620f5b6de197c9e2562ed95262deb3b19ace57d757ebc0459abf2d53",
+      "r": "9e753f880a09d99cb8e2ebdff19cb1dfb5434d89e5be0a540c488d70f1d75df6",
+      "s": "1b5ea1775a7bdf5a3511a84554bd94c5d1f8196e4a7bffde35d6275c7d70528d",
+      "adaptorPoint": "03c5b1264b53b9cd05badfa74bace503ad4c6c243a03ac94946ba662638d0e963d",
+      "error": "could not extract the adaptor secret"
+    }
+  ]
+}
