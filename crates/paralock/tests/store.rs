@@ -107,3 +107,67 @@ async fn concurrent_writes_to_one_key_leave_a_whole_record() {
 async fn memory_store_is_not_durable() {
     assert!(!MemoryStore::new().durable());
 }
+
+#[tokio::test]
+async fn quarantine_moves_a_record_aside_and_lists_it_under_its_prefix() {
+    let dir = temp_dir("quarantine");
+    let store = FileStore::open(&dir).unwrap();
+    store.put("maker/swap/0xab", "{broken").await.unwrap();
+    store.put("maker/swap/0xcd", "{}").await.unwrap();
+    store.quarantine("maker/swap/0xab").await.unwrap();
+    store.quarantine("maker/swap/0xnone").await.unwrap(); // absent: a no-op
+    let keys: Vec<String> = store.list("maker/").await.unwrap().into_iter().map(|(k, _)| k).collect();
+    assert_eq!(keys, ["maker/swap/0xcd"]);
+    assert!(dir.join("quarantine").join("maker~swap~0xab.json").exists());
+    let quarantined = store.list("quarantine/maker/swap/").await.unwrap();
+    assert_eq!(quarantined.len(), 1);
+    assert_eq!(quarantined[0].0, "quarantine/maker/swap/0xab");
+    assert_eq!(quarantined[0].1.as_str(), "{broken");
+    assert_eq!(store.get("quarantine/maker/swap/0xab").await.unwrap().unwrap().as_str(), "{broken");
+    // Quarantining the same key again keeps both versions.
+    store.put("maker/swap/0xab", "{again").await.unwrap();
+    store.quarantine("maker/swap/0xab").await.unwrap();
+    assert_eq!(std::fs::read_dir(dir.join("quarantine")).unwrap().count(), 2);
+    drop(store);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[tokio::test]
+async fn memory_store_quarantines_under_the_prefix() {
+    let store = MemoryStore::new();
+    store.put("taker/0x1", "{").await.unwrap();
+    store.quarantine("taker/0x1").await.unwrap();
+    assert!(store.get("taker/0x1").await.unwrap().is_none());
+    assert_eq!(store.get("quarantine/taker/0x1").await.unwrap().unwrap().as_str(), "{");
+}
+
+#[tokio::test]
+async fn opening_sweeps_temporary_files_left_by_a_crash() {
+    let dir = temp_dir("sweep");
+    drop(FileStore::open(&dir).unwrap());
+    std::fs::write(dir.join(".taker~x.json.0a1b2c3d4e5f.tmp"), "torn").unwrap();
+    std::fs::write(dir.join("taker~y.json"), "{}").unwrap();
+    let store = FileStore::open(&dir).unwrap();
+    let mut files: Vec<String> =
+        std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    files.sort();
+    assert_eq!(files, [".lock", "taker~y.json"]);
+    drop(store);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn open_private_restricts_a_directory_others_can_read() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = temp_dir("private");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // `open` only warns.
+    drop(FileStore::open(&dir).unwrap());
+    assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o755);
+    // `open_private` (the builders on mainnet) restricts it.
+    drop(FileStore::open_private(&dir).unwrap());
+    assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

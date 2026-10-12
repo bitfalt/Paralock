@@ -1,6 +1,10 @@
 //! A [`ZcashNode`] over a lightwalletd-compatible gRPC server (lightwalletd or Zaino), so swaps don't need a full
 //! node. The protos are vendored from `packages/lightwalletd/proto` (see `proto/`).
 //!
+//! **Trust:** lightwalletd and Zaino serve what their backing node tells them and do no proof-of-work verification
+//! of their own; a server run by someone else can report transactions and confirmations that don't exist. The maker
+//! locks its stablecoins on what its backend reports, so run your own (in front of your own full node) for real funds.
+//!
 //! Differences from a full node ([`crate::ZcashRpc`]):
 //! - No `getTxOut`: the engines check confirmed UTXOs instead, so a spend sitting in the mempool isn't seen until it
 //!   is mined.
@@ -120,15 +124,21 @@ fn retryable(code: Code) -> bool {
     matches!(code, Code::Unavailable | Code::DeadlineExceeded | Code::ResourceExhausted)
 }
 
+/// A gRPC failure as a [`NodeError`]. Only `NotFound` reads as "the server doesn't have it" ([`NodeError::Rpc`], what
+/// the engines may act on), and a refused broadcast is the node's answer too; any other status (permission, internal
+/// errors, …) is a [`NodeError::Transport`]: unknown, retried later, never read as "not found" or "not mined".
 fn status_error(method: &str, status: &Status) -> NodeError {
-    if retryable(status.code()) {
-        transport(method, format!("{:?}: {}", status.code(), status.message()))
-    } else {
+    let code = status.code();
+    if retryable(code) {
+        transport(method, format!("{code:?}: {}", status.message()))
+    } else if code == Code::NotFound || method == "SendTransaction" {
         NodeError::Rpc {
             method: method.to_owned(),
-            code: i64::from(i32::from(status.code())),
+            code: i64::from(i32::from(code)),
             message: status.message().to_owned(),
         }
+    } else {
+        transport(method, format!("{code:?}: {}", status.message()))
     }
 }
 
@@ -178,7 +188,16 @@ impl Lightwalletd {
         self.tls
     }
 
-    async fn retrying<T, F, Fut>(&self, method: &str, mut call: F) -> Result<T, NodeError>
+    async fn retrying<T, F, Fut>(&self, method: &str, call: F) -> Result<T, NodeError>
+    where
+        F: FnMut(CompactTxStreamerClient<Channel>) -> Fut,
+        Fut: Future<Output = Result<T, Status>>,
+    {
+        self.retrying_status(call).await.map_err(|status| status_error(method, &status))
+    }
+
+    /// [`Lightwalletd::retrying`], returning the final gRPC status.
+    async fn retrying_status<T, F, Fut>(&self, mut call: F) -> Result<T, Status>
     where
         F: FnMut(CompactTxStreamerClient<Channel>) -> Fut,
         Fut: Future<Output = Result<T, Status>>,
@@ -191,7 +210,7 @@ impl Lightwalletd {
                     tokio::time::sleep(backoff_delay(attempt, self.options.retry_delay, Duration::from_secs(5))).await;
                     attempt += 1;
                 }
-                Err(status) => return Err(status_error(method, &status)),
+                Err(status) => return Err(status),
             }
         }
     }
@@ -215,16 +234,16 @@ impl Lightwalletd {
         if !self.legacy_taddress_rpc.load(Ordering::Relaxed) {
             let f = filter.clone();
             let result = self
-                .retrying("GetTaddressTransactions", |mut c| {
+                .retrying_status(|mut c| {
                     let f = f.clone();
                     async move { collect(c.get_taddress_transactions(f).await?.into_inner()).await }
                 })
                 .await;
             match result {
-                Err(NodeError::Rpc { code, .. }) if code == i64::from(i32::from(Code::Unimplemented)) => {
+                Err(status) if status.code() == Code::Unimplemented => {
                     self.legacy_taddress_rpc.store(true, Ordering::Relaxed);
                 }
-                other => return other,
+                other => return other.map_err(|status| status_error("GetTaddressTransactions", &status)),
             }
         }
         self.retrying("GetTaddressTxids", |mut c| {
@@ -487,6 +506,23 @@ impl ZcashNode for Lightwalletd {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
+
+    #[test]
+    fn only_not_found_reads_as_not_having_it() {
+        let not_found = status_error("GetTransaction", &Status::not_found("unknown"));
+        assert!(not_found.is_rejection());
+        for status in
+            [Status::internal("x"), Status::permission_denied("x"), Status::unknown("x"), Status::invalid_argument("x")]
+        {
+            let e = status_error("GetTransaction", &status);
+            assert!(!e.is_rejection(), "{e}");
+            assert!(matches!(e, NodeError::Transport { .. }));
+        }
+        assert!(status_error("GetTransaction", &Status::unavailable("x")).to_string().contains("Unavailable"));
+        // A refused broadcast is the node's answer (and may say "already in mempool").
+        let refused = status_error("SendTransaction", &Status::invalid_argument("txn-already-in-mempool"));
+        assert!(refused.is_rejection() && refused.already_known());
+    }
 
     #[test]
     fn parses_urls() {

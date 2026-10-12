@@ -66,7 +66,7 @@ async fn completes_an_htlc_swap_and_persists_every_step() {
     let quote = taker.quote(100_000_000, EvmChain::Tempo, SwapMode::Htlc).await.unwrap();
     let swap = taker.swap(&quote, SwapOptions::default()).await.unwrap();
     assert_eq!(swap.status, SwapStatus::Completed);
-    assert_eq!(maker.get_swap(&swap.id).unwrap().status, SwapStatus::Completed);
+    assert_eq!(maker.get_swap(&swap.id).await.unwrap().unwrap().status, SwapStatus::Completed);
     assert_eq!(w.evm.balance(TAKER_EVM), quote.usd_amount);
     assert_eq!(taker.record(&swap.id).await.unwrap().unwrap().stage, TakerStage::Completed);
     w.shutdown().await;
@@ -85,7 +85,7 @@ async fn completes_an_adaptor_swap() {
     assert!(swap.hashlock.is_none());
     assert_eq!(maker.stage(&swap.id), Some(MakerStage::Completed));
     // The maker's public view has no adaptor data; the taker's own view has it.
-    let public = maker.get_swap(&swap.id).unwrap();
+    let public = maker.get_swap(&swap.id).await.unwrap().unwrap();
     assert!(public.adaptor.is_none() && public.adaptor_point.is_none());
     assert!(swap.adaptor.unwrap().evm_pre_signature.is_some());
     w.shutdown().await;
@@ -306,10 +306,10 @@ async fn answers_the_takers_pre_signature_with_the_adaptor_data_but_never_anyone
     assert_eq!(first.adaptor_point, Some(p.proposal.adaptor_point.clone()));
     assert!(first.adaptor.as_ref().unwrap().signer_pubkey.as_ref().unwrap().as_str().starts_with("0x0"));
     // The public view leaves the adaptor data out.
-    let view = maker.get_swap(&p.quote.id).unwrap();
+    let view = maker.get_swap(&p.quote.id).await.unwrap().unwrap();
     assert_eq!(view.status, SwapStatus::Quoted);
     assert!(view.adaptor_point.is_none() && view.adaptor.is_none());
-    assert!(maker.list_swaps().iter().all(|s| s.adaptor_point.is_none() && s.adaptor.is_none()));
+    assert!(maker.list_swaps().await.unwrap().iter().all(|s| s.adaptor_point.is_none() && s.adaptor.is_none()));
     // Re-sending the stored pre-signature (any hex casing) is idempotent; another valid one also proves the key.
     let again =
         maker.adaptor_pre_signature(&p.quote.id, &pre_request(&format!("0x{}", p.pre.to_uppercase()))).await.unwrap();
@@ -352,7 +352,7 @@ async fn abandons_when_the_2_of_2_holds_less_than_proposed() {
     w.zcash.mine(1);
     until(|| maker.stage(&p.quote.id) == Some(MakerStage::Abandoned), "abandon", 5 * SECOND).await;
     assert_eq!(w.escrow.lock_count(), 0);
-    let detail = maker.get_swap(&p.quote.id).unwrap().events.last().unwrap().detail.clone().unwrap();
+    let detail = maker.get_swap(&p.quote.id).await.unwrap().unwrap().events.last().unwrap().detail.clone().unwrap();
     assert!(detail.contains("expected 100000000"), "{detail}");
     w.shutdown().await;
 }
@@ -397,7 +397,7 @@ async fn drops_a_proposal_whose_declared_funding_expiry_passed_releasing_the_inv
     assert_eq!(maker.stage(&p.quote.id), Some(MakerStage::Proposed));
     w.zcash.mine(1); // the window rule alone would only fire at tip + 11
     until(|| maker.stage(&p.quote.id) == Some(MakerStage::Abandoned), "abandon", 5 * SECOND).await;
-    let detail = maker.get_swap(&p.quote.id).unwrap().events.last().unwrap().detail.clone().unwrap();
+    let detail = maker.get_swap(&p.quote.id).await.unwrap().unwrap().events.last().unwrap().detail.clone().unwrap();
     assert!(detail.contains("without being mined"), "{detail}");
     assert_eq!(
         maker.quote(100_000_000, EvmChain::Tempo, SwapMode::Adaptor).await.unwrap().usd_amount,
@@ -811,7 +811,7 @@ async fn the_maker_drops_an_unfunded_reservation_after_the_declared_expiry() {
     assert_eq!(maker.accept(&too_far).await.unwrap_err().code(), ParalockErrorCode::InvalidRequest);
     maker.accept(&AcceptRequest { funding_expiry_height: Some(b.tip + 5), ..b.request.clone() }).await.unwrap();
     assert_eq!(maker.record(&b.id).unwrap().funding_expiry_height, Some(b.tip + 5));
-    assert_eq!(maker.get_swap(&b.id).unwrap().status, SwapStatus::Quoted); // reserved, not funded yet
+    assert_eq!(maker.get_swap(&b.id).await.unwrap().unwrap().status, SwapStatus::Quoted); // reserved, not funded yet
     assert_eq!(
         maker.quote(100_000_000, EvmChain::Tempo, SwapMode::Htlc).await.unwrap_err().code(),
         ParalockErrorCode::InsufficientLiquidity
@@ -822,7 +822,18 @@ async fn the_maker_drops_an_unfunded_reservation_after_the_declared_expiry() {
     w.zcash.mine(1);
     until(|| maker.stage(&b.id) == Some(MakerStage::Abandoned), "the maker to drop the reservation", 5 * SECOND).await;
     assert!(
-        maker.get_swap(&b.id).unwrap().events.last().unwrap().detail.as_ref().unwrap().contains("without being mined")
+        maker
+            .get_swap(&b.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .events
+            .last()
+            .unwrap()
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("without being mined")
     );
     assert_eq!(maker.quote(100_000_000, EvmChain::Tempo, SwapMode::Htlc).await.unwrap().usd_amount, quote.usd_amount);
     assert_eq!(w.htlc.lock_count(), 0);
@@ -845,7 +856,8 @@ async fn still_serves_v1_0_takers_that_accept_after_funding() {
     assert_eq!(swap.id, b.id);
     until(|| maker.stage(&b.id) == Some(MakerStage::Locked), "the maker's lock", 5 * SECOND).await;
     assert!(maker.record(&b.id).unwrap().funding_expiry_height.is_none());
-    let statuses: Vec<SwapStatus> = maker.get_swap(&b.id).unwrap().events.iter().map(|e| e.status).collect();
+    let statuses: Vec<SwapStatus> =
+        maker.get_swap(&b.id).await.unwrap().unwrap().events.iter().map(|e| e.status).collect();
     assert_eq!(statuses, [SwapStatus::ZcashLocked, SwapStatus::EvmLocked]);
     w.shutdown().await;
 }
@@ -866,6 +878,8 @@ async fn keeps_an_old_style_reservation_until_the_window_closes_before_the_deriv
     assert!(
         maker
             .get_swap(&b.id)
+            .await
+            .unwrap()
             .unwrap()
             .events
             .last()
@@ -925,7 +939,20 @@ async fn drops_an_accept_without_expiry_whose_funding_it_never_sees() {
     assert_eq!(maker.stage(&b.id), Some(MakerStage::Funding));
     w.zcash.mine(1);
     until(|| maker.stage(&b.id) == Some(MakerStage::Abandoned), "the deadline", 5 * SECOND).await;
-    assert!(maker.get_swap(&b.id).unwrap().events.last().unwrap().detail.as_ref().unwrap().contains("never seen"));
+    assert!(
+        maker
+            .get_swap(&b.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .events
+            .last()
+            .unwrap()
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("never seen")
+    );
     assert_eq!(maker.quote(100_000_000, EvmChain::Tempo, SwapMode::Htlc).await.unwrap().usd_amount, quote.usd_amount);
     w.shutdown().await;
 }
@@ -1064,7 +1091,20 @@ async fn min_evm_lock_seconds_left_makes_the_maker_abandon_instead_of_locking() 
     w.zcash.send_raw_transaction(&b.funding.hex).await.unwrap();
     w.zcash.mine(1);
     until(|| maker.stage(&b.id) == Some(MakerStage::Abandoned), "the maker to refuse to lock", 5 * SECOND).await;
-    assert!(maker.get_swap(&b.id).unwrap().events.last().unwrap().detail.as_ref().unwrap().contains("only 45s left"));
+    assert!(
+        maker
+            .get_swap(&b.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .events
+            .last()
+            .unwrap()
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("only 45s left")
+    );
     assert_eq!(w.htlc.lock_count(), 0);
     w.shutdown().await;
 }
@@ -1165,9 +1205,12 @@ async fn resumes_after_a_crash_between_the_pre_signature_answer_and_persisting_i
     let mut fresh_proxy = Proxy::new(maker.clone());
     let log = reads.clone();
     fresh_proxy.get_swap = Some(Arc::new(move |m, id: String| {
-        let view = m.get_swap(&id);
-        log.lock().unwrap().push(view.clone());
-        Box::pin(async move { Ok(view) })
+        let log = log.clone();
+        Box::pin(async move {
+            let view = m.get_swap(&id).await?;
+            log.lock().unwrap().push(view.clone());
+            Ok(view)
+        })
     }));
     let done = w.new_taker(fresh_proxy.api()).resume(&id, ResumeOptions::default()).await.unwrap();
     assert_eq!(done.status, SwapStatus::Completed);
@@ -1376,5 +1419,90 @@ async fn records_and_configs_never_print_secrets() {
     }
     let maker_key = paralock_core::encoding::to_hex(&*w.maker_key.private_key().to_bytes());
     assert!(!printed.contains(&maker_key));
+    w.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn keeps_only_unfinished_and_recently_finished_swaps_in_memory() {
+    let w = World::default_world();
+    let mut cfg = w.maker_config();
+    cfg.finished_swaps_in_memory = 1;
+    let updates = Arc::new(Mutex::new(Vec::<(String, SwapStatus)>::new()));
+    let seen = updates.clone();
+    cfg.on_update = Some(Arc::new(move |swap: &paralock::Swap| {
+        assert!(swap.adaptor.is_none() && swap.adaptor_point.is_none()); // the public view
+        seen.lock().unwrap().push((swap.id.clone(), swap.status));
+    }));
+    let maker = paralock::Maker::new(cfg.clone()).unwrap();
+    w.makers.lock().unwrap().push(maker.clone());
+    let taker = w.new_taker(maker_api(&maker));
+    let mut ids = Vec::new();
+    for mode in [SwapMode::Htlc, SwapMode::Adaptor, SwapMode::Htlc] {
+        let quote = taker.quote(50_000_000, EvmChain::Tempo, mode).await.unwrap();
+        let swap = taker.swap(&quote, SwapOptions::default()).await.unwrap();
+        until(|| maker.stage(&swap.id) == Some(MakerStage::Completed), "the maker's claim", 5 * SECOND).await;
+        ids.push(swap.id);
+    }
+    // Only the most recent finished swap is still in memory; the others are read back from the store.
+    assert_eq!(maker.stage(&ids[0]), None);
+    assert_eq!(maker.stage(&ids[1]), None);
+    assert_eq!(maker.stage(&ids[2]), Some(MakerStage::Completed));
+    assert!(maker.unfinished_swaps().is_empty());
+    for id in &ids {
+        let view = maker.get_swap(id).await.unwrap().unwrap();
+        assert_eq!(view.status, SwapStatus::Completed);
+        assert!(view.adaptor.is_none() && view.adaptor_point.is_none());
+        assert_eq!(maker.load_record(id).await.unwrap().unwrap().stage, MakerStage::Completed);
+        assert_eq!(MakerApi::get_swap(&maker, id).await.unwrap().unwrap().id, *id);
+    }
+    // The public listing serves memory only (no store reads); the operator's listing reads the store.
+    assert_eq!(maker.list_swaps().await.unwrap().len(), 1);
+    assert_eq!(maker.list_all_swaps().await.unwrap().len(), 3);
+    assert!(maker.get_swap(&format!("0x{}", "00".repeat(32))).await.unwrap().is_none());
+    assert!(maker.get_swap("../../etc/passwd").await.unwrap().is_none());
+
+    // A hashlock stays single-use after its swap left memory: the identical accept is answered from the store, and
+    // any other accept with the same hashlock is a conflict (it never overwrites the finished record).
+    let old = maker.load_record(&ids[0]).await.unwrap().unwrap();
+    let mut body = serde_json::json!({
+        "quoteId": old.swap.quote.id,
+        "redeemScript": old.swap.zcash.redeem_script,
+        "fundingTxid": old.swap.zcash.funding_txid,
+        "fundingVout": old.swap.zcash.funding_vout,
+        "takerEvmAddress": old.swap.evm.recipient,
+    });
+    let replay = maker.accept_value(&body).await.unwrap();
+    assert_eq!((replay.id.as_str(), replay.status), (ids[0].as_str(), SwapStatus::Completed));
+    body["fundingVout"] = serde_json::json!(old.swap.zcash.funding_vout.unwrap() + 1);
+    let conflict = maker.accept_value(&body).await.unwrap_err();
+    assert_eq!(
+        (conflict.code(), conflict.to_string().as_str()),
+        (ParalockErrorCode::Conflict, "hashlock already used")
+    );
+    assert_eq!(maker.load_record(&ids[0]).await.unwrap().unwrap().stage, MakerStage::Completed);
+    // The private swap that left memory still answers the taker's repeated pre-signature from the store.
+    let taker_record = taker.record(&ids[1]).await.unwrap().unwrap();
+    let pre = taker_record.adaptor.unwrap().taker_pre_signature.unwrap();
+    let request = AdaptorPreSignatureRequest { taker_pre_signature: pre };
+    assert_eq!(maker.adaptor_pre_signature(&ids[1], &request).await.unwrap().status, SwapStatus::Completed);
+
+    // Every status change was reported once persisted.
+    let updates = updates.lock().unwrap().clone();
+    for id in &ids {
+        let statuses: Vec<SwapStatus> = updates.iter().filter(|(i, _)| i == id).map(|(_, s)| *s).collect();
+        assert_eq!(statuses.first(), Some(&SwapStatus::Quoted), "{statuses:?}");
+        for status in [SwapStatus::ZcashLocked, SwapStatus::EvmLocked, SwapStatus::EvmClaimed, SwapStatus::Completed] {
+            assert!(statuses.contains(&status), "{id}: {statuses:?}");
+        }
+    }
+
+    // A restarted maker loads every unfinished swap but only the most recent finished ones.
+    maker.stop().await;
+    let restarted = paralock::Maker::new(cfg).unwrap();
+    restarted.start().await.unwrap();
+    assert_eq!(restarted.stage(&ids[2]), Some(MakerStage::Completed));
+    assert_eq!(restarted.stage(&ids[0]), None);
+    assert_eq!(restarted.get_swap(&ids[0]).await.unwrap().unwrap().status, SwapStatus::Completed);
+    restarted.stop().await;
     w.shutdown().await;
 }

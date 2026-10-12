@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use paralock_core::adaptor::{self, AdaptorSecret, VerifiedPreSignature};
-use paralock_core::evm::{AdaptorSwap, HtlcSwap};
+use paralock_core::evm::{AdaptorSwap, ClaimSignature, HtlcSwap};
 use paralock_core::keys::{KeyPair, PrivateKey, PublicKey, Secret};
 use paralock_core::protocol::{
     self, AcceptRequest, AdaptorLockCheck, AdaptorPreSignatureRequest, AdaptorProposal, AdaptorProposalAccepted,
@@ -25,13 +25,17 @@ use paralock_core::zcash::{
 use serde::{Deserialize, Serialize};
 
 use crate::api::MakerApi;
-use crate::evm::{AdaptorEvmClient, AdaptorOutcome, ChainInfo, EvmLock, HtlcOutcome, TakerChain, parse_address};
+use crate::evm::{
+    AdaptorEvmClient, AdaptorOutcome, ChainInfo, EvmClient, EvmError, EvmLock, HtlcOutcome, SentTx, TakerChain, TxHash,
+    TxStatus, parse_address,
+};
 use crate::price::PriceSource;
-use crate::records::{AdaptorEscrowParams, SecretString, StoredTx};
+use crate::records::{AdaptorEscrowParams, HtlcEscrowParams, SecretString, StoredTx};
 use crate::runtime::{Clock, Entropy, EntropyRng, Env, OsEntropy, SystemClock, backoff_delay};
-use crate::store::{MemoryStore, SwapStore, get_record, list_records, put_record};
+use crate::store::{MemoryStore, SwapStore, get_record, load_records, put_record};
 use crate::zcash::{ZcashNode, is_unspent, upgrade_check};
 use crate::{Error, Result};
+use zeroize::Zeroizing;
 
 const PREFIX: &str = "taker/";
 /// A quote counts as expired locally only this long after its `expiresAt` (the maker's clock may run behind ours).
@@ -46,11 +50,21 @@ pub struct TakerLimits {
     /// 1 confirmation; `ClaimLimits::new`). A claim mined after the expiry reverts but still publishes the secret, so
     /// leave room for congestion (minutes on Ethereum L1). Per-chain overrides: `TakerChain::claim_limits`.
     pub claim: ClaimLimits,
+    /// The maker's fixed Zcash claim fee (zatoshi) allowed on top of `quote.max_slippage_bps`: makers price it into
+    /// every quote (spec §8.3), and as slippage it would refuse small swaps (with 200 bps, under about 0.0067 ZEC).
+    /// `0` counts it as slippage (spec §8.4's check). Default [`DEFAULT_MAKER_FEE_ZAT`].
+    pub maker_fee_zat: u64,
 }
 
+/// Default of [`TakerLimits::maker_fee_zat`]: the reference maker's `zcashFeeZat` (10 000 zat, a ZIP 317 claim).
+pub const DEFAULT_MAKER_FEE_ZAT: u64 = protocol::DEFAULT_MAKER_LIMITS.zcash_fee_zat;
+
 /// Defaults of [`TakerLimits`].
-pub const DEFAULT_TAKER_LIMITS: TakerLimits =
-    TakerLimits { quote: protocol::DEFAULT_QUOTE_LIMITS, claim: protocol::DEFAULT_CLAIM_LIMITS };
+pub const DEFAULT_TAKER_LIMITS: TakerLimits = TakerLimits {
+    quote: protocol::DEFAULT_QUOTE_LIMITS,
+    claim: protocol::DEFAULT_CLAIM_LIMITS,
+    maker_fee_zat: DEFAULT_MAKER_FEE_ZAT,
+};
 
 impl Default for TakerLimits {
     fn default() -> Self {
@@ -61,7 +75,8 @@ impl Default for TakerLimits {
 /// How the taker checks a quote's rate (spec §8.4).
 #[derive(Clone)]
 pub enum TakerPriceCheck {
-    /// Your own USD/ZEC price: quotes more than `limits.quote.max_slippage_bps` worse are rejected. The default to use.
+    /// Your own USD/ZEC price: quotes more than `limits.quote.max_slippage_bps` worse (beyond the maker's fixed claim
+    /// fee, `limits.maker_fee_zat`) are rejected. The default to use.
     Source(Arc<dyn PriceSource>),
     /// No price check. **Risky:** nothing then bounds the rate, so the maker chooses the other side of the trade
     /// freely. Use it only when a person reviews every quote before it is used.
@@ -88,6 +103,10 @@ pub struct TakerTimeouts {
     pub follow_maker: Duration,
     /// Between polls. Default 2 s.
     pub poll_interval: Duration,
+    /// How long the taker's claim may sit unmined before it is replaced at the same nonce with higher fees (while the
+    /// maker's lock hasn't expired). The claim is followed until it is mined or the lock expires; it is never left
+    /// to a client's receipt timeout. Default 20 s.
+    pub claim_bump_after: Duration,
 }
 
 /// Defaults of [`TakerTimeouts`].
@@ -96,7 +115,17 @@ pub const DEFAULT_TAKER_TIMEOUTS: TakerTimeouts = TakerTimeouts {
     maker_lock: Duration::from_secs(30 * 60),
     follow_maker: Duration::from_secs(60),
     poll_interval: Duration::from_secs(2),
+    claim_bump_after: Duration::from_secs(20),
 };
+
+/// Most fee bumps of one claim (each replaces it at the same nonce with higher fees).
+const MAX_CLAIM_BUMPS: usize = 10;
+/// Longest error message from a maker kept in a record or an event.
+const MAX_REMOTE_MESSAGE: usize = 300;
+/// Claim window and confirmations the taker requires at least on Ethereum L1 (mainnet and Sepolia: 12 s blocks
+/// and a busy mempool).
+const ETHEREUM_L1_CLAIM_WINDOW_SECONDS: u64 = 300;
+const ETHEREUM_L1_CONFIRMATIONS: u64 = 3;
 
 impl Default for TakerTimeouts {
     fn default() -> Self {
@@ -114,6 +143,13 @@ pub type FreshRecipientHook = Arc<dyn Fn(&FreshRecipient, &Swap) + Send + Sync>;
 
 /// Everything a [`Taker`] needs. Most apps build it with [`TakerConfig::new`] and adjust fields, or with
 /// `create_taker` (feature `evm`).
+///
+/// **Trust:** before revealing its secret, the taker verifies the maker's lock through its EVM clients' RPC endpoints
+/// (the lock's terms, its confirmations, the chain's time left): an RPC that lies could make it reveal against a lock
+/// that doesn't exist or is about to expire, and lose the ZEC. Use your own nodes or providers you trust, and set
+/// [`TakerChain::verifier`] to a second, independent endpoint (the final check then needs both to agree). The Zcash
+/// backend is trusted for the funding's confirmations and the refund height; a lightwalletd / Zaino server does no
+/// proof-of-work verification.
 #[derive(Clone)]
 pub struct TakerConfig {
     /// The Zcash network.
@@ -144,6 +180,11 @@ pub struct TakerConfig {
     pub on_update: Option<UpdateHook>,
     /// Receives the key of each fresh recipient address.
     pub on_fresh_recipient: Option<FreshRecipientHook>,
+    /// Allow private (adaptor) swaps on mainnet with a Zcash backend that can't report network upgrades (older
+    /// lightwalletd servers). The maker's pre-signed refund is invalidated by an upgrade activating before the refund
+    /// height, and without the schedule that can't be checked, so by default the taker refuses them on mainnet.
+    /// Default false.
+    pub allow_unknown_upgrades: bool,
     /// Wall clock.
     pub clock: Arc<dyn Clock>,
     /// Randomness (secrets, per-swap keys, fresh recipients, pre-signature nonces).
@@ -174,6 +215,7 @@ impl TakerConfig {
             mine_zcash: None,
             on_update: None,
             on_fresh_recipient: None,
+            allow_unknown_upgrades: false,
             clock: Arc::new(SystemClock),
             entropy: Arc::new(OsEntropy),
         }
@@ -195,6 +237,7 @@ impl fmt::Debug for TakerConfig {
             .field("chains", &self.chains)
             .field("limits", &self.limits)
             .field("timeouts", &self.timeouts)
+            .field("allow_unknown_upgrades", &self.allow_unknown_upgrades)
             .finish_non_exhaustive()
     }
 }
@@ -237,6 +280,9 @@ pub enum TakerStage {
     Accepted,
     /// The maker's lock was verified.
     Locked,
+    /// The claim is decided (persisted before anything is sent) and being sent, followed and, if it sits unmined,
+    /// replaced at the same nonce with higher fees until it is mined or the lock expires. The secret may be public.
+    Claiming,
     /// Stablecoins claimed (the secret is public).
     Claimed,
     /// The maker claimed the ZEC.
@@ -248,6 +294,23 @@ pub enum TakerStage {
 }
 
 impl TakerStage {
+    /// The stage's name, as persisted (`prepared`, `claiming`, …).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Reserved => "reserved",
+            Self::Proposed => "proposed",
+            Self::Funded => "funded",
+            Self::Accepted => "accepted",
+            Self::Locked => "locked",
+            Self::Claiming => "claiming",
+            Self::Claimed => "claimed",
+            Self::Completed => "completed",
+            Self::Refunded => "refunded",
+            Self::Abandoned => "abandoned",
+        }
+    }
+
     /// True for stages after which there is nothing left to drive.
     pub const fn is_done(self) -> bool {
         matches!(self, Self::Claimed | Self::Completed | Self::Refunded | Self::Abandoned)
@@ -297,8 +360,8 @@ pub struct TakerHtlcSecrets {
     pub secret: SecretString,
 }
 
-/// adaptor-mode data (holds secrets).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// adaptor-mode data (holds secrets). `Debug` prints none of it.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TakerAdaptorData {
     /// The adaptor secret `y` (`0x` hex).
@@ -319,6 +382,40 @@ pub struct TakerAdaptorData {
     pub escrow: Option<AdaptorEscrowParams>,
 }
 
+impl fmt::Debug for TakerAdaptorData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TakerAdaptorData")
+            .field("accepted", &self.accepted.is_some())
+            .field("taker_pre_signature", &self.taker_pre_signature.is_some())
+            .field("evm_pre_signature", &self.evm_pre_signature.is_some())
+            .field("escrow", &self.escrow.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The taker's claim in progress (stage `claiming`): persisted before anything is sent, and then every claim
+/// transaction, before it is broadcast when the client signs first ([`SentTx::raw`]), else right after.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TakerClaim {
+    /// Submitted by the relayer account.
+    pub relayed: bool,
+    /// When the taker decided to claim (Unix ms).
+    pub started_at: u64,
+    /// htlc mode: the lock being claimed (as verified).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub htlc: Option<HtlcEscrowParams>,
+    /// adaptor mode: the completed release signature (`r ‖ s ‖ v`, hex). It reveals the adaptor secret to the maker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<SecretString>,
+    /// Every claim transaction sent, oldest first: fee bumps (same nonce), and new ones after a drop or a revert.
+    #[serde(default)]
+    pub txs: Vec<SentTx>,
+    /// When the last one was sent (Unix ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_sent_at: Option<u64>,
+}
+
 /// A fresh EVM account created to receive one swap's stablecoins. Its key controls the funds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -329,8 +426,9 @@ pub struct FreshRecipient {
     pub private_key: SecretString,
 }
 
-/// A swap as persisted by the taker, including its secrets.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A swap as persisted by the taker, including its secrets. `Debug` prints its id, stage, status and transactions,
+/// never its secrets, keys, pre-signatures, adaptor point or escrow data.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TakerSwapRecord {
     /// `taker-swap`.
@@ -365,14 +463,48 @@ pub struct TakerSwapRecord {
     /// The fresh recipient account, if one was used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fresh_recipient: Option<FreshRecipient>,
+    /// The claim in progress (stage `claiming`) and the transactions sent for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim: Option<TakerClaim>,
     /// The signed refund, persisted before it is broadcast.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refund: Option<StoredTx>,
+    /// Txids of earlier versions of the refund (htlc mode: re-signed after a network upgrade changed the branch id).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previous_refunds: Vec<String>,
     /// The last error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Unix ms of the last write.
     pub updated_at: u64,
+}
+
+impl crate::records::StoredRecord for TakerSwapRecord {
+    const WHAT: &'static str = "taker swap";
+    const VERSION: u32 = 1;
+}
+
+impl fmt::Debug for TakerSwapRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TakerSwapRecord")
+            .field("kind", &self.kind)
+            .field("version", &self.version)
+            .field("id", &self.id)
+            .field("stage", &self.stage)
+            .field("swap", &crate::error::SwapSummary(&self.swap))
+            .field("options", &self.options)
+            .field("funding_txid", &self.funding.txid)
+            .field("funding_expiry_height", &self.funding.expiry_height)
+            .field("reserved_at", &self.reserved_at)
+            .field("funding_sent_at", &self.funding_sent_at)
+            .field("adaptor", &self.adaptor)
+            .field("fresh_recipient", &self.fresh_recipient.as_ref().map(|r| &r.address))
+            .field("claim_txs", &self.claim.as_ref().map(|c| c.txs.iter().map(|t| &t.hash).collect::<Vec<_>>()))
+            .field("refund_txid", &self.refund.as_ref().map(|r| &r.txid))
+            .field("error", &self.error)
+            .field("updated_at", &self.updated_at)
+            .finish_non_exhaustive()
+    }
 }
 
 struct Inner {
@@ -411,6 +543,11 @@ fn hex_of(b: &[u8]) -> Hex {
     Hex::from_bytes(b)
 }
 
+/// A swap id shortened for logs (swap ids link the two legs of a swap).
+fn short(id: &str) -> &str {
+    id.get(..10).unwrap_or(id)
+}
+
 fn zec(zat: u64) -> String {
     let whole = zat / 100_000_000;
     let frac = zat % 100_000_000;
@@ -421,6 +558,19 @@ fn fmt_units(units: u128, decimals: u32) -> String {
     let scale = 10u128.saturating_pow(decimals).max(1);
     let cents = units.saturating_mul(100) / scale;
     format!("{}.{:02}", cents / 100, cents % 100)
+}
+
+/// `0x` hex of secret bytes, with no unzeroized copy left behind.
+fn secret_hex(bytes: &[u8]) -> SecretString {
+    secret_0x(&Zeroizing::new(paralock_core::encoding::to_hex(bytes)))
+}
+
+/// `0x` + secret hex digits, built in one allocation (no reallocation leaves a copy behind).
+fn secret_0x(digits: &str) -> SecretString {
+    let mut hex = String::with_capacity(digits.len() + 2);
+    hex.push_str("0x");
+    hex.push_str(digits);
+    SecretString::new(hex)
 }
 
 fn word(hex: &str, what: &'static str) -> Result<[u8; 32]> {
@@ -458,6 +608,38 @@ impl Taker {
         for (chain, c) in &cfg.chains {
             for token in &c.tokens {
                 crate::evm::parse_address(token, &format!("{chain}.tokens"))?;
+            }
+            // Relayers and the verifier must use the very escrows the taker verifies (and on the same chain).
+            let same = |what: &str, client: &dyn ChainInfo, reference: &dyn ChainInfo| -> Result<()> {
+                let contract = |c: &dyn ChainInfo| c.contract().as_str().to_ascii_lowercase();
+                if client.chain_id() != reference.chain_id() || contract(client) != contract(reference) {
+                    return Err(Error::invalid_request(format!(
+                        "{chain}.{what} must use the same chain and escrow contract as the taker's own client"
+                    )));
+                }
+                Ok(())
+            };
+            if let Some(r) = &c.relayer {
+                same("relayer.htlc", r.htlc.as_ref(), c.htlc.as_ref())?;
+                match (&r.adaptor, &c.adaptor) {
+                    (Some(r), Some(own)) => same("relayer.adaptor", r.as_ref(), own.as_ref())?,
+                    (Some(_), None) => {
+                        return Err(Error::invalid_request(format!("{chain}.relayer.adaptor needs private mode")));
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(v) = &c.verifier {
+                same("verifier.htlc", v.htlc.as_ref(), c.htlc.as_ref())?;
+                match (&v.adaptor, &c.adaptor) {
+                    (Some(v), Some(own)) => same("verifier.adaptor", v.as_ref(), own.as_ref())?,
+                    (None, Some(_)) => {
+                        return Err(Error::invalid_request(format!(
+                            "{chain}.verifier.adaptor is required with private mode"
+                        )));
+                    }
+                    _ => {}
+                }
             }
         }
         let env = Env { clock: cfg.clock.clone(), entropy: cfg.entropy.clone() };
@@ -571,9 +753,10 @@ impl Taker {
         Ok(get_record(self.inner.cfg.store.as_ref(), &format!("{PREFIX}{id}")).await?)
     }
 
-    /// Persisted swaps that are not finished (their ZEC may still be locked).
+    /// Persisted swaps that are not finished (their ZEC may still be locked). A record that can't be read is
+    /// quarantined (see [`SwapStore::quarantine`]) with an error log, and the others are still listed.
     pub async fn pending_swaps(&self) -> Result<Vec<Swap>> {
-        let all = list_records::<TakerSwapRecord>(self.inner.cfg.store.as_ref(), PREFIX).await?;
+        let all = load_records::<TakerSwapRecord>(self.inner.cfg.store.as_ref(), PREFIX).await?;
         Ok(all.into_iter().filter(|(_, r)| !r.stage.is_done()).map(|(_, r)| r.swap).collect())
     }
 
@@ -628,7 +811,10 @@ impl Inner {
     async fn validate_quote(&self, quote: &Quote, request: &QuoteRequest) -> Result<()> {
         let c = self.chain(quote.chain)?;
         let price = match &self.cfg.price {
-            TakerPriceCheck::Source(p) => PriceCheck::Reference(p.usd_per_zec().await?),
+            TakerPriceCheck::Source(p) => match self.cfg.limits.maker_fee_zat {
+                0 => PriceCheck::Reference(p.usd_per_zec().await?),
+                fee => PriceCheck::ReferenceWithFee { price: p.usd_per_zec().await?, fixed_fee_zat: fee },
+            },
             TakerPriceCheck::Disabled => PriceCheck::Disabled,
         };
         let mut chains = BTreeMap::new();
@@ -709,7 +895,7 @@ impl Inner {
 
     /// UTXOs of our address not already spent by another of our pending fundings.
     async fn spendable_utxos(&self) -> Result<Vec<Utxo>> {
-        let busy: HashSet<String> = list_records::<TakerSwapRecord>(self.cfg.store.as_ref(), PREFIX)
+        let busy: HashSet<String> = load_records::<TakerSwapRecord>(self.cfg.store.as_ref(), PREFIX)
             .await?
             .into_iter()
             .filter(|(_, r)| {
@@ -764,7 +950,7 @@ impl Inner {
         // One prepare at a time: two swaps must never pick the same UTXOs.
         let _prepare = self.prepare.lock().await;
         // A quote backs one swap. htlc swaps are stored under their hashlock, so look at every record.
-        let records = list_records::<TakerSwapRecord>(self.cfg.store.as_ref(), PREFIX).await?;
+        let records = load_records::<TakerSwapRecord>(self.cfg.store.as_ref(), PREFIX).await?;
         if records.iter().any(|(_, r)| r.swap.quote.id == quote.id) {
             return Err(err(ParalockErrorCode::Conflict, "this quote was already used"));
         }
@@ -791,7 +977,7 @@ impl Inner {
                     err(ParalockErrorCode::QuoteRejected, format!("private mode is not available on {}", quote.chain))
                 })?;
                 // Fails early if an upgrade activates before the refund (the pre-signed refund would be invalid).
-                upgrade_check(self.cfg.zcash.as_ref(), refund_height).await?;
+                upgrade_check(self.cfg.zcash.as_ref(), refund_height, network, self.cfg.allow_unknown_upgrades).await?;
                 let y = AdaptorSecret::random(&mut rng);
                 // A fresh key per swap, unrelated to the funding address.
                 let multisig_key = KeyPair::from_private(self.env.entropy.private_key());
@@ -834,18 +1020,17 @@ impl Inner {
                     return_address: self.return_address.clone(),
                     htlc: None,
                     adaptor: Some(TakerAdaptorData {
-                        secret: SecretString::new(format!("0x{}", y.to_hex().as_str())),
-                        multisig_key: SecretString::new(format!(
-                            "0x{}",
-                            paralock_core::encoding::to_hex(&*multisig_key.private_key().to_bytes())
-                        )),
+                        secret: secret_0x(&y.to_hex()),
+                        multisig_key: secret_hex(&*multisig_key.private_key().to_bytes()),
                         accepted: None,
                         taker_pre_signature: None,
                         evm_pre_signature: None,
                         escrow: None,
                     }),
                     fresh_recipient: None,
+                    claim: None,
                     refund: None,
+                    previous_refunds: Vec::new(),
                     error: None,
                     updated_at: self.env.now_ms(),
                 }
@@ -896,12 +1081,12 @@ impl Inner {
                     reserved_at: None,
                     funding_sent_at: None,
                     return_address: self.return_address.clone(),
-                    htlc: Some(TakerHtlcSecrets {
-                        secret: SecretString::new(format!("0x{}", secret.to_hex().as_str())),
-                    }),
+                    htlc: Some(TakerHtlcSecrets { secret: secret_0x(&secret.to_hex()) }),
                     adaptor: None,
                     fresh_recipient: None,
+                    claim: None,
                     refund: None,
+                    previous_refunds: Vec::new(),
                     error: None,
                     updated_at: self.env.now_ms(),
                 }
@@ -917,10 +1102,7 @@ impl Inner {
             record.swap.evm.recipient = recipient.clone();
         } else if fresh {
             let (address, key) = protocol::fresh_evm_account(&mut rng);
-            let account = FreshRecipient {
-                address: hex_of(&address.0),
-                private_key: SecretString::new(format!("0x{}", paralock_core::encoding::to_hex(&*key.to_bytes()))),
-            };
+            let account = FreshRecipient { address: hex_of(&address.0), private_key: secret_hex(&*key.to_bytes()) };
             record.swap.evm.recipient = account.address.clone();
             record.fresh_recipient = Some(account);
         } else {
@@ -958,7 +1140,9 @@ impl Inner {
     }
 
     async fn fail(&self, mut record: TakerSwapRecord, error: Error) -> Error {
-        record.error = Some(error.to_string());
+        // The message may come from the maker: bounded and printable before it goes into the record and an event.
+        let message = sanitize_remote(&error.to_string());
+        record.error = Some(message.clone());
         if record.stage == TakerStage::Abandoned {
             // A step gave up on a funding that can no longer be mined: nothing was locked.
             if let Err(e) = self.save(&mut record).await {
@@ -968,7 +1152,7 @@ impl Inner {
         }
         if record.stage.is_unfunded() && record.funding_sent_at.is_none() {
             // No node has seen the funding (e.g. the maker refused or the quote expired): no funds moved.
-            let detail = format!("Not funded: {error}");
+            let detail = format!("Not funded: {message}");
             if let Err(e) = self
                 .transition(
                     &mut record,
@@ -985,8 +1169,7 @@ impl Inner {
             return error;
         }
         let chain = Chain::Evm(record.swap.quote.chain);
-        let detail = Some(error.to_string());
-        if let Err(e) = self.transition(&mut record, None, Some(SwapStatus::Failed), chain, None, detail).await {
+        if let Err(e) = self.transition(&mut record, None, Some(SwapStatus::Failed), chain, None, Some(message)).await {
             return e;
         }
         Error::SwapFailed { swap: Box::new(record.swap), source: Box::new(error) }
@@ -1031,7 +1214,8 @@ impl Inner {
                     self.verify_htlc_lock(record).await
                 }
             }
-            TakerStage::Locked => self.claim(record).await,
+            TakerStage::Locked => self.start_claim(record).await,
+            TakerStage::Claiming => self.track_claim(record).await,
             _ => Ok(()),
         }
     }
@@ -1172,31 +1356,72 @@ impl Inner {
     async fn funding_confirmed(&self, record: &mut TakerSwapRecord) -> Result<()> {
         if record.reserved_at.is_none() && !record.options.stop_after_funding {
             // Funded without a reservation (a swap started by an older SDK, or a resumed lock_only): tell the maker now.
-            let view = self.cfg.maker.accept(&Self::accept_request(record, false)).await?;
-            check_maker_view(record, &view)?;
-            record.reserved_at = Some(self.env.now_ms());
+            self.late_accept(record).await?;
         }
         self.transition(record, Some(TakerStage::Accepted), None, Chain::Zcash, None, None).await
     }
 
-    fn claim_limits(&self, c: &TakerChain) -> ClaimLimits {
-        c.claim_limits.unwrap_or(self.cfg.limits.claim)
+    /// htlc mode: has the maker accept a funding it never committed to (a swap started with `lock_only`, or by an
+    /// SDK that funded first) while the quote is still valid. Without it the maker never locks, so an expired quote
+    /// fails at once, with the way out (the refund).
+    async fn late_accept(&self, record: &mut TakerSwapRecord) -> Result<()> {
+        if record.swap.quote.expires_at.saturating_add(QUOTE_CLOCK_SKEW_SECONDS) < self.env.now_s() {
+            return Err(err(
+                ParalockErrorCode::QuoteExpired,
+                format!(
+                    "the maker never committed to this swap (it was funded without a reservation, e.g. with lock_only) \
+                     and its quote has expired, so the maker will not lock; refund the ZEC once block {} is reached",
+                    record.swap.zcash.refund_height
+                ),
+            ));
+        }
+        let view = self.cfg.maker.accept(&Self::accept_request(record, false)).await?;
+        check_maker_view(record, &view)?;
+        if view.status == SwapStatus::Failed {
+            return Err(err(
+                ParalockErrorCode::Conflict,
+                format!(
+                    "the maker dropped the swap; refund the ZEC once block {} is reached",
+                    record.swap.zcash.refund_height
+                ),
+            ));
+        }
+        record.reserved_at = Some(self.env.now_ms());
+        self.save(record).await
     }
 
-    /// The maker's htlc lock, checked by `paralock-core` (`verify_htlc_lock`) against what the chain reports now:
-    /// active and matching its commitment, paying our recipient at least the quoted amount of the quoted token,
+    /// The claim window and confirmations on chain `c`: its override, else the taker's limits, raised on Ethereum L1
+    /// (chain ids 1, 11155111, 17000, 560048) to at least 5 minutes and 3 confirmations.
+    fn claim_limits(&self, c: &TakerChain) -> ClaimLimits {
+        if let Some(limits) = c.claim_limits {
+            return limits;
+        }
+        let base = self.cfg.limits.claim;
+        if matches!(c.htlc.chain_id(), 1 | 11_155_111 | 17_000 | 560_048) {
+            return ClaimLimits::new(
+                base.min_claim_window_seconds().max(ETHEREUM_L1_CLAIM_WINDOW_SECONDS),
+                base.min_evm_confirmations().max(ETHEREUM_L1_CONFIRMATIONS),
+            )
+            .unwrap_or(base);
+        }
+        base
+    }
+
+    /// The maker's htlc lock, checked by `paralock-core` (`verify_htlc_lock`) against what `client`'s RPC reports
+    /// now: active and matching its commitment, paying our recipient at least the quoted amount of the quoted token,
     /// confirmed, and with at least the claim window left.
     async fn checked_htlc_lock(
         &self,
         record: &TakerSwapRecord,
-        c: &TakerChain,
+        limits: &ClaimLimits,
+        client: &dyn EvmClient,
         lock: &EvmLock<HtlcSwap>,
     ) -> Result<()> {
         let hashlock = hashlock_of(record)?;
-        let state = c.htlc.state(&hashlock).await?;
+        let state = client.state(&hashlock).await?;
         let observed = EvmLockObservation {
-            now: c.htlc.now().await?,
-            latest_block: c.htlc.block_number().await?,
+            now: client.now().await?,
+            latest_block: client.block_number().await?,
             lock_block: lock.block_number,
         };
         let request = Self::accept_request(record, true);
@@ -1207,18 +1432,22 @@ impl Inner {
             locked: &lock.swap,
             state: &state,
             observed: &observed,
-            limits: &self.claim_limits(c),
+            limits,
         })?;
         Ok(())
     }
 
     async fn verify_htlc_lock(&self, record: &mut TakerSwapRecord) -> Result<()> {
+        if record.reserved_at.is_none() {
+            // A lock_only swap resumed with a claim: the maker was never told, and never locks otherwise.
+            self.late_accept(record).await?;
+        }
         let c = self.chain(record.swap.quote.chain)?.clone();
         let hashlock = hashlock_of(record)?;
         let htlc = c.htlc.clone();
-        let lock =
-            self.wait_for_lock(record, &self.claim_limits(&c), htlc.as_ref(), || htlc.get_lock(&hashlock)).await?;
-        self.checked_htlc_lock(record, &c, &lock).await?;
+        let limits = self.claim_limits(&c);
+        let lock = self.wait_for_lock(record, &limits, htlc.as_ref(), || htlc.get_lock(&hashlock)).await?;
+        self.checked_htlc_lock(record, &limits, c.htlc.as_ref(), &lock).await?;
         record.swap.evm.expiry = Some(lock.swap.expiry);
         record.swap.evm.lock_tx = lock.tx_hash.clone();
         let detail = format!(
@@ -1281,7 +1510,13 @@ impl Inner {
         let proposal = Self::proposal_of(record)?;
         let accepted = self.cfg.maker.propose_adaptor(&proposal).await?;
         // Check everything the pre-signed refund depends on before funding (invariant 3).
-        let upgrade = upgrade_check(self.cfg.zcash.as_ref(), proposal.refund_height).await?;
+        let upgrade = upgrade_check(
+            self.cfg.zcash.as_ref(),
+            proposal.refund_height,
+            self.cfg.network,
+            self.cfg.allow_unknown_upgrades,
+        )
+        .await?;
         let branch_id = self.cfg.zcash.get_next_branch_id().await?;
         protocol::verify_proposal_accepted(
             &record.swap.quote,
@@ -1415,7 +1650,9 @@ impl Inner {
             a.evm_pre_signature = Some(evm_pre.clone());
             a.escrow = Some(AdaptorEscrowParams::from_swap(&lock.swap));
         }
-        record.swap.evm.lock_tx = lock.tx_hash.clone().or_else(|| view.evm.lock_tx.clone());
+        // The maker's view is informational: its lock hash is kept only if it is one.
+        record.swap.evm.lock_tx =
+            lock.tx_hash.clone().or_else(|| view.evm.lock_tx.clone().filter(|h| h.byte_len() == 32));
         record.swap.evm.expiry = Some(lock.swap.expiry);
         let swap_data = record.swap.adaptor.get_or_insert_with(AdaptorSwapData::default);
         swap_data.escrow_id = Some(hex_of(&escrow_id));
@@ -1433,54 +1670,56 @@ impl Inner {
 
     // claim ----------------------------------------------------------------------------------------------------------
 
-    async fn claim(&self, record: &mut TakerSwapRecord) -> Result<()> {
-        let c = self.chain(record.swap.quote.chain)?.clone();
-        let privacy = record.options.privacy;
-        let relayer = if privacy.relay_claim == Some(true) { c.relayer.clone() } else { None };
-        let chain = Chain::Evm(record.swap.quote.chain);
-        // After a restart the claim may already be on-chain.
-        let (claimed, refunded) = if let Some(a) = &record.adaptor {
+    /// Where the maker's lock stands now, read through our own client.
+    async fn lock_outcome(&self, record: &TakerSwapRecord, c: &TakerChain) -> Result<LockOutcome> {
+        if let Some(a) = &record.adaptor {
             let escrow = c
                 .adaptor
                 .clone()
                 .ok_or_else(|| err(ParalockErrorCode::QuoteRejected, "private mode is not configured"))?;
             let params = a.escrow.as_ref().ok_or_else(|| Error::Internal("no verified lock".into()))?.to_swap()?;
-            match escrow.outcome(&params.id()).await? {
-                AdaptorOutcome::Claimed { .. } => (true, false),
-                AdaptorOutcome::Refunded => (false, true),
-                _ => (false, false),
-            }
+            Ok(match escrow.outcome(&params.id()).await? {
+                AdaptorOutcome::Claimed { .. } => LockOutcome::Claimed,
+                AdaptorOutcome::Refunded => LockOutcome::Refunded,
+                AdaptorOutcome::Active => LockOutcome::Active,
+                AdaptorOutcome::Empty => LockOutcome::Empty,
+            })
         } else {
-            let hashlock = word(record.swap.hashlock.as_ref().map(Hex::as_str).unwrap_or_default(), "hashlock")?;
-            match c.htlc.outcome(&hashlock).await? {
-                HtlcOutcome::Claimed { .. } => (true, false),
-                HtlcOutcome::Refunded => (false, true),
-                _ => (false, false),
+            Ok(match c.htlc.outcome(&hashlock_of(record)?).await? {
+                HtlcOutcome::Claimed { .. } => LockOutcome::Claimed,
+                HtlcOutcome::Refunded => LockOutcome::Refunded,
+                HtlcOutcome::Active => LockOutcome::Active,
+                HtlcOutcome::Empty => LockOutcome::Empty,
+            })
+        }
+    }
+
+    /// Decides to claim: re-verifies the lock right before revealing anything (its terms, the pre-signature, the
+    /// claim window; through the verifier endpoint too when configured), simulates the claim, persists the decision
+    /// (stage `claiming`), then sends the claim. [`Inner::track_claim`] follows it from there.
+    async fn start_claim(&self, record: &mut TakerSwapRecord) -> Result<()> {
+        let c = self.chain(record.swap.quote.chain)?.clone();
+        // After a restart the claim may already be on-chain.
+        match self.lock_outcome(record, &c).await? {
+            LockOutcome::Claimed => return self.claimed(record, None).await,
+            LockOutcome::Refunded => {
+                return Err(err(ParalockErrorCode::LockMismatch, "the maker's lock was refunded before we claimed"));
             }
-        };
-        if claimed {
-            self.transition(
-                record,
-                Some(TakerStage::Claimed),
-                Some(SwapStatus::EvmClaimed),
-                chain,
-                None,
-                Some("Claim found on-chain".into()),
-            )
-            .await?;
-            self.follow_maker(record).await?;
-            return Ok(());
+            LockOutcome::Active | LockOutcome::Empty => {}
         }
-        if refunded {
-            return Err(err(ParalockErrorCode::LockMismatch, "the maker's lock was refunded before we claimed"));
-        }
-        if let Some(max) = privacy.jitter_ms.filter(|m| *m > 0) {
+        let privacy = record.options.privacy;
+        if let Some(max) = privacy.jitter_ms.filter(|m| *m > 0)
+            && record.claim.is_none()
+        {
             let mut b = [0u8; 8];
             self.env.entropy.fill_bytes(&mut b);
             tokio::time::sleep(Duration::from_millis(u64::from_le_bytes(b) % max)).await;
         }
-        let mut relayed = false;
-        let claim_tx = if let Some(a) = &record.adaptor {
+        // Relayed only if a relayer serves this mode (an htlc-only relayer leaves private claims to our own account).
+        let relayed = privacy.relay_claim == Some(true)
+            && c.relayer.as_ref().is_some_and(|r| record.adaptor.is_none() || r.adaptor.is_some());
+        let limits = self.claim_limits(&c);
+        let (call, stored) = if let Some(a) = &record.adaptor {
             let escrow = c
                 .adaptor
                 .clone()
@@ -1495,18 +1734,23 @@ impl Inner {
             // Everything again, right before revealing anything: the lock, the pre-signature, the claim window.
             let pre = a.evm_pre_signature.clone().unwrap_or_default();
             let verified = self.checked_adaptor_lock(record, &c, escrow.as_ref(), &escrow_id, &lock, &pre).await?;
+            if let Some(v) = c.verifier.as_ref().and_then(|v| v.adaptor.clone()) {
+                let second = v.get_lock(&escrow_id).await?.filter(|l| l.swap == params).ok_or_else(|| {
+                    err(ParalockErrorCode::LockMismatch, "the verifier RPC endpoint doesn't report the maker's lock")
+                })?;
+                self.checked_adaptor_lock(record, &c, v.as_ref(), &escrow_id, &second, &pre).await.map_err(|e| {
+                    err(ParalockErrorCode::LockMismatch, format!("the verifier RPC endpoint disagrees: {e}"))
+                })?;
+            }
             let y = AdaptorSecret::from_hex(a.secret.expose())?;
             // The completed signature reveals y to the maker (only), even in a reverted transaction.
             let signature = protocol::complete_escrow_claim(&verified, &y)?;
-            let claimer = match relayer.as_ref().and_then(|r| r.adaptor.clone()) {
-                Some(relayer) => {
-                    relayed = true;
-                    relayer
-                }
-                None => escrow,
+            let client = match c.relayer.as_ref().and_then(|r| r.adaptor.clone()) {
+                Some(relayer) if relayed => relayer,
+                _ => escrow,
             };
-            simulate(claimer.simulate_claim(&params, &signature).await)?;
-            submit_claim(relayed, claimer.claim(&params, &signature).await)?
+            let stored = (None, Some(signature_hex(&signature)));
+            (ClaimCall::Adaptor { client, swap: params, signature }, stored)
         } else {
             let hashlock = hashlock_of(record)?;
             let lock = c
@@ -1515,37 +1759,316 @@ impl Inner {
                 .await?
                 .ok_or_else(|| err(ParalockErrorCode::LockMismatch, "the maker's lock disappeared"))?;
             // Everything again, right before revealing the secret: the lock, its state, the claim window.
-            self.checked_htlc_lock(record, &c, &lock).await?;
+            self.checked_htlc_lock(record, &limits, c.htlc.as_ref(), &lock).await?;
+            if let Some(v) = &c.verifier {
+                let second = v.htlc.get_lock(&hashlock).await?.filter(|l| l.swap == lock.swap).ok_or_else(|| {
+                    err(ParalockErrorCode::LockMismatch, "the verifier RPC endpoint doesn't report the maker's lock")
+                })?;
+                self.checked_htlc_lock(record, &limits, v.htlc.as_ref(), &second).await.map_err(|e| {
+                    err(ParalockErrorCode::LockMismatch, format!("the verifier RPC endpoint disagrees: {e}"))
+                })?;
+            }
             let secret = record.htlc.as_ref().ok_or_else(|| Error::Internal("no htlc secret".into()))?;
-            let secret = Secret::from_hex(secret.secret.expose())?;
-            let claimer = match &relayer {
-                Some(r) => {
-                    relayed = true;
-                    r.htlc.clone()
-                }
-                None => c.htlc.clone(),
+            let preimage = Secret::from_hex(secret.secret.expose())?;
+            let client = match &c.relayer {
+                Some(r) if relayed => r.htlc.clone(),
+                _ => c.htlc.clone(),
             };
-            simulate(claimer.simulate_claim(&lock.swap, &secret).await)?;
-            submit_claim(relayed, claimer.claim(&lock.swap, &secret).await)?
+            let stored = (Some(HtlcEscrowParams::from_swap(&lock.swap)), None);
+            (ClaimCall::Htlc { client, swap: lock.swap, preimage }, stored)
         };
-        record.swap.evm.claim_tx = Some(claim_tx.clone());
-        let amount = format!(
-            "{} {}",
-            fmt_units(record.swap.evm.amount, c.token_decimals.unwrap_or(6)),
-            record.swap.quote.token_symbol
-        );
-        let detail = format!(
-            "{} {amount}{}; {}",
-            if record.swap.payment.is_some() { "Recipient received" } else { "Received" },
-            if relayed { " (claim relayed)" } else { "" },
-            if record.adaptor.is_some() { "no hash on either chain" } else { "the secret is now public" }
-        );
+        if let Err(e) = call.simulate().await {
+            // A claim by someone else (a relayer's duplicate, say) may have landed meanwhile: it paid our recipient.
+            if matches!(self.lock_outcome(record, &c).await, Ok(LockOutcome::Claimed)) {
+                return self.claimed(record, None).await;
+            }
+            let code = if e.transient { ParalockErrorCode::Unavailable } else { ParalockErrorCode::LockMismatch };
+            return Err(err(code, format!("the claim would not go through ({e}); nothing was sent")));
+        }
+        // Persisted before anything is sent: from here on the claim is followed, and fee-bumped, until it is mined,
+        // and a resume looks at what was sent before it sends anything new.
+        let (htlc, signature) = stored;
+        record.claim = Some(TakerClaim {
+            relayed,
+            started_at: self.env.now_ms(),
+            htlc,
+            signature,
+            txs: Vec::new(),
+            last_sent_at: None,
+        });
+        record.stage = TakerStage::Claiming;
+        self.save(record).await?;
+        self.send_claim_tx(record, &call, None).await
+    }
+
+    /// Sends a claim transaction (or, with `replacing`, a fee bump of that pending one at its nonce) and records it:
+    /// before the broadcast when the client signs first, right after it otherwise. A failure that carries the
+    /// broadcast transaction is recorded and followed like a success.
+    async fn send_claim_tx(
+        &self,
+        record: &mut TakerSwapRecord,
+        call: &ClaimCall,
+        replacing: Option<&SentTx>,
+    ) -> Result<()> {
+        let relayed = record.claim.as_ref().is_some_and(|c| c.relayed);
+        match call.sign(replacing).await {
+            Ok(signed) => {
+                let raw = signed.raw.clone();
+                self.record_claim_tx(record, signed).await?;
+                if let Some(raw) = raw
+                    && let Err(e) = call.info().broadcast_raw(&raw).await
+                {
+                    tracing::warn!(swap = short(&record.id), error = %e, "taker: claim broadcast failed; retrying");
+                }
+                return Ok(());
+            }
+            Err(e) if e.is_unsupported() => {}
+            Err(e) => return Err(claim_error(relayed, e)),
+        }
+        let result = match replacing {
+            Some(pending) => call.bump(pending).await,
+            None => call.send().await,
+        };
+        match result {
+            Ok(sent) => self.record_claim_tx(record, sent).await,
+            Err(e) => {
+                if let Some(hash) = e.tx_hash() {
+                    // Broadcast, but its receipt didn't come: follow it rather than send another one.
+                    let sent = SentTx { hash: hash.clone(), nonce: e.nonce(), raw: None, client: None };
+                    tracing::warn!(swap = short(&record.id), tx = %hash, error = %e, "taker: claim sent but not confirmed yet");
+                    return self.record_claim_tx(record, sent).await;
+                }
+                if replacing.is_some() && e.is_unsupported() {
+                    return Ok(()); // this client can't bump: keep following the claim
+                }
+                Err(claim_error(relayed, e))
+            }
+        }
+    }
+
+    async fn record_claim_tx(&self, record: &mut TakerSwapRecord, tx: SentTx) -> Result<()> {
+        let now = self.env.now_ms();
+        let claim = record.claim.as_mut().ok_or_else(|| Error::Internal("no claim in progress".into()))?;
+        if !claim.txs.iter().any(|t| t.hash == tx.hash) {
+            claim.txs.push(tx);
+        }
+        claim.last_sent_at = Some(now);
+        self.save(record).await
+    }
+
+    /// The claim as recorded when it was decided, with the client that sends it (the relayer's or our own).
+    fn claim_call(&self, record: &TakerSwapRecord, c: &TakerChain, relayed: bool) -> Result<ClaimCall> {
+        let claim = record.claim.as_ref().ok_or_else(|| Error::Internal("no claim in progress".into()))?;
+        if let Some(a) = &record.adaptor {
+            let swap = a.escrow.as_ref().ok_or_else(|| Error::Internal("no verified lock".into()))?.to_swap()?;
+            let signature = claim
+                .signature
+                .as_ref()
+                .ok_or_else(|| Error::Internal("no claim signature".into()))
+                .and_then(|s| parse_signature(s.expose()))?;
+            let client = match (relayed, c.relayer.as_ref().and_then(|r| r.adaptor.clone()), &c.adaptor) {
+                (true, Some(relayer), _) => relayer,
+                (_, _, Some(own)) => own.clone(),
+                _ => return Err(err(ParalockErrorCode::QuoteRejected, "private mode is not configured")),
+            };
+            Ok(ClaimCall::Adaptor { client, swap, signature })
+        } else {
+            let swap = claim.htlc.as_ref().ok_or_else(|| Error::Internal("no claimed lock".into()))?.to_swap()?;
+            let secret = record.htlc.as_ref().ok_or_else(|| Error::Internal("no htlc secret".into()))?;
+            let preimage = Secret::from_hex(secret.secret.expose())?;
+            let client = match &c.relayer {
+                Some(r) if relayed => r.htlc.clone(),
+                _ => c.htlc.clone(),
+            };
+            Ok(ClaimCall::Htlc { client, swap, preimage })
+        }
+    }
+
+    /// Follows the claim until the escrow reports it claimed (by our transaction or anyone's: the funds only ever go
+    /// to the recipient), or until the lock expires. Looks at the transactions already sent before sending anything:
+    /// a pending one is fee-bumped at its nonce after `timeouts.claim_bump_after`, a dropped one is rebroadcast (or
+    /// replaced at its nonce), a reverted one is sent again while the lock is active.
+    async fn track_claim(&self, record: &mut TakerSwapRecord) -> Result<()> {
+        let c = self.chain(record.swap.quote.chain)?.clone();
+        let Some(claim) = record.claim.clone() else {
+            return Err(Error::Internal("claiming without a claim".into()));
+        };
+        if claim.txs.is_empty() {
+            // Nothing is known to be out (the send failed, or a crash came first): decide again, re-verifying the
+            // lock and the claim window before anything is revealed.
+            return self.start_claim(record).await;
+        }
+        let expiry = record.swap.evm.expiry.ok_or_else(|| Error::Internal("no lock expiry".into()))?;
+        let started = tokio::time::Instant::now();
+        let left = match c.htlc.now().await {
+            Ok(now) => Duration::from_secs(expiry.saturating_sub(now)),
+            Err(_) => self.cfg.timeouts.maker_lock,
+        };
+        // Wall-clock bound, in case the RPC stops answering: the lock's time left plus a margin for the indexer.
+        let deadline = started + left + Duration::from_secs(120);
+        let mut bumps = 0usize;
+        let mut failures: u32 = 0;
+        loop {
+            let claim = record.claim.clone().ok_or_else(|| Error::Internal("no claim in progress".into()))?;
+            let call = self.claim_call(record, &c, claim.relayed)?;
+            match self.claim_round(record, &c, &call, &claim, expiry, &mut bumps).await {
+                Ok(Some(())) => return Ok(()),
+                Ok(None) => failures = 0,
+                Err(e) if is_final(&e) => return Err(e),
+                Err(e) => {
+                    failures = failures.saturating_add(1);
+                    tracing::debug!(swap = short(&record.id), error = %e, "taker: following the claim");
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                let hashes = claim_hashes(record);
+                return Err(err(
+                    ParalockErrorCode::Timeout,
+                    format!("timed out following the claim ({hashes}); resume the swap to keep following it"),
+                ));
+            }
+            let interval = self.cfg.timeouts.poll_interval;
+            let wait = if failures > 0 { backoff_delay(failures, interval, Duration::from_secs(15)) } else { interval };
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    /// One look at the claim. `Some(())` once it is settled (claimed by anyone), `None` to keep waiting.
+    async fn claim_round(
+        &self,
+        record: &mut TakerSwapRecord,
+        c: &TakerChain,
+        call: &ClaimCall,
+        claim: &TakerClaim,
+        expiry: u64,
+        bumps: &mut usize,
+    ) -> Result<Option<()>> {
+        let last = claim.txs.last().cloned().ok_or_else(|| Error::Internal("no claim transaction".into()))?;
+        match self.lock_outcome(record, c).await? {
+            LockOutcome::Claimed => {
+                let ours = self.mined_claim(call, claim).await;
+                self.claimed(record, ours).await?;
+                return Ok(Some(()));
+            }
+            LockOutcome::Refunded => {
+                return Err(err(
+                    ParalockErrorCode::LockMismatch,
+                    format!(
+                        "the maker refunded its lock before our claim ({}) was mined; the secret is public, so the \
+                         maker may also claim the ZEC: refund it once block {} is reached",
+                        claim_hashes(record),
+                        record.swap.zcash.refund_height
+                    ),
+                ));
+            }
+            LockOutcome::Active | LockOutcome::Empty => {}
+        }
+        // Newest first: a mined success settles it (the escrow's state may lag), anything pending is waited for.
+        let mut pending = false;
+        let mut reverted = false;
+        for tx in claim.txs.iter().rev() {
+            match call.info().transaction_status(&tx.hash).await {
+                Ok(TxStatus::Mined { success: true, .. }) => {
+                    self.claimed(record, Some(tx.hash.clone())).await?;
+                    return Ok(Some(()));
+                }
+                Ok(TxStatus::Mined { success: false, .. }) => reverted = true,
+                Ok(TxStatus::Pending) => pending = true,
+                Ok(TxStatus::Unknown) => {}
+                // Can't tell (unsupported, or the RPC failed): never read as dropped.
+                Err(_) => pending = true,
+            }
+        }
+        let now = call.info().now().await?;
+        if now >= expiry {
+            return Err(err(
+                ParalockErrorCode::Timeout,
+                format!(
+                    "our claim ({}) was not mined before the maker's lock expired; the secret is public, so the maker \
+                     may claim the ZEC: refund it once block {} is reached if it doesn't",
+                    claim_hashes(record),
+                    record.swap.zcash.refund_height
+                ),
+            ));
+        }
+        if pending {
+            let since = self.env.now_ms().saturating_sub(claim.last_sent_at.unwrap_or(claim.started_at));
+            if *bumps < MAX_CLAIM_BUMPS && u128::from(since) >= self.cfg.timeouts.claim_bump_after.as_millis() {
+                *bumps += 1;
+                tracing::info!(swap = short(&record.id), tx = %last.hash, "taker: the claim is not mined yet; bumping its fees");
+                self.send_claim_tx(record, call, Some(&last)).await?;
+            }
+            return Ok(None);
+        }
+        if reverted {
+            // Our claim was mined but reverted while the lock is still active (checked above): send it again (the
+            // secret is public already).
+            tracing::warn!(swap = short(&record.id), tx = %last.hash, "taker: the claim reverted; sending it again");
+            let call =
+                self.claim_call(record, c, claim.relayed && record.options.privacy.relay_claim != Some(false))?;
+            self.send_claim_tx(record, &call, None).await?;
+            return Ok(None);
+        }
+        // No node knows any of them (dropped, or never received): rebroadcast, or replace at the nonce, or resend.
+        if let Some(raw) = &last.raw {
+            call.info().broadcast_raw(raw).await?;
+        } else if last.nonce.is_some() {
+            self.send_claim_tx(record, call, Some(&last)).await?;
+        } else {
+            let call =
+                self.claim_call(record, c, claim.relayed && record.options.privacy.relay_claim != Some(false))?;
+            self.send_claim_tx(record, &call, None).await?;
+        }
+        Ok(None)
+    }
+
+    /// The claim transaction to record once the escrow reads claimed: ours that was mined; else, when the client
+    /// can't tell (no transaction status, or the RPC failed), the last one we sent, the likeliest; none only when every
+    /// one of ours is known not to be it (reverted, pending, dropped or replaced: another claim paid the recipient).
+    async fn mined_claim(&self, call: &ClaimCall, claim: &TakerClaim) -> Option<TxHash> {
+        let mut unsure = false;
+        for tx in claim.txs.iter().rev() {
+            match call.info().transaction_status(&tx.hash).await {
+                Ok(TxStatus::Mined { success: true, .. }) => return Some(tx.hash.clone()),
+                Ok(_) => {}
+                Err(_) => unsure = true,
+            }
+        }
+        if unsure { claim.txs.last().map(|t| t.hash.clone()) } else { None }
+    }
+
+    /// The escrow paid the recipient: by our claim (`tx`), or by any other (a relayer's duplicate, a front-runner):
+    /// a success either way, since the funds only go to the recipient.
+    async fn claimed(&self, record: &mut TakerSwapRecord, tx: Option<TxHash>) -> Result<()> {
+        let c = self.chain(record.swap.quote.chain)?.clone();
+        let chain = Chain::Evm(record.swap.quote.chain);
+        let relayed = record.claim.as_ref().is_some_and(|c| c.relayed);
+        let detail = match &tx {
+            Some(_) => {
+                let amount = format!(
+                    "{} {}",
+                    fmt_units(record.swap.evm.amount, c.token_decimals.unwrap_or(6)),
+                    record.swap.quote.token_symbol
+                );
+                format!(
+                    "{} {amount}{}; {}",
+                    if record.swap.payment.is_some() { "Recipient received" } else { "Received" },
+                    if relayed { " (claim relayed)" } else { "" },
+                    if record.adaptor.is_some() { "no hash on either chain" } else { "the secret is now public" }
+                )
+            }
+            None => "Claim found on-chain".to_owned(),
+        };
+        if tx.is_some() {
+            record.swap.evm.claim_tx = tx.clone();
+        }
+        record.error = None;
         self.transition(
             record,
             Some(TakerStage::Claimed),
             Some(SwapStatus::EvmClaimed),
             chain,
-            Some(claim_tx.to_string()),
+            tx.map(|h| h.to_string()),
             Some(detail),
         )
         .await?;
@@ -1566,7 +2089,9 @@ impl Inner {
             )
             .await;
         let Ok(view) = view else { return Ok(()) };
-        record.swap.zcash.claim_txid = view.zcash.claim_txid.clone();
+        // Informational, from the maker: kept only if it is a txid.
+        let claim_txid = view.zcash.claim_txid.filter(|t| Txid::is_txid(t)).map(|t| t.to_ascii_lowercase());
+        record.swap.zcash.claim_txid = claim_txid.clone();
         let detail = if record.adaptor.is_some() {
             "Maker completed the signature and claimed the ZEC"
         } else {
@@ -1577,7 +2102,7 @@ impl Inner {
             Some(TakerStage::Completed),
             Some(SwapStatus::Completed),
             Chain::Zcash,
-            view.zcash.claim_txid,
+            claim_txid,
             Some(detail.into()),
         )
         .await
@@ -1667,7 +2192,6 @@ impl Inner {
         if record.stage == TakerStage::Refunded {
             return Ok(record.swap);
         }
-        let network = self.cfg.network;
         let funding_txid = record.funding.txid.clone();
         let funding_vout = record.funding.vout;
         let refund_height = record.swap.zcash.refund_height;
@@ -1699,8 +2223,6 @@ impl Inner {
                 tip = self.cfg.zcash.get_block_count().await?;
             }
             let branch_id = self.cfg.zcash.get_next_branch_id().await?;
-            let options = TxOptions::new(branch_id, network);
-            let to = TransparentAddress::decode_for(&record.return_address, network)?;
             let signed = if let Some(a) = &record.adaptor {
                 let accepted = a.accepted.clone().ok_or_else(|| {
                     err(ParalockErrorCode::Conflict, "no pre-signed refund: this swap was never funded")
@@ -1714,45 +2236,104 @@ impl Inner {
                     &[(key.public_key(), ours), (maker, accepted.maker_refund_signature.to_bytes())],
                 )?
             } else {
-                let htlc = Htlc::from_redeem_script(&record.swap.zcash.redeem_script.to_bytes(), network)?;
-                let utxo = Utxo {
-                    txid: Txid::from_display_hex(&funding_txid)?,
-                    vout: funding_vout,
-                    value: record.swap.zcash.amount_zat,
-                    script_pubkey: htlc.script_pubkey().to_vec(),
-                };
-                zc::build_htlc_refund(&htlc, &utxo, &self.cfg.zcash_key, &to, &options)?
+                self.htlc_refund(&record, branch_id)?
             };
             record.refund = Some(StoredTx { txid: signed.txid.to_display_hex(), hex: signed.hex });
             self.save(&mut record).await?;
         }
-        let refund = record.refund.clone().ok_or_else(|| Error::Internal("no refund".into()))?;
-        self.cfg.zcash.send_raw_transaction(&refund.hex).await?;
+        let mut refund = record.refund.clone().ok_or_else(|| Error::Internal("no refund".into()))?;
+        if let Err(e) = self.cfg.zcash.send_raw_transaction(&refund.hex).await {
+            let resigned = if e.is_rejection() { self.resign_htlc_refund(&mut record, &refund).await? } else { None };
+            match resigned {
+                Some(again) => {
+                    refund = again;
+                    self.cfg.zcash.send_raw_transaction(&refund.hex).await?;
+                }
+                // Unless an earlier attempt already got it to the node, the refusal stands.
+                None if self.cfg.zcash.get_raw_transaction(&refund.txid).await.is_ok() => {}
+                None => return Err(e.into()),
+            }
+        }
         record.swap.zcash.refund_txid = Some(refund.txid.clone());
         let txid = refund.txid.clone();
-        self.poll(
-            &format!("Zcash transaction {txid}"),
-            self.cfg.timeouts.funding_confirmation,
-            || async {
-                Ok(match self.cfg.zcash.get_raw_transaction(&txid).await {
-                    Ok(tx) if tx.confirmations > 0 => Some(()),
-                    _ => None,
-                })
-            },
-            None::<fn() -> std::future::Ready<Result<bool>>>,
-        )
-        .await
-        .map_err(|e| poll_error(e, &format!("Zcash transaction {txid}")))?;
+        let candidates: Vec<String> = std::iter::once(txid.clone()).chain(record.previous_refunds.clone()).collect();
+        let mined = self
+            .poll(
+                &format!("Zcash transaction {txid}"),
+                self.cfg.timeouts.funding_confirmation,
+                || async {
+                    for candidate in &candidates {
+                        if let Ok(tx) = self.cfg.zcash.get_raw_transaction(candidate).await
+                            && tx.confirmations > 0
+                        {
+                            return Ok(Some(candidate.clone()));
+                        }
+                    }
+                    Ok(None)
+                },
+                None::<fn() -> std::future::Ready<Result<bool>>>,
+            )
+            .await
+            .map_err(|e| poll_error(e, &format!("Zcash transaction {txid}")))?;
+        record.swap.zcash.refund_txid = Some(mined.clone());
         self.transition(
             &mut record,
             Some(TakerStage::Refunded),
             Some(SwapStatus::RefundedZcash),
             Chain::Zcash,
-            Some(refund.txid),
+            Some(mined),
             Some("Refunded the ZEC after the timeout".into()),
         )
         .await?;
         Ok(record.swap)
+    }
+
+    /// The htlc refund of `record`'s lock to its return address, signed for `branch_id`.
+    fn htlc_refund(&self, record: &TakerSwapRecord, branch_id: u32) -> Result<zc::SignedTx> {
+        let network = self.cfg.network;
+        let to = TransparentAddress::decode_for(&record.return_address, network)?;
+        let htlc = Htlc::from_redeem_script(&record.swap.zcash.redeem_script.to_bytes(), network)?;
+        let utxo = Utxo {
+            txid: Txid::from_display_hex(&record.funding.txid)?,
+            vout: record.funding.vout,
+            value: record.swap.zcash.amount_zat,
+            script_pubkey: htlc.script_pubkey().to_vec(),
+        };
+        Ok(zc::build_htlc_refund(&htlc, &utxo, &self.cfg.zcash_key, &to, &TxOptions::new(branch_id, network))?)
+    }
+
+    /// After the node refused the stored refund: if a network upgrade changed the consensus branch id since it was
+    /// signed, signs it again (htlc mode; the earlier txid is kept in `previous_refunds`) and returns the new one.
+    /// The pre-signed refund of a private swap can't be re-signed (the maker's signature commits to the branch id).
+    async fn resign_htlc_refund(&self, record: &mut TakerSwapRecord, refund: &StoredTx) -> Result<Option<StoredTx>> {
+        let signed_for = paralock_core::encoding::decode_hex(&refund.hex)
+            .ok()
+            .and_then(|bytes| zc::parse_tx(&bytes).ok())
+            .map(|parsed| parsed.tx.branch_id);
+        let branch_id = self.cfg.zcash.get_next_branch_id().await?;
+        if signed_for == Some(branch_id) {
+            return Ok(None);
+        }
+        if record.adaptor.is_some() {
+            return Err(err(
+                ParalockErrorCode::Conflict,
+                format!(
+                    "the consensus branch id changed (now {branch_id:#010x}) since the maker pre-signed the refund, \
+                     which can't be signed again; it can never be mined"
+                ),
+            ));
+        }
+        let signed = self.htlc_refund(record, branch_id)?;
+        tracing::warn!(
+            swap = short(&record.id),
+            branch_id = format!("{branch_id:#010x}"),
+            "taker: the consensus branch id changed since the refund was signed; signing it again"
+        );
+        let again = StoredTx { txid: signed.txid.to_display_hex(), hex: signed.hex };
+        record.previous_refunds.push(refund.txid.clone());
+        record.refund = Some(again.clone());
+        self.save(record).await?; // persisted before it is broadcast
+        Ok(Some(again))
     }
 
     // helpers --------------------------------------------------------------------------------------------------------
@@ -1847,18 +2428,114 @@ fn poll_error(e: PollEnd, what: &str) -> Error {
     }
 }
 
-/// Submits a claim; a relayer's failure says how to claim from your own account instead.
-fn submit_claim(relayed: bool, result: core::result::Result<Hex, crate::evm::EvmError>) -> Result<Hex> {
-    match result {
-        Ok(tx) => Ok(tx),
-        Err(e) if relayed => Err(err(
+/// A failed claim send: a relayer's failure says how to claim from your own account instead.
+fn claim_error(relayed: bool, e: EvmError) -> Error {
+    if relayed {
+        return err(
             ParalockErrorCode::Unavailable,
             format!(
                 "the relayer did not submit the claim ({e}); resume the swap with relay_claim: false (relayClaim: false) to submit it from your own account before the lock expires"
             ),
-        )),
-        Err(e) => Err(e.into()),
+        );
     }
+    e.into()
+}
+
+/// True for an error that ends following a claim; RPC failures are retried.
+fn is_final(e: &Error) -> bool {
+    match e {
+        Error::Evm(_) | Error::Zcash(_) => false,
+        Error::Protocol(p) => p.code != ParalockErrorCode::Unavailable,
+        _ => true,
+    }
+}
+
+/// The claim transactions sent so far, for messages.
+fn claim_hashes(record: &TakerSwapRecord) -> String {
+    let hashes: Vec<String> = record.claim.iter().flat_map(|c| c.txs.iter().map(|t| t.hash.to_string())).collect();
+    if hashes.is_empty() { "none sent".to_owned() } else { hashes.join(", ") }
+}
+
+/// A completed release signature as stored: `r ‖ s ‖ v`, hex.
+fn signature_hex(signature: &ClaimSignature) -> SecretString {
+    let mut bytes = Zeroizing::new(Vec::with_capacity(65));
+    bytes.extend_from_slice(&signature.r);
+    bytes.extend_from_slice(&signature.s);
+    bytes.push(signature.v);
+    secret_hex(&bytes)
+}
+
+fn parse_signature(hex: &str) -> Result<ClaimSignature> {
+    let bytes = Zeroizing::new(paralock_core::encoding::decode_hex(hex.strip_prefix("0x").unwrap_or(hex))?);
+    let (Some(r), Some(s), Some(v)) = (bytes.get(..32), bytes.get(32..64), bytes.get(64).filter(|_| bytes.len() == 65))
+    else {
+        return Err(Error::Internal("the stored claim signature is not 65 bytes".into()));
+    };
+    let (Ok(r), Ok(s)) = (<[u8; 32]>::try_from(r), <[u8; 32]>::try_from(s)) else {
+        return Err(Error::Internal("the stored claim signature is malformed".into()));
+    };
+    Ok(paralock_core::evm::normalize_claim_signature(r, s, u64::from(*v))?)
+}
+
+/// Where the maker's lock stands, as the taker sees it.
+enum LockOutcome {
+    Empty,
+    Active,
+    Refunded,
+    Claimed,
+}
+
+/// A claim ready to send: the client that sends it and the call's arguments.
+enum ClaimCall {
+    Htlc { client: Arc<dyn EvmClient>, swap: HtlcSwap, preimage: Secret },
+    Adaptor { client: Arc<dyn AdaptorEvmClient>, swap: AdaptorSwap, signature: ClaimSignature },
+}
+
+impl ClaimCall {
+    fn info(&self) -> &dyn ChainInfo {
+        match self {
+            Self::Htlc { client, .. } => client.as_ref(),
+            Self::Adaptor { client, .. } => client.as_ref(),
+        }
+    }
+
+    async fn simulate(&self) -> core::result::Result<(), EvmError> {
+        match self {
+            Self::Htlc { client, swap, preimage } => client.simulate_claim(swap, preimage).await,
+            Self::Adaptor { client, swap, signature } => client.simulate_claim(swap, signature).await,
+        }
+    }
+
+    async fn sign(&self, replacing: Option<&SentTx>) -> core::result::Result<SentTx, EvmError> {
+        match self {
+            Self::Htlc { client, swap, preimage } => client.sign_claim(swap, preimage, replacing).await,
+            Self::Adaptor { client, swap, signature } => client.sign_claim(swap, signature, replacing).await,
+        }
+    }
+
+    async fn send(&self) -> core::result::Result<SentTx, EvmError> {
+        match self {
+            Self::Htlc { client, swap, preimage } => client.send_claim(swap, preimage).await,
+            Self::Adaptor { client, swap, signature } => client.send_claim(swap, signature).await,
+        }
+    }
+
+    async fn bump(&self, pending: &SentTx) -> core::result::Result<SentTx, EvmError> {
+        match self {
+            Self::Htlc { client, swap, preimage } => client.bump_claim(swap, preimage, pending).await,
+            Self::Adaptor { client, swap, signature } => client.bump_claim(swap, signature, pending).await,
+        }
+    }
+}
+
+/// A message that may come from the maker, bounded and with control characters replaced, for records and events.
+fn sanitize_remote(message: &str) -> String {
+    let mut out: String =
+        message.chars().take(MAX_REMOTE_MESSAGE).map(|c| if c.is_control() { ' ' } else { c }).collect();
+    if message.chars().count() > MAX_REMOTE_MESSAGE {
+        out.push('…');
+    }
+    out
 }
 
 /// Picks the UTXOs a funding spends: the largest first, until they cover `amount` plus the ZIP 317 fee of a funding
@@ -1876,14 +2553,6 @@ fn select_utxos(mut utxos: Vec<Utxo>, amount: u64) -> Vec<Utxo> {
         }
     }
     utxos
-}
-
-/// A failed claim simulation: nothing was sent, and nothing is revealed.
-fn simulate(result: core::result::Result<(), crate::evm::EvmError>) -> Result<()> {
-    result.map_err(|e| {
-        let code = if e.transient { ParalockErrorCode::Unavailable } else { ParalockErrorCode::LockMismatch };
-        err(code, format!("the claim would not go through ({e}); nothing was sent"))
-    })
 }
 
 fn hashlock_of(record: &TakerSwapRecord) -> Result<[u8; 32]> {
@@ -1956,5 +2625,8 @@ mod tests {
         assert!(TakerStage::Claimed.is_done() && !TakerStage::Locked.is_done());
         assert!(TakerStage::Reserved.is_unfunded() && !TakerStage::Funded.is_unfunded());
         assert_eq!(serde_json::to_string(&TakerStage::Prepared).unwrap(), "\"prepared\"");
+        for stage in [TakerStage::Claiming, TakerStage::Accepted, TakerStage::Abandoned] {
+            assert_eq!(serde_json::to_string(&stage).unwrap(), format!("\"{}\"", stage.as_str()));
+        }
     }
 }

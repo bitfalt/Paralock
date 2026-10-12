@@ -18,7 +18,7 @@ use super::{AddressUtxo, NodeError, NodeInput, NodeTransaction, NodeTxOut, Upgra
 use crate::runtime::backoff_delay;
 
 /// Options of [`ZcashRpc`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZcashRpcOptions {
     /// Per-request timeout. Default 15 s.
     pub timeout: Duration,
@@ -28,6 +28,9 @@ pub struct ZcashRpcOptions {
     pub retry_delay: Duration,
     /// Largest response body accepted. Default 64 MiB.
     pub max_response_bytes: usize,
+    /// The `User-Agent` header. Default [`crate::DEFAULT_USER_AGENT`] (a generic value; it matters with a node or an
+    /// RPC provider run by someone else).
+    pub user_agent: String,
 }
 
 impl Default for ZcashRpcOptions {
@@ -37,6 +40,7 @@ impl Default for ZcashRpcOptions {
             retries: 3,
             retry_delay: Duration::from_millis(250),
             max_response_bytes: 64 * 1024 * 1024,
+            user_agent: crate::DEFAULT_USER_AGENT.to_owned(),
         }
     }
 }
@@ -110,14 +114,15 @@ impl ZcashRpc {
         if !(url.starts_with("http://") || url.starts_with("https://")) {
             return Err(crate::Error::invalid_request("the Zcash RPC URL must be an http(s) URL"));
         }
-        let client = crate::runtime::http_client_builder()
+        let client = crate::runtime::http_client_builder(&options.user_agent)
             .timeout(options.timeout)
             .build()
             .map_err(|e| crate::Error::Internal(format!("HTTP client: {}", e.without_url())))?;
         Ok(Self { url, client, auth: None, options, next_id: AtomicU64::new(1) })
     }
 
-    /// Uses HTTP basic auth (Zebra cookie auth, or zcashd-style `rpcuser` / `rpcpassword`).
+    /// Uses HTTP basic auth (Zebra cookie auth, or zcashd-style `rpcuser` / `rpcpassword`). The password is moved
+    /// into a [`Zeroizing`] buffer, wiped on drop.
     #[must_use]
     pub fn with_auth(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
         self.auth = Some((username.into(), Zeroizing::new(password.into())));
@@ -233,18 +238,19 @@ fn hex_field(value: Option<&Value>) -> Option<String> {
         .map(|s| s.to_ascii_lowercase())
 }
 
-/// Parses a verbose `getrawtransaction` result, checking (when the version allows it) that the transaction hashes to
-/// the txid that was asked for.
+/// Parses a verbose `getrawtransaction` result, checking that the transaction's bytes hash to the txid that was asked
+/// for. It fails closed: a transaction this client can't hash (a version other than v1–v5, or malformed bytes) is an
+/// [`NodeError::InvalidResponse`], never accepted unchecked.
 pub(crate) fn parse_node_transaction(method: &str, requested: &str, v: &Value) -> Result<NodeTransaction, NodeError> {
     let hex = hex_field(v.get("hex")).ok_or_else(|| invalid(method, "hex is missing"))?;
     let txid = txid_field(method, v.get("txid"), "txid")?;
     if !txid.eq_ignore_ascii_case(requested) {
         return Err(invalid(method, format!("the node returned transaction {txid}, expected {requested}")));
     }
-    if let Ok(bytes) = paralock_core::encoding::decode_hex(&hex)
-        && let Ok(decoded) = decode_tx(&bytes)
-        && !decoded.txid.to_display_hex().eq_ignore_ascii_case(&txid)
-    {
+    let bytes = paralock_core::encoding::decode_hex(&hex).map_err(|_| invalid(method, "hex is not hex"))?;
+    let decoded = decode_tx(&bytes)
+        .map_err(|e| invalid(method, format!("can't check that the transaction hashes to its txid: {e}")))?;
+    if !decoded.txid.to_display_hex().eq_ignore_ascii_case(&txid) {
         return Err(invalid(method, "the transaction bytes do not hash to its txid"));
     }
     let height = non_negative(v.get("height")).and_then(|h| u32::try_from(h).ok()).filter(|h| *h > 0);
@@ -335,7 +341,12 @@ impl ZcashNode for ZcashRpc {
             if id.eq_ignore_ascii_case(txid) {
                 continue;
             }
-            let tx = self.get_raw_transaction(&id).await?;
+            let tx = match self.get_raw_transaction(&id).await {
+                Ok(tx) => tx,
+                // A transaction this client can't hash (another version) can't be a Paralock spend.
+                Err(NodeError::InvalidResponse { .. }) => continue,
+                Err(e) => return Err(e),
+            };
             if tx
                 .vin
                 .iter()
@@ -391,32 +402,50 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
 
+    fn sample_tx() -> paralock_core::zcash::TransparentTx {
+        paralock_core::zcash::TransparentTx {
+            branch_id: 0x37a5_165b,
+            lock_time: 0,
+            expiry_height: 0,
+            inputs: vec![],
+            outputs: vec![paralock_core::zcash::TxOut { value: 5, script_pubkey: vec![0x51] }],
+        }
+    }
+
     #[test]
     fn parses_mempool_and_mined_transactions() {
-        let txid = "46d552c030f1bce824c2179fcdbefd7a53a4892a2e0e39632ee77a6b8a3a367e";
-        let mined = json!({ "hex": "00", "txid": txid, "height": 8300, "confirmations": 74,
+        let sample = sample_tx();
+        let txid = sample.txid().to_display_hex();
+        let hex = sample.to_hex();
+        let mined = json!({ "hex": hex, "txid": txid, "height": 8300, "confirmations": 74,
             "vin": [{ "coinbase": "02", "sequence": 1 }, { "txid": "AB".repeat(32), "vout": 1, "scriptSig": { "hex": "51" } }] });
-        let tx = parse_node_transaction("getrawtransaction", txid, &mined).unwrap();
+        let tx = parse_node_transaction("getrawtransaction", &txid, &mined).unwrap();
         assert_eq!((tx.height, tx.confirmations), (Some(8300), 74));
         assert_eq!(tx.vin[0].coinbase.as_deref(), Some("02"));
         assert_eq!(tx.vin[1].txid.as_deref(), Some("ab".repeat(32).as_str()));
         assert_eq!(tx.vin[1].script_sig.as_deref(), Some("51"));
-        let mempool = json!({ "hex": "00", "txid": txid, "height": -1, "confirmations": 0, "vin": [] });
-        let tx = parse_node_transaction("getrawtransaction", txid, &mempool).unwrap();
+        let mempool = json!({ "hex": hex, "txid": txid, "height": -1, "confirmations": 0, "vin": [] });
+        let tx = parse_node_transaction("getrawtransaction", &txid, &mempool).unwrap();
         assert_eq!((tx.height, tx.confirmations), (None, 0));
         let other = parse_node_transaction("getrawtransaction", &"00".repeat(32), &mempool).unwrap_err();
         assert!(matches!(other, NodeError::InvalidResponse { .. }));
     }
 
     #[test]
+    fn fails_closed_on_bytes_it_cannot_hash() {
+        // A v6 header, and garbage: the txid can't be checked, so the answer is refused (never accepted unchecked).
+        let txid = "46d552c030f1bce824c2179fcdbefd7a53a4892a2e0e39632ee77a6b8a3a367e";
+        for hex in ["06000080", "00", "0500008000"] {
+            let v = json!({ "hex": hex, "txid": txid, "vin": [] });
+            let e = parse_node_transaction("getrawtransaction", txid, &v).unwrap_err();
+            assert!(matches!(e, NodeError::InvalidResponse { .. }), "{hex}");
+            assert!(!e.is_rejection());
+        }
+    }
+
+    #[test]
     fn refuses_bytes_that_do_not_hash_to_the_txid() {
-        let tx = paralock_core::zcash::TransparentTx {
-            branch_id: 0x37a5_165b,
-            lock_time: 0,
-            expiry_height: 0,
-            inputs: vec![],
-            outputs: vec![paralock_core::zcash::TxOut { value: 5, script_pubkey: vec![0x51] }],
-        };
+        let tx = sample_tx();
         let real = tx.txid().to_display_hex();
         let v = json!({ "hex": tx.to_hex(), "txid": real, "vin": [] });
         assert!(parse_node_transaction("m", &real, &v).is_ok());

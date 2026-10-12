@@ -91,6 +91,8 @@ mod feed {
         pub timeout: Duration,
         /// Price to use when the feed is down and no recent price is cached. Only for devnets and demos.
         pub fallback: Option<f64>,
+        /// The `User-Agent` header (the API refuses requests without one). Default [`crate::DEFAULT_USER_AGENT`].
+        pub user_agent: String,
     }
 
     impl Default for CoinGeckoOptions {
@@ -101,6 +103,7 @@ mod feed {
                 max_stale: Duration::from_secs(300),
                 timeout: Duration::from_secs(3),
                 fallback: None,
+                user_agent: crate::DEFAULT_USER_AGENT.to_owned(),
             }
         }
     }
@@ -123,7 +126,7 @@ mod feed {
 
         /// The feed with explicit options.
         pub fn with_options(options: CoinGeckoOptions) -> crate::Result<Self> {
-            let client = crate::runtime::http_client_builder()
+            let client = crate::runtime::http_client_builder(&options.user_agent)
                 .timeout(options.timeout)
                 .build()
                 .map_err(|e| crate::Error::Internal(format!("HTTP client: {}", e.without_url())))?;
@@ -147,9 +150,18 @@ mod feed {
                 tracing::warn!(status = response.status().as_u16(), "the ZEC price feed refused the request");
                 return None;
             }
-            let bytes = response.bytes().await.ok()?;
-            if bytes.len() > 64 * 1024 {
+            // Read at most 64 KiB, chunk by chunk: a hostile or broken endpoint can't make us buffer a huge body.
+            const MAX: usize = 64 * 1024;
+            if response.content_length().is_some_and(|n| n > MAX as u64) {
                 return None;
+            }
+            let mut response = response;
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response.chunk().await.ok()? {
+                if bytes.len() + chunk.len() > MAX {
+                    return None;
+                }
+                bytes.extend_from_slice(&chunk);
             }
             let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
             value.get("zcash")?.get("usd")?.as_f64().filter(|p| p.is_finite() && *p > 0.0)

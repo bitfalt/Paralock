@@ -178,7 +178,7 @@ pub trait ZcashNode: Send + Sync {
 
     /// The node's tip and network-upgrade schedule (spec §3.13). Optional: backends that can't report upgrades
     /// return [`NodeError::Unsupported`], and the engines then skip the upgrade check with a logged warning (as the
-    /// spec allows).
+    /// spec allows), except for private swaps on mainnet, which they refuse unless `allow_unknown_upgrades` is set.
     async fn network_upgrades(&self) -> Result<UpgradeSchedule, NodeError> {
         Err(NodeError::Unsupported("networkUpgrades"))
     }
@@ -204,30 +204,79 @@ pub async fn is_unspent(node: &dyn ZcashNode, address: &str, txid: &str, vout: u
     }
 }
 
-/// Applies the network-upgrade rule (spec §3.13) for a pre-signed spend at `refund_height`: fails with
-/// `unsafe_timeouts` if an upgrade activates after the next block and at or before `refund_height + 1`. Backends that
-/// can't report upgrades yield [`UpgradeCheck::BackendCannotReport`], with a warning.
-pub(crate) async fn upgrade_check(node: &dyn ZcashNode, refund_height: u32) -> crate::Result<UpgradeCheck> {
+/// The node's network-upgrade schedule (spec §3.13), or `None` when the backend can't report one.
+pub(crate) async fn upgrade_schedule(node: &dyn ZcashNode) -> crate::Result<Option<UpgradeSchedule>> {
     match node.network_upgrades().await {
-        Ok(schedule) => Ok(UpgradeCheck::Checked(protocol::assert_no_upgrade_before(
+        Ok(schedule) => Ok(Some(schedule)),
+        Err(NodeError::Unsupported(_)) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Applies the network-upgrade rule (spec §3.13) for a pre-signed spend at `refund_height`: fails with
+/// `unsafe_timeouts` if an upgrade activates after the next block and at or before `refund_height + 1`.
+///
+/// Without a schedule (a backend that can't report upgrades) the rule can't be checked. The spec allows skipping it,
+/// which is logged; on mainnet that is refused (`unavailable`) unless `allow_unknown` (the engines'
+/// `allow_unknown_upgrades` option): an upgrade before the refund height would invalidate the pre-signed refund.
+pub(crate) fn upgrade_rule(
+    schedule: Option<&UpgradeSchedule>,
+    refund_height: u32,
+    network: paralock_core::zcash::Network,
+    allow_unknown: bool,
+) -> crate::Result<UpgradeCheck> {
+    match schedule {
+        Some(schedule) => Ok(UpgradeCheck::Checked(protocol::assert_no_upgrade_before(
             &schedule.upgrades,
             schedule.tip,
             refund_height,
         )?)),
-        Err(NodeError::Unsupported(_)) => {
+        None if network == paralock_core::zcash::Network::Mainnet && !allow_unknown => Err(crate::Error::protocol(
+            protocol::ParalockErrorCode::Unavailable,
+            "the Zcash backend can't report network upgrades, which private swaps on mainnet need (an upgrade before \
+             the refund height would invalidate the pre-signed refund); use a full node, or set allow_unknown_upgrades",
+        )),
+        None => {
             tracing::warn!(
                 "this Zcash backend can't report network upgrades; skipping the upgrade check for pre-signed spends"
             );
             Ok(UpgradeCheck::BackendCannotReport)
         }
-        Err(e) => Err(e.into()),
     }
+}
+
+/// [`upgrade_schedule`] then [`upgrade_rule`].
+pub(crate) async fn upgrade_check(
+    node: &dyn ZcashNode,
+    refund_height: u32,
+    network: paralock_core::zcash::Network,
+    allow_unknown: bool,
+) -> crate::Result<UpgradeCheck> {
+    upgrade_rule(upgrade_schedule(node).await?.as_ref(), refund_height, network, allow_unknown)
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
+    use paralock_core::protocol::ParalockErrorCode;
+    use paralock_core::zcash::Network;
+
+    #[test]
+    fn refuses_an_unknown_upgrade_schedule_for_mainnet_private_swaps_unless_allowed() {
+        let e = upgrade_rule(None, 1_000, Network::Mainnet, false).unwrap_err();
+        assert_eq!(e.code(), ParalockErrorCode::Unavailable);
+        assert!(e.to_string().contains("allow_unknown_upgrades"), "{e}");
+        assert_eq!(upgrade_rule(None, 1_000, Network::Mainnet, true).unwrap(), UpgradeCheck::BackendCannotReport);
+        assert_eq!(upgrade_rule(None, 1_000, Network::Testnet, false).unwrap(), UpgradeCheck::BackendCannotReport);
+        let schedule = UpgradeSchedule {
+            tip: 900,
+            upgrades: vec![NetworkUpgrade { name: "NU7".into(), branch_id: 0x7719_0ad9, activation_height: 950 }],
+        };
+        let e = upgrade_rule(Some(&schedule), 1_000, Network::Mainnet, false).unwrap_err();
+        assert_eq!(e.code(), ParalockErrorCode::UnsafeTimeouts);
+        assert!(matches!(upgrade_rule(Some(&schedule), 940, Network::Mainnet, false), Ok(UpgradeCheck::Checked(_))));
+    }
 
     #[test]
     fn recognizes_already_known_broadcasts() {

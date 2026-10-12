@@ -15,8 +15,13 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use zeroize::Zeroizing;
+
+use crate::records::{RecordError, StoredRecord, decode_record};
+
+/// Where [`SwapStore::quarantine`] moves records that can't be read: `quarantine/<key>` (a `quarantine/` directory in
+/// a [`FileStore`]).
+pub const QUARANTINE_PREFIX: &str = "quarantine/";
 
 /// A store failure.
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +64,20 @@ pub trait SwapStore: Send + Sync {
     async fn delete(&self, key: &str) -> Result<(), StoreError>;
     /// All records whose key starts with `prefix`, with their keys, sorted by key.
     async fn list(&self, prefix: &str) -> Result<Vec<(String, Zeroizing<String>)>, StoreError>;
+
+    /// Moves the record under `key` aside, out of every listing the engines make, without losing it: the engines
+    /// call it for a record they can't read (corrupted, edited by hand, written by an incompatible SDK), so that one
+    /// bad record never stops the others from loading. An operator inspects it and restores it by hand.
+    ///
+    /// The default copies it to `quarantine/<key>` ([`QUARANTINE_PREFIX`]) and then deletes the original; a
+    /// [`FileStore`] renames the file into its `quarantine/` directory.
+    async fn quarantine(&self, key: &str) -> Result<(), StoreError> {
+        check_store_key(key)?;
+        if let Some(json) = self.get(key).await? {
+            self.put(&format!("{QUARANTINE_PREFIX}{key}"), &json).await?;
+        }
+        self.delete(key).await
+    }
 }
 
 /// Fails unless `key` is a valid store key.
@@ -71,11 +90,12 @@ pub fn check_store_key(key: &str) -> Result<(), StoreError> {
     if ok { Ok(()) } else { Err(StoreError::InvalidKey(key.chars().take(200).collect())) }
 }
 
-/// Reads and decodes a typed record.
-pub(crate) async fn get_record<T: DeserializeOwned>(store: &dyn SwapStore, key: &str) -> Result<Option<T>, StoreError> {
+/// Reads and decodes a typed record (migrating older record versions). A record that doesn't decode is
+/// [`StoreError::Corrupt`].
+pub(crate) async fn get_record<T: StoredRecord>(store: &dyn SwapStore, key: &str) -> Result<Option<T>, StoreError> {
     match store.get(key).await? {
         None => Ok(None),
-        Some(json) => serde_json::from_str(&json)
+        Some(json) => decode_record::<T>(&json)
             .map(Some)
             .map_err(|e| StoreError::Corrupt { key: key.to_owned(), message: e.to_string() }),
     }
@@ -90,16 +110,51 @@ pub(crate) async fn put_record<T: Serialize>(store: &dyn SwapStore, key: &str, r
     store.put(key, &json).await
 }
 
-/// Lists and decodes typed records.
-pub(crate) async fn list_records<T: DeserializeOwned>(
+/// A store key with the swap id shortened, for logs (swap ids link the two legs of a swap).
+pub(crate) fn short_key(key: &str) -> String {
+    let cut = key.rfind('/').map_or(0, |i| i + 1);
+    let id = &key[cut..];
+    format!("{}{}", &key[..cut], id.get(..10).unwrap_or(id))
+}
+
+/// Lists and decodes typed records, one by one: a record that can't be read never stops the others from loading.
+///
+/// - A record written by a newer version of the SDK (a higher `version`) is skipped and left in place, with an error
+///   log: upgrade to handle it.
+/// - Any other record that doesn't decode is moved aside with [`SwapStore::quarantine`], with an error log.
+///
+/// Only a failure of the listing itself is an error.
+pub(crate) async fn load_records<T: StoredRecord>(
     store: &dyn SwapStore,
     prefix: &str,
 ) -> Result<Vec<(String, T)>, StoreError> {
     let mut out = Vec::new();
     for (key, json) in store.list(prefix).await? {
-        let record = serde_json::from_str(&json)
-            .map_err(|e| StoreError::Corrupt { key: key.clone(), message: e.to_string() })?;
-        out.push((key, record));
+        match decode_record::<T>(&json) {
+            Ok(record) => out.push((key, record)),
+            Err(RecordError::Newer { version }) => tracing::error!(
+                key = %short_key(&key),
+                version,
+                supported = T::VERSION,
+                "a {} record was written by a newer version of paralock; skipping it (upgrade to handle it)",
+                T::WHAT
+            ),
+            Err(RecordError::Invalid(message)) => match store.quarantine(&key).await {
+                Ok(()) => tracing::error!(
+                    key = %short_key(&key),
+                    error = %message,
+                    "an unreadable {} record was moved to quarantine/; inspect it and restore it by hand",
+                    T::WHAT
+                ),
+                Err(e) => tracing::error!(
+                    key = %short_key(&key),
+                    error = %message,
+                    quarantine_error = %e,
+                    "an unreadable {} record could not be moved to quarantine/; skipping it",
+                    T::WHAT
+                ),
+            },
+        }
     }
     Ok(out)
 }
@@ -166,12 +221,15 @@ impl SwapStore for MemoryStore {
 
 /// One JSON file per record in a directory: the durable store for real funds.
 ///
-/// - The directory is created with mode `0700` and files with `0600` (Unix). A directory readable by others is
-///   reported with a warning.
+/// - The directory is created with mode `0700` and files with `0600` (Unix). [`FileStore::open`] warns about an
+///   existing directory that other users can access; [`FileStore::open_private`] (what the builders use on mainnet)
+///   restricts it to `0700`, or fails if it can't.
 /// - Each `put` writes a temporary file, fsyncs it, renames it over the old one and fsyncs the directory, so a record
-///   is either the old version or the new one, never a torn write.
+///   is either the old version or the new one, never a torn write. A failed directory fsync is an error. Temporary
+///   files left by a crash are removed when the store is opened.
 /// - Writes are serialized in-process, and an exclusive lock on `<dir>/.lock` keeps a second process (a second maker
 ///   or taker on the same directory) out.
+/// - [`SwapStore::quarantine`] moves a record's file into `<dir>/quarantine/`.
 ///
 /// The file layout is the TypeScript `FileSwapStore`'s (`taker~<id>.json`, `maker~swap~<id>.json`), but the record
 /// formats of the two SDKs differ: don't point both at the same directory.
@@ -207,10 +265,21 @@ async fn blocking<T: Send + 'static>(
 }
 
 impl FileStore {
-    /// Opens (creating it if needed) the store directory and takes its exclusive lock.
+    /// Opens (creating it if needed) the store directory and takes its exclusive lock. An existing directory that
+    /// other users can access is reported with a warning (see [`FileStore::open_private`]).
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, StoreError> {
-        let dir = dir.into();
-        create_private_dir(&dir)?;
+        Self::open_with(dir.into(), false)
+    }
+
+    /// [`FileStore::open`], but an existing directory that other users can access is restricted to `0700` (Unix), and
+    /// the store fails to open if that isn't possible (e.g. the directory belongs to another user). The builders use
+    /// it on mainnet: the records hold private keys and swap secrets.
+    pub fn open_private(dir: impl Into<PathBuf>) -> Result<Self, StoreError> {
+        Self::open_with(dir.into(), true)
+    }
+
+    fn open_with(dir: PathBuf, strict: bool) -> Result<Self, StoreError> {
+        create_private_dir(&dir, strict)?;
         let lock_path = dir.join(".lock");
         let mut options = std::fs::OpenOptions::new();
         options.create(true).truncate(false).read(true).write(true);
@@ -225,6 +294,8 @@ impl FileStore {
             Err(std::fs::TryLockError::WouldBlock) => return Err(StoreError::Locked(dir)),
             Err(std::fs::TryLockError::Error(e)) => return Err(io(e)),
         }
+        // We hold the lock: any temporary file is a leftover of a write that crashed before its rename.
+        sweep_temporary_files(&dir)?;
         Ok(Self { dir, write_lock: tokio::sync::Mutex::new(()), _lock: lock })
     }
 
@@ -233,12 +304,20 @@ impl FileStore {
         &self.dir
     }
 
+    /// A record's file: `<dir>/<key with ~>.json`, and `<dir>/quarantine/<rest with ~>.json` for
+    /// `quarantine/<rest>`.
     fn path(&self, key: &str) -> PathBuf {
-        self.dir.join(file_name(key))
+        match key.strip_prefix(QUARANTINE_PREFIX) {
+            Some(rest) => self.dir.join(QUARANTINE_DIR).join(file_name(rest)),
+            None => self.dir.join(file_name(key)),
+        }
     }
 }
 
-fn create_private_dir(dir: &Path) -> Result<(), StoreError> {
+/// The subdirectory of a [`FileStore`] that holds quarantined records.
+const QUARANTINE_DIR: &str = "quarantine";
+
+fn create_private_dir(dir: &Path, strict: bool) -> Result<(), StoreError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -247,21 +326,65 @@ fn create_private_dir(dir: &Path) -> Result<(), StoreError> {
         }
         let mode = std::fs::metadata(dir).map_err(io)?.permissions().mode();
         if mode & 0o077 != 0 {
-            tracing::warn!(
-                dir = %dir.display(),
-                "the swap store directory is accessible by other users; it holds private keys (chmod 700 it)"
-            );
+            if strict {
+                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| {
+                    StoreError::Io(format!(
+                        "the swap store directory {} is accessible by other users and can't be restricted to 0700: {e}",
+                        dir.display()
+                    ))
+                })?;
+                tracing::warn!(
+                    dir = %dir.display(),
+                    "the swap store directory was accessible by other users; restricted it to 0700"
+                );
+            } else {
+                tracing::warn!(
+                    dir = %dir.display(),
+                    "the swap store directory is accessible by other users; it holds private keys (chmod 700 it)"
+                );
+            }
         }
     }
     #[cfg(not(unix))]
-    std::fs::create_dir_all(dir).map_err(io)?;
+    {
+        let _ = strict;
+        std::fs::create_dir_all(dir).map_err(io)?;
+    }
     Ok(())
 }
 
-fn sync_dir(dir: &Path) {
-    // Persists renames and removals. Not supported on every platform; the rename itself is atomic regardless.
-    if let Ok(handle) = std::fs::File::open(dir) {
-        let _ = handle.sync_all();
+/// Removes `.<name>.<random>.tmp` files: writes interrupted before their rename (the store's lock is held).
+fn sweep_temporary_files(dir: &Path) -> Result<(), StoreError> {
+    for entry in std::fs::read_dir(dir).map_err(io)? {
+        let Ok(entry) = entry else { continue };
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        if name.starts_with('.') && name.ends_with(".tmp") && entry.file_type().is_ok_and(|t| t.is_file()) {
+            match std::fs::remove_file(entry.path()) {
+                Ok(()) => tracing::debug!(file = %name, "removed a temporary file left by an interrupted write"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io(e)),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Persists renames and removals in `dir`. A failure is an error (the caller can't know the change is durable), except
+/// on filesystems that don't support syncing a directory at all, where the rename itself is still atomic.
+fn sync_dir(dir: &Path) -> Result<(), StoreError> {
+    #[cfg(unix)]
+    {
+        let handle = std::fs::File::open(dir).map_err(io)?;
+        match handle.sync_all() {
+            Ok(()) => Ok(()),
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::InvalidInput | std::io::ErrorKind::Unsupported) => Ok(()),
+            Err(e) => Err(io(e)),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
     }
 }
 
@@ -287,8 +410,7 @@ fn write_atomically(dir: &Path, target: &Path, name: &str, json: &[u8]) -> Resul
         let _ = std::fs::remove_file(&tmp);
         return Err(io(e));
     }
-    sync_dir(dir);
-    Ok(())
+    sync_dir(dir)
 }
 
 #[async_trait]
@@ -311,31 +433,71 @@ impl SwapStore for FileStore {
     async fn put(&self, key: &str, json: &str) -> Result<(), StoreError> {
         check_store_key(key)?;
         let _guard = self.write_lock.lock().await;
-        let (dir, target, name) = (self.dir.clone(), self.path(key), file_name(key));
+        let target = self.path(key);
+        let dir = target.parent().map_or_else(|| self.dir.clone(), Path::to_path_buf);
+        let name = target.file_name().and_then(|n| n.to_str()).map(str::to_owned).unwrap_or_else(|| file_name(key));
         let json = Zeroizing::new(json.as_bytes().to_vec());
-        blocking(move || write_atomically(&dir, &target, &name, &json)).await
+        let quarantine = key.starts_with(QUARANTINE_PREFIX);
+        blocking(move || {
+            if quarantine {
+                create_private_dir(&dir, true)?;
+            }
+            write_atomically(&dir, &target, &name, &json)
+        })
+        .await
     }
 
     async fn delete(&self, key: &str) -> Result<(), StoreError> {
         check_store_key(key)?;
         let _guard = self.write_lock.lock().await;
-        let (dir, path) = (self.dir.clone(), self.path(key));
+        let path = self.path(key);
+        let dir = path.parent().map_or_else(|| self.dir.clone(), Path::to_path_buf);
         blocking(move || {
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(io(e)),
             }
-            sync_dir(&dir);
-            Ok(())
+            sync_dir(&dir)
+        })
+        .await
+    }
+
+    async fn quarantine(&self, key: &str) -> Result<(), StoreError> {
+        check_store_key(key)?;
+        let _guard = self.write_lock.lock().await;
+        let (dir, name) = (self.dir.clone(), file_name(key));
+        blocking(move || {
+            let from = dir.join(&name);
+            if !from.exists() {
+                return Ok(());
+            }
+            let quarantine = dir.join(QUARANTINE_DIR);
+            create_private_dir(&quarantine, true)?;
+            let mut to = quarantine.join(&name);
+            if to.exists() {
+                // Keep every quarantined version.
+                let mut suffix = [0u8; 4];
+                rand_core::RngCore::fill_bytes(&mut paralock_core::OsRng, &mut suffix);
+                to = quarantine.join(format!("{name}.{}", paralock_core::encoding::to_hex(&suffix)));
+            }
+            std::fs::rename(&from, &to).map_err(io)?;
+            sync_dir(&quarantine)?;
+            sync_dir(&dir)
         })
         .await
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<(String, Zeroizing<String>)>, StoreError> {
-        let dir = self.dir.clone();
-        let prefix = prefix.to_owned();
+        // `quarantine/…` keys live in the quarantine directory; any other prefix lists the store's own records.
+        let (dir, prefix, mapped) = match prefix.strip_prefix(QUARANTINE_PREFIX) {
+            Some(rest) => (self.dir.join(QUARANTINE_DIR), rest.to_owned(), true),
+            None => (self.dir.clone(), prefix.to_owned(), false),
+        };
         blocking(move || {
+            if mapped && !dir.exists() {
+                return Ok(Vec::new());
+            }
             let mut files: Vec<String> = std::fs::read_dir(&dir)
                 .map_err(io)?
                 .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
@@ -348,6 +510,7 @@ impl SwapStore for FileStore {
                 if !key.starts_with(&prefix) || check_store_key(&key).is_err() {
                     continue;
                 }
+                let key = if mapped { format!("{QUARANTINE_PREFIX}{key}") } else { key };
                 match std::fs::read_to_string(dir.join(&file)) {
                     Ok(json) => out.push((key, Zeroizing::new(json))),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

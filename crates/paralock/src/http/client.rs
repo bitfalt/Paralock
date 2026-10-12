@@ -31,6 +31,9 @@ pub struct HttpMakerApiOptions {
     pub headers: BTreeMap<String, String>,
     /// Largest response body accepted. Default 1 MiB.
     pub max_response_bytes: usize,
+    /// The `User-Agent` header. Default [`crate::DEFAULT_USER_AGENT`], a generic value: a client-specific one (an SDK
+    /// name and version) helps a maker tell its takers apart.
+    pub user_agent: String,
 }
 
 impl Default for HttpMakerApiOptions {
@@ -41,6 +44,7 @@ impl Default for HttpMakerApiOptions {
             retry_delay: Duration::from_millis(500),
             headers: BTreeMap::new(),
             max_response_bytes: 1024 * 1024,
+            user_agent: crate::DEFAULT_USER_AGENT.to_owned(),
         }
     }
 }
@@ -88,7 +92,10 @@ impl HttpMakerApi {
         if !(url.starts_with("http://") || url.starts_with("https://")) {
             return Err(Error::invalid_request("the maker URL must be an http(s) URL"));
         }
-        let client = crate::runtime::http_client_builder()
+        if network == Network::Mainnet && url.starts_with("http://") && !local_or_onion(&url) {
+            tracing::warn!("the maker URL is plain http: anyone on the path can see and link your swaps; use https");
+        }
+        let client = crate::runtime::http_client_builder(&options.user_agent)
             .timeout(options.timeout)
             .build()
             .map_err(|e| Error::Internal(format!("HTTP client: {}", e.without_url())))?;
@@ -151,7 +158,11 @@ impl HttpMakerApi {
                 attempt += 1;
                 continue;
             }
-            return Err(ErrorBody::from_response(status, &text).into());
+            // The maker's message is bounded (300 characters) by the parser; control characters are replaced too, so it
+            // is safe to log and to keep in a record.
+            let mut refusal = ErrorBody::from_response(status, &text);
+            refusal.message = refusal.message.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+            return Err(refusal.into());
         }
     }
 
@@ -162,6 +173,19 @@ impl HttpMakerApi {
     async fn get(&self, path: &str) -> Result<Value> {
         self.request(path, None, false).await?.ok_or_else(|| unavailable("maker: not found"))
     }
+}
+
+/// True for loopback hosts and Tor onion services (where plain http is fine).
+fn local_or_onion(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map_or(host, |(name, _)| name),
+    };
+    let host = host.to_ascii_lowercase();
+    host == "localhost" || host.ends_with(".onion") || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 async fn read_limited(mut response: reqwest::Response, max: usize) -> core::result::Result<String, ()> {

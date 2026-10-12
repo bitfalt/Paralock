@@ -5,6 +5,8 @@
 //! counterparty; the other variants describe local infrastructure (a node, an EVM RPC, the store) and are never sent
 //! to clients by the maker server.
 
+use core::fmt;
+
 use paralock_core::protocol::{ParalockError, ParalockErrorCode, Swap};
 
 use crate::evm::EvmError;
@@ -15,7 +17,10 @@ use crate::zcash::NodeError;
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 /// Any error the SDK returns.
-#[derive(Debug, thiserror::Error)]
+///
+/// `Debug` never prints a [`Error::SwapFailed`] swap's adaptor data (pre-signatures, adaptor point, escrow data): only
+/// its id, mode, status and transactions.
+#[derive(thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     /// An expected protocol failure with a stable code (a refused quote, an unsafe window, a maker's refusal, …).
@@ -46,6 +51,48 @@ pub enum Error {
     /// Anything else (a bug or an unexpected condition). Its message is never sent to clients.
     #[error("{0}")]
     Internal(String),
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Protocol(e) => f.debug_tuple("Protocol").field(e).finish(),
+            Self::Zcash(e) => f.debug_tuple("Zcash").field(e).finish(),
+            Self::Evm(e) => f.debug_tuple("Evm").field(e).finish(),
+            Self::Store(e) => f.debug_tuple("Store").field(e).finish(),
+            Self::Core(e) => f.debug_tuple("Core").field(e).finish(),
+            Self::SwapFailed { swap, source } => {
+                f.debug_struct("SwapFailed").field("swap", &SwapSummary(swap)).field("source", source).finish()
+            }
+            Self::Internal(message) => f.debug_tuple("Internal").field(message).finish(),
+        }
+    }
+}
+
+/// A swap's `Debug` without its adaptor data (used by the records' and errors' `Debug`).
+pub(crate) struct SwapSummary<'a>(pub &'a Swap);
+
+impl fmt::Debug for SwapSummary<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.0;
+        f.debug_struct("Swap")
+            .field("id", &s.id)
+            .field("mode", &s.mode)
+            .field("status", &s.status)
+            .field("chain", &s.evm.chain)
+            .field("zat", &s.zcash.amount_zat)
+            .field("usd_amount", &s.evm.amount)
+            .field("lock_address", &s.zcash.htlc_address)
+            .field("refund_height", &s.zcash.refund_height)
+            .field("funding_txid", &s.zcash.funding_txid)
+            .field("claim_txid", &s.zcash.claim_txid)
+            .field("refund_txid", &s.zcash.refund_txid)
+            .field("evm_expiry", &s.evm.expiry)
+            .field("lock_tx", &s.evm.lock_tx)
+            .field("claim_tx", &s.evm.claim_tx)
+            .field("refund_tx", &s.evm.refund_tx)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Error {

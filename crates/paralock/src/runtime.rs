@@ -121,12 +121,32 @@ impl Env {
     }
 }
 
-/// The HTTP client builder every SDK client starts from: a `User-Agent` (some APIs, CoinGecko among them, refuse
-/// requests without one) and no automatic redirects to other hosts' credentials.
-pub(crate) fn http_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .user_agent(concat!("paralock-rs/", env!("CARGO_PKG_VERSION")))
-        .redirect(reqwest::redirect::Policy::limited(3))
+/// The `User-Agent` the SDK's HTTP clients send unless told otherwise: a generic value, the same in every version, so
+/// it doesn't single out this SDK (or its version) to a maker, a node or a price API. Some APIs, CoinGecko among
+/// them, refuse requests without one. Each client's options can replace it (e.g. to match the other clients you want
+/// to blend in with).
+pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0";
+
+/// The HTTP client builder every SDK client starts from: the given `User-Agent`, and redirects followed only within
+/// the original origin (same scheme, host and port; at most 3), so a server can't bounce a request, its body or custom
+/// headers such as an API key to another host, another port or plain http.
+pub(crate) fn http_client_builder(user_agent: &str) -> reqwest::ClientBuilder {
+    reqwest::Client::builder().user_agent(user_agent).redirect(same_origin_redirects())
+}
+
+fn same_origin_redirects() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() > 3 {
+            return attempt.error("too many redirects");
+        }
+        let next = attempt.url();
+        let same_origin = attempt.previous().first().is_some_and(|first| {
+            first.scheme() == next.scheme()
+                && first.host_str() == next.host_str()
+                && first.port_or_known_default() == next.port_or_known_default()
+        });
+        if same_origin { attempt.follow() } else { attempt.stop() }
+    })
 }
 
 /// Exponential backoff with "equal jitter": between half and all of `min × 2^attempt`, capped at `max`.

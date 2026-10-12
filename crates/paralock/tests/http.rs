@@ -19,8 +19,8 @@ use common::*;
 use paralock::http::{HttpMakerApi, HttpMakerApiOptions};
 use paralock::zcash::NodeError;
 use paralock::{
-    EvmChain, MakerApi, Network, ParalockErrorCode, ServerOptions, SwapMode, SwapOptions, SwapStatus, ZcashNode,
-    ZcashRpc, ZcashRpcOptions, maker_router,
+    EvmChain, Maker, MakerApi, Network, ParalockErrorCode, PriceFn, RateLimit, ServerOptions, SwapMode, SwapOptions,
+    SwapStatus, SwapStore, ZcashNode, ZcashRpc, ZcashRpcOptions, maker_router,
 };
 
 type Handler = Arc<dyn Fn(String, String, Option<String>) -> (u16, String) + Send + Sync>;
@@ -99,8 +99,8 @@ async fn zcash_rpc_retries_transport_failures_with_auth_and_never_retries_genera
     assert_eq!(mock.hits.load(Ordering::SeqCst), before + 1); // not retried
     let err = rpc.get_raw_transaction(&"ab".repeat(32)).await.unwrap_err();
     assert!(err.is_rejection() && err.to_string().contains("No such"));
-    // Every request carries a User-Agent.
-    assert!(mock.seen.lock().unwrap().iter().all(|(_, _, agent)| agent.starts_with("paralock-rs/")));
+    // Every request carries a User-Agent: a generic one, the same in every version (no SDK name or version).
+    assert!(mock.seen.lock().unwrap().iter().all(|(_, _, agent)| agent == paralock::DEFAULT_USER_AGENT));
 }
 
 #[tokio::test]
@@ -252,6 +252,7 @@ async fn the_price_feed_caches_and_bounds_staleness() {
         max_stale: stale,
         timeout: Duration::from_millis(500),
         fallback,
+        ..CoinGeckoOptions::default()
     };
     let feed = CoinGecko::with_options(options(Duration::from_secs(60), Duration::from_secs(300), None)).unwrap();
     assert_eq!(feed.usd_per_zec().await.unwrap(), 52.5);
@@ -269,7 +270,7 @@ async fn the_price_feed_caches_and_bounds_staleness() {
     assert_eq!(feed.usd_per_zec().await.unwrap_err().code(), ParalockErrorCode::Unavailable);
     let with_fallback = CoinGecko::with_options(options(Duration::ZERO, Duration::ZERO, Some(40.0))).unwrap();
     assert_eq!(with_fallback.usd_per_zec().await.unwrap(), 40.0);
-    assert!(mock.seen.lock().unwrap().iter().all(|(_, _, agent)| agent.starts_with("paralock-rs/")));
+    assert!(mock.seen.lock().unwrap().iter().all(|(_, _, agent)| agent == paralock::DEFAULT_USER_AGENT));
 }
 
 /// Records the requests the maker router serves, with their response bodies.
@@ -447,4 +448,194 @@ async fn a_node_outage_is_a_generic_503() {
     let text = response.text().await.unwrap();
     assert_eq!(text, r#"{"error":"the maker's Zcash node is unavailable","code":"unavailable"}"#);
     maker.stop().await;
+}
+
+// -----------------------------------------------------------------------------------------------------------------
+// Production limits of `serve` / `maker_router`, the clients' User-Agent and redirects
+
+async fn serve_maker(maker: Maker, options: ServerOptions) -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(paralock::serve(listener, maker, options));
+    addr
+}
+
+/// A maker whose price source takes `delay` (a slow dependency).
+fn slow_maker(w: &World, delay: Duration) -> Maker {
+    let mut cfg = w.maker_config();
+    cfg.price = Arc::new(PriceFn::new(move || async move {
+        tokio::time::sleep(delay).await;
+        Ok(1_000.0)
+    }));
+    Maker::new(cfg).unwrap()
+}
+
+#[tokio::test]
+async fn serve_rate_limits_each_client_on_the_routes_that_do_work() {
+    let w = World::default_world();
+    let maker = w.new_maker();
+    let limit = RateLimit { per_minute: 1, burst: 2 };
+    let addr = serve_maker(maker.clone(), ServerOptions { rate_limit: Some(limit), ..ServerOptions::default() }).await;
+    let client = reqwest::Client::new();
+    let quote = || client.get(format!("http://{addr}/quote?zat=100000000")).send();
+    assert_eq!(quote().await.unwrap().status(), 200);
+    assert_eq!(quote().await.unwrap().status(), 200);
+    let limited = quote().await.unwrap();
+    assert_eq!(limited.status(), 429);
+    let retry_after: u64 = limited.headers()["retry-after"].to_str().unwrap().parse().unwrap();
+    assert!((1..=60).contains(&retry_after), "{retry_after}");
+    assert_eq!(limited.text().await.unwrap(), r#"{"error":"too many requests; slow down","code":"busy"}"#);
+    // The POSTs share the budget; reads are not limited.
+    let post = client.post(format!("http://{addr}/swaps")).body("{}").send().await.unwrap();
+    assert_eq!(post.status(), 429);
+    for _ in 0..5 {
+        assert_eq!(client.get(format!("http://{addr}/health")).send().await.unwrap().status(), 200);
+        let unknown = format!("http://{addr}/swaps/0x{}", "ab".repeat(32));
+        assert_eq!(client.get(unknown).send().await.unwrap().status(), 404);
+    }
+    // The client sees `busy` (after its own retries).
+    let api = HttpMakerApi::with_options(
+        format!("http://{addr}"),
+        Network::Regtest,
+        HttpMakerApiOptions { retries: 0, ..HttpMakerApiOptions::default() },
+    )
+    .unwrap();
+    let err = api.quote(100_000_000, EvmChain::Tempo, SwapMode::Htlc).await.unwrap_err();
+    assert_eq!(err.code(), ParalockErrorCode::Busy);
+    maker.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_request_that_times_out_never_cuts_the_makers_work_off() {
+    let w = World::default_world();
+    let maker = slow_maker(&w, Duration::from_millis(600));
+    let options = ServerOptions { request_timeout: Some(Duration::from_millis(150)), ..ServerOptions::default() };
+    let addr = serve_maker(maker.clone(), options).await;
+    let response = reqwest::get(format!("http://{addr}/quote?zat=100000000")).await.unwrap();
+    assert_eq!(response.status(), 504);
+    assert_eq!(response.text().await.unwrap(), r#"{"error":"the request timed out; retry it","code":"timeout"}"#);
+    // The quote was still made and persisted in the background (the same holds for the commitments, whose retries
+    // are idempotent).
+    let store = w.maker_store.clone();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while store.list("maker/quote/").await.unwrap().is_empty() {
+        assert!(tokio::time::Instant::now() < deadline, "the quote was never persisted");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    maker.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sheds_requests_beyond_the_concurrency_limit() {
+    let w = World::default_world();
+    let maker = slow_maker(&w, Duration::from_millis(500));
+    let options = ServerOptions { max_concurrent_requests: Some(1), ..ServerOptions::default() };
+    let addr = serve_maker(maker.clone(), options).await;
+    let url = format!("http://{addr}/quote?zat=100000000");
+    let (a, b) = tokio::join!(reqwest::get(&url), async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        reqwest::get(&url).await
+    });
+    assert_eq!((a.unwrap().status().as_u16(), b.unwrap().status().as_u16()), (200, 429));
+    // Once the slot is free, requests go through again.
+    assert_eq!(reqwest::get(&url).await.unwrap().status(), 200);
+    maker.stop().await;
+}
+
+#[tokio::test]
+async fn serve_closes_idle_connections_and_shuts_down_gracefully() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let w = World::default_world();
+    let maker = w.new_maker();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let options = ServerOptions {
+        request_timeout: None,
+        idle_timeout: Some(Duration::from_millis(300)),
+        ..ServerOptions::default()
+    };
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(paralock::serve_with_shutdown(listener, maker.clone(), options, async {
+        let _ = stopped.await;
+    }));
+    // A client that connects and never sends a request is disconnected.
+    let mut silent = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let mut buf = [0u8; 64];
+    let read = tokio::time::timeout(Duration::from_secs(3), silent.read(&mut buf)).await.expect("not closed");
+    assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+    // An active client is served.
+    let mut active = tokio::net::TcpStream::connect(addr).await.unwrap();
+    active.write_all(b"GET /health HTTP/1.1\r\nhost: maker\r\nconnection: close\r\n\r\n").await.unwrap();
+    let mut response = String::new();
+    active.read_to_string(&mut response).await.unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    stop.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server).await.expect("graceful shutdown").unwrap().unwrap();
+    maker.stop().await;
+}
+
+#[tokio::test]
+async fn the_maker_client_sends_a_generic_user_agent_and_never_follows_a_redirect_to_another_host() {
+    // Another host (`localhost` rather than `127.0.0.1`) that must never see the client's requests or headers.
+    let (other, other_mock) = mock(Arc::new(|_, _, _| (200, r#"{"ok":true,"chains":[]}"#.into()))).await;
+    let seen = Arc::new(Mutex::new(Vec::<(String, String, Option<String>)>::new()));
+    let log = seen.clone();
+    let maker = Router::new().fallback(move |request: Request| {
+        let log = log.clone();
+        async move {
+            let path = request.uri().path().to_owned();
+            let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
+            log.lock().unwrap().push((path.clone(), header("user-agent").unwrap_or_default(), header("x-api-key")));
+            let location = match path.as_str() {
+                "/cross/health" => Some(format!("http://localhost:{}/health", other.port())),
+                "/port/health" => Some(format!("http://127.0.0.1:{}/health", other.port())),
+                "/same/health" => Some("/health".to_owned()),
+                _ => None,
+            };
+            let mut response = match location {
+                Some(location) => {
+                    let mut r = Response::new(Body::empty());
+                    *r.status_mut() = StatusCode::TEMPORARY_REDIRECT;
+                    r.headers_mut().insert("location", location.parse().unwrap());
+                    r
+                }
+                None => Response::new(Body::from(r#"{"ok":true,"chains":["tempo"]}"#)),
+            };
+            response.headers_mut().insert("content-type", "application/json".parse().unwrap());
+            response
+        }
+    });
+    let addr = serve(maker).await;
+    let options = |agent: Option<&str>| {
+        let mut o = HttpMakerApiOptions { retries: 0, ..HttpMakerApiOptions::default() };
+        o.headers.insert("x-api-key".into(), "secret-key".into());
+        if let Some(agent) = agent {
+            o.user_agent = agent.into();
+        }
+        o
+    };
+    let same = HttpMakerApi::with_options(format!("http://{addr}/same"), Network::Regtest, options(None)).unwrap();
+    assert!(same.health().await.unwrap().ok); // a redirect within the maker's host is followed
+    let cross =
+        HttpMakerApi::with_options(format!("http://{addr}/cross"), Network::Regtest, options(Some("ua/1"))).unwrap();
+    assert!(cross.health().await.is_err()); // one to another host is not…
+    let port = HttpMakerApi::with_options(format!("http://{addr}/port"), Network::Regtest, options(None)).unwrap();
+    assert!(port.health().await.is_err()); // …nor to another port of the same host
+    assert_eq!(other_mock.hits.load(Ordering::SeqCst), 0);
+    let seen = seen.lock().unwrap().clone();
+    let agents: Vec<&str> = seen.iter().map(|(_, agent, _)| agent.as_str()).collect();
+    let generic = paralock::DEFAULT_USER_AGENT;
+    assert_eq!(agents, [generic, generic, "ua/1", generic]);
+    assert!(seen.iter().all(|(_, _, key)| key.as_deref() == Some("secret-key")));
+}
+
+#[tokio::test]
+async fn the_price_feed_refuses_an_oversized_answer() {
+    use paralock::PriceSource;
+    use paralock::price::{CoinGecko, CoinGeckoOptions};
+    let huge = format!(r#"{{"zcash":{{"usd":52.5}},"pad":"{}"}}"#, "x".repeat(100 * 1024));
+    let (addr, _) = mock(Arc::new(move |_, _, _| (200, huge.clone()))).await;
+    let options = CoinGeckoOptions { url: format!("http://{addr}/price"), ..CoinGeckoOptions::default() };
+    let feed = CoinGecko::with_options(options).unwrap();
+    assert_eq!(feed.usd_per_zec().await.unwrap_err().code(), ParalockErrorCode::Unavailable);
 }

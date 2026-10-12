@@ -2,6 +2,22 @@
 //! `createMaker`). They connect a Zcash backend, the EVM escrow clients of `paralock-evm` (feature `evm`), the maker
 //! client and a store. For other EVM client libraries or custody APIs, build a [`TakerConfig`] / [`MakerConfig`] with
 //! your own trait objects instead.
+//!
+//! # Trust
+//!
+//! Each engine acts on what its nodes tell it, so the nodes you configure are part of what you trust:
+//!
+//! - **The taker** reveals its secret (claims) after verifying the maker's lock through its EVM RPC endpoint: the
+//!   lock's terms, its confirmations and the chain's time left. An endpoint that lies could make it reveal against a
+//!   lock that doesn't exist or is about to expire, losing the ZEC. Use your own node or a provider you trust, and set
+//!   [`EvmChainOptions::verify_rpc_url`] to a second, independent endpoint: the final check before claiming then
+//!   needs both to agree.
+//! - **The maker** locks its stablecoins once its Zcash backend reports the taker's funding confirmed. A full node
+//!   (Zebra) verifies the chain itself; a lightwalletd / Zaino server does no proof-of-work verification, and a
+//!   backend run by someone else could report a funding that doesn't exist. Run your own full node for real funds.
+//!
+//! The builders also check every escrow address against the contract code this crate was built with
+//! (`verify_escrow_code`), so a typo or a look-alike contract never receives funds.
 
 use core::fmt;
 use std::path::PathBuf;
@@ -16,26 +32,32 @@ use paralock_evm::{AdaptorEscrowClient, EvmConfig, EvmHtlcClient, ScanConfig, kn
 use zeroize::Zeroizing;
 
 use crate::api::MakerApi;
-use crate::evm::{AdaptorEvmClient, ChainClients, EvmClient, RelayerClients, TakerChain, parse_address};
+use crate::evm::{
+    AdaptorEvmClient, ChainClients, EvmClient, RelayerClients, TakerChain, VerifierClients, parse_address,
+};
 use crate::evm_adapter::{AdaptorEscrow, HtlcEscrow};
-use crate::maker::{AfterClaim, Maker, MakerConfig};
+use crate::maker::{AfterClaim, Maker, MakerConfig, MakerUpdateHook};
 use crate::price::PriceSource;
 use crate::store::{FileStore, MemoryStore, SwapStore};
-use crate::taker::{Taker, TakerConfig, TakerLimits, TakerPriceCheck, TakerTimeouts};
+use crate::taker::{
+    FreshRecipientHook, MineHook, Taker, TakerConfig, TakerLimits, TakerPriceCheck, TakerTimeouts, UpdateHook,
+};
 use crate::zcash::{ZcashNode, ZcashRpc};
 use crate::{Error, Result};
 
 /// Which Zcash backend to use.
 #[derive(Clone)]
 pub enum ZcashBackend {
-    /// A Zebra / Zakura JSON-RPC endpoint, optionally with HTTP basic auth.
+    /// A Zebra / Zakura JSON-RPC endpoint, optionally with HTTP basic auth. A full node verifies the chain itself:
+    /// the backend to use for real funds.
     Rpc {
         /// The endpoint, e.g. `http://127.0.0.1:8232`.
         url: String,
-        /// `(username, password)`.
-        auth: Option<(String, String)>,
+        /// `(username, password)`; the password is wiped from memory on drop.
+        auth: Option<(String, Zeroizing<String>)>,
     },
-    /// A lightwalletd / Zaino gRPC server (feature `lightwalletd`).
+    /// A lightwalletd / Zaino gRPC server (feature `lightwalletd`). It does no proof-of-work verification of what
+    /// it serves: run your own, in front of your own full node, for real funds (a maker locks on what it reports).
     #[cfg(feature = "lightwalletd")]
     Lightwalletd {
         /// `https://host:443`, `host:port` or `http://127.0.0.1:9067`.
@@ -56,8 +78,9 @@ impl fmt::Debug for ZcashBackend {
     }
 }
 
-/// How to reach Zcash and which key to use.
+/// How to reach Zcash and which key to use. Build it with [`ZcashOptions::new`].
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ZcashOptions {
     /// The network.
     pub network: Network,
@@ -65,6 +88,14 @@ pub struct ZcashOptions {
     pub backend: ZcashBackend,
     /// The transparent signing key: 32 bytes of hex (with or without `0x`).
     pub key: Zeroizing<String>,
+}
+
+impl ZcashOptions {
+    /// The options: the network, the backend and the transparent signing key (32 bytes of hex, with or without `0x`;
+    /// moved into a buffer wiped on drop).
+    pub fn new(network: Network, backend: ZcashBackend, key: impl Into<String>) -> Self {
+        Self { network, backend, key: Zeroizing::new(key.into()) }
+    }
 }
 
 impl fmt::Debug for ZcashOptions {
@@ -76,8 +107,10 @@ impl fmt::Debug for ZcashOptions {
     }
 }
 
-/// One EVM chain: where the escrows are and which account signs.
+/// One EVM chain: where the escrows are and which account signs. Build it with [`EvmChainOptions::new`] and set the
+/// optional fields.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct EvmChainOptions {
     /// JSON-RPC endpoint.
     pub rpc_url: String,
@@ -99,6 +132,13 @@ pub struct EvmChainOptions {
     pub rpc_timeout: Option<Duration>,
     /// RPC retries on transient failures.
     pub rpc_retries: Option<u32>,
+    /// Longest wait for a transaction's receipt (locks, approvals, refunds; the taker's claim is followed without it).
+    /// Default: `paralock-evm`'s (60 s), and for a taker at most half its claim window on the chain.
+    pub receipt_timeout: Option<Duration>,
+    /// Taker only: a second, independent JSON-RPC endpoint on the same chain. The taker's last check before it
+    /// claims reads the maker's lock through both endpoints and claims only if both report the same lock and both
+    /// pass every check (a quorum of 2), so one lying or stale endpoint can't make it reveal its secret.
+    pub verify_rpc_url: Option<String>,
 }
 
 impl fmt::Debug for EvmChainOptions {
@@ -108,6 +148,8 @@ impl fmt::Debug for EvmChainOptions {
             .field("htlc", &self.htlc)
             .field("adaptor_escrow", &self.adaptor_escrow)
             .field("from_block", &self.from_block)
+            .field("receipt_timeout", &self.receipt_timeout)
+            .field("verifier", &self.verify_rpc_url.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -126,12 +168,15 @@ impl EvmChainOptions {
             tempo: None,
             rpc_timeout: None,
             rpc_retries: None,
+            receipt_timeout: None,
+            verify_rpc_url: None,
         }
     }
 }
 
-/// A taker's EVM chain.
+/// A taker's EVM chain. Build it with [`TakerEvmChainOptions::new`].
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct TakerEvmChainOptions {
     /// Connection and account.
     pub evm: EvmChainOptions,
@@ -143,8 +188,19 @@ pub struct TakerEvmChainOptions {
     /// A second account (private key) that submits claims, so a fresh recipient needs no gas. It can't redirect
     /// funds.
     pub relayer: Option<Zeroizing<String>>,
-    /// Claim window and confirmations on this chain.
+    /// Claim window and confirmations on this chain. Default: `limits.claim` (30 s and 1 confirmation, the protocol's
+    /// floors), raised to at least 5 minutes and 3 confirmations on Ethereum L1 (chain ids 1, 11155111, 17000 and
+    /// 560048). Raise it on any chain with slow or congested inclusion: a claim mined after the expiry reverts but still
+    /// publishes the secret.
     pub claim_limits: Option<ClaimLimits>,
+}
+
+impl TakerEvmChainOptions {
+    /// A chain with its connection and the stablecoins you accept (empty: the registry's for its chain id); no relayer,
+    /// default decimals and claim limits.
+    pub fn new(evm: EvmChainOptions, tokens: Vec<Hex>) -> Self {
+        Self { evm, tokens, token_decimals: None, relayer: None, claim_limits: None }
+    }
 }
 
 impl fmt::Debug for TakerEvmChainOptions {
@@ -159,8 +215,9 @@ impl fmt::Debug for TakerEvmChainOptions {
     }
 }
 
-/// A maker's EVM chain.
+/// A maker's EVM chain. Build it with [`MakerEvmChainOptions::new`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MakerEvmChainOptions {
     /// Connection and account.
     pub evm: EvmChainOptions,
@@ -170,6 +227,13 @@ pub struct MakerEvmChainOptions {
     pub token_symbol: String,
     /// Its decimals. Default 6.
     pub token_decimals: Option<u32>,
+}
+
+impl MakerEvmChainOptions {
+    /// A chain with its connection and the stablecoin quoted on it (6 decimals unless set).
+    pub fn new(evm: EvmChainOptions, token: Hex, token_symbol: impl Into<String>) -> Self {
+        Self { evm, token, token_symbol: token_symbol.into(), token_decimals: None }
+    }
 }
 
 /// A store: a directory (a [`FileStore`]), any [`SwapStore`], or in memory (lost on exit; refused on mainnet).
@@ -213,8 +277,10 @@ impl fmt::Debug for MakerEndpoint {
     }
 }
 
-/// Options of [`create_taker`].
-#[derive(Debug, Clone)]
+/// Options of [`create_taker`]. Build them with [`CreateTakerOptions::new`] and [`CreateTakerOptions::with_chain`],
+/// then set the optional fields.
+#[derive(Clone)]
+#[non_exhaustive]
 pub struct CreateTakerOptions {
     /// Zcash backend and key.
     pub zcash: ZcashOptions,
@@ -226,16 +292,71 @@ pub struct CreateTakerOptions {
     pub maker: MakerEndpoint,
     /// Persistence for secrets and refund data. Required (durable) on mainnet.
     pub store: StoreOption,
-    /// Bounds.
+    /// Bounds. Default [`crate::DEFAULT_TAKER_LIMITS`].
     pub limits: TakerLimits,
-    /// Waits.
+    /// Waits. Default [`crate::DEFAULT_TAKER_TIMEOUTS`].
     pub timeouts: TakerTimeouts,
     /// Your own price (recommended), or an explicit opt-out.
     pub price: TakerPriceCheck,
+    /// Allow private swaps on mainnet with a Zcash backend that can't report network upgrades (see
+    /// `TakerConfig::allow_unknown_upgrades`). Default false.
+    pub allow_unknown_upgrades: bool,
+    /// Called with the updated swap whenever its status changes.
+    pub on_update: Option<UpdateHook>,
+    /// Receives the key of each fresh recipient address (it controls the swapped stablecoins).
+    pub on_fresh_recipient: Option<FreshRecipientHook>,
+    /// Devnet hook: mines Zcash blocks while the taker waits.
+    pub mine_zcash: Option<MineHook>,
 }
 
-/// Options of [`create_maker`].
+impl CreateTakerOptions {
+    /// Options with the required parts and the defaults (no chain yet: add them with
+    /// [`CreateTakerOptions::with_chain`]).
+    pub fn new(zcash: ZcashOptions, maker: MakerEndpoint, store: StoreOption, price: TakerPriceCheck) -> Self {
+        Self {
+            zcash,
+            return_address: None,
+            evm: Vec::new(),
+            maker,
+            store,
+            limits: TakerLimits::default(),
+            timeouts: TakerTimeouts::default(),
+            price,
+            allow_unknown_upgrades: false,
+            on_update: None,
+            on_fresh_recipient: None,
+            mine_zcash: None,
+        }
+    }
+
+    /// Adds an EVM chain.
+    #[must_use]
+    pub fn with_chain(mut self, chain: EvmChain, options: TakerEvmChainOptions) -> Self {
+        self.evm.push((chain, options));
+        self
+    }
+}
+
+impl fmt::Debug for CreateTakerOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CreateTakerOptions")
+            .field("zcash", &self.zcash)
+            .field("return_address", &self.return_address)
+            .field("evm", &self.evm)
+            .field("maker", &self.maker)
+            .field("store", &self.store)
+            .field("limits", &self.limits)
+            .field("timeouts", &self.timeouts)
+            .field("price", &self.price)
+            .field("allow_unknown_upgrades", &self.allow_unknown_upgrades)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Options of [`create_maker`]. Build them with [`CreateMakerOptions::new`] and [`CreateMakerOptions::with_chain`],
+/// then set the optional fields.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct CreateMakerOptions {
     /// Zcash backend and key.
     pub zcash: ZcashOptions,
@@ -257,6 +378,39 @@ pub struct CreateMakerOptions {
     pub poll_interval: Option<Duration>,
     /// Called after the maker's ZEC claim confirms.
     pub after_claim: Option<AfterClaim>,
+    /// Accept private swaps on mainnet with a Zcash backend that can't report network upgrades (see
+    /// [`MakerConfig::allow_unknown_upgrades`]). Default false.
+    pub allow_unknown_upgrades: bool,
+    /// Called with a swap's public view when the maker commits to it and after every status change.
+    pub on_update: Option<MakerUpdateHook>,
+}
+
+impl CreateMakerOptions {
+    /// Options with the required parts and the defaults (no chain yet: add them with
+    /// [`CreateMakerOptions::with_chain`]).
+    pub fn new(zcash: ZcashOptions, price: Arc<dyn PriceSource>, store: StoreOption) -> Self {
+        Self {
+            zcash,
+            payout_address: None,
+            evm: Vec::new(),
+            price,
+            spread_bps: None,
+            policy: None,
+            limits: None,
+            store,
+            poll_interval: None,
+            after_claim: None,
+            allow_unknown_upgrades: false,
+            on_update: None,
+        }
+    }
+
+    /// Adds an EVM chain to serve.
+    #[must_use]
+    pub fn with_chain(mut self, chain: EvmChain, options: MakerEvmChainOptions) -> Self {
+        self.evm.push((chain, options));
+        self
+    }
 }
 
 impl fmt::Debug for CreateMakerOptions {
@@ -282,7 +436,8 @@ pub fn zcash_node(backend: &ZcashBackend) -> Result<Arc<dyn ZcashNode>> {
         ZcashBackend::Rpc { url, auth } => {
             let rpc = ZcashRpc::new(url.clone())?;
             Arc::new(match auth {
-                Some((user, pass)) => rpc.with_auth(user.clone(), pass.clone()),
+                // The copy is moved into the client's own zeroizing buffer.
+                Some((user, pass)) => rpc.with_auth(user.clone(), pass.as_str().to_owned()),
                 None => rpc,
             })
         }
@@ -294,6 +449,8 @@ pub fn zcash_node(backend: &ZcashBackend) -> Result<Arc<dyn ZcashNode>> {
 
 fn store(option: &StoreOption, network: Network, role: &str) -> Result<Arc<dyn SwapStore>> {
     let store: Arc<dyn SwapStore> = match option {
+        // On mainnet the directory must be private (it holds keys and secrets): restricted to 0700, or refused.
+        StoreOption::Dir(dir) if network == Network::Mainnet => Arc::new(FileStore::open_private(dir.clone())?),
         StoreOption::Dir(dir) => Arc::new(FileStore::open(dir.clone())?),
         StoreOption::Store(store) => store.clone(),
         StoreOption::Memory => Arc::new(MemoryStore::new()),
@@ -306,14 +463,14 @@ fn store(option: &StoreOption, network: Network, role: &str) -> Result<Arc<dyn S
     Ok(store)
 }
 
-fn evm_config(chain: EvmChain, o: &EvmChainOptions, account: &str) -> Result<EvmConfig> {
-    if !(o.rpc_url.starts_with("http://") || o.rpc_url.starts_with("https://")) {
+fn evm_config(chain: EvmChain, o: &EvmChainOptions, rpc_url: &str, account: &str) -> Result<EvmConfig> {
+    if !(rpc_url.starts_with("http://") || rpc_url.starts_with("https://")) {
         return Err(Error::invalid_request(format!("{chain}.rpcUrl must be an http(s) URL")));
     }
     if o.chain_id == 0 {
         return Err(Error::invalid_request(format!("{chain}.chainId must be a positive integer")));
     }
-    let mut config = EvmConfig::new(o.rpc_url.clone(), o.chain_id)
+    let mut config = EvmConfig::new(rpc_url.to_owned(), o.chain_id)
         .with_private_key(account)
         .map_err(|_| Error::invalid_request(format!("{chain}: the EVM account must be a 0x 32-byte private key")))?;
     if let Some(token) = &o.fee_token {
@@ -329,26 +486,40 @@ fn evm_config(chain: EvmChain, o: &EvmChainOptions, account: &str) -> Result<Evm
             Duration::from_millis(250),
         );
     }
+    if let Some(timeout) = o.receipt_timeout {
+        config = config.with_receipt_timeout(timeout);
+    }
     Ok(config)
 }
 
-/// Connects to one EVM chain's escrows with `account` (a private key) and returns the engine clients.
+/// Connects to one EVM chain's escrows with `account` (a private key) and returns the engine clients. Each escrow
+/// address must hold exactly the contract code this crate was built with (`verify_escrow_code`), else
+/// `invalid_request`.
 pub async fn connect_evm_chain(
     chain: EvmChain,
     o: &EvmChainOptions,
     account: &str,
 ) -> Result<(Arc<dyn EvmClient>, Option<Arc<dyn AdaptorEvmClient>>)> {
-    let config = evm_config(chain, o, account)?;
+    connect_escrows(chain, o, &o.rpc_url, account).await
+}
+
+async fn connect_escrows(
+    chain: EvmChain,
+    o: &EvmChainOptions,
+    rpc_url: &str,
+    account: &str,
+) -> Result<(Arc<dyn EvmClient>, Option<Arc<dyn AdaptorEvmClient>>)> {
+    let config = evm_config(chain, o, rpc_url, account)?;
     let scan = o.from_block.map(ScanConfig::from_block).unwrap_or_default();
     let htlc_address = Address::from(parse_address(&o.htlc, &format!("{chain}.htlc"))?.0);
-    let htlc =
-        EvmHtlcClient::connect(config.clone(), htlc_address, scan).await.map_err(|e| Error::Evm(evm_error(e)))?;
+    let htlc = EvmHtlcClient::connect(config.clone(), htlc_address, scan).await.map_err(evm_error)?;
+    htlc.verify_escrow_code().await.map_err(|e| code_error(chain, "htlc", e))?;
     let htlc: Arc<dyn EvmClient> = Arc::new(HtlcEscrow::new(chain, htlc)?);
     let adaptor = match &o.adaptor_escrow {
         Some(escrow) => {
             let address = Address::from(parse_address(escrow, &format!("{chain}.adaptorEscrow"))?.0);
-            let client =
-                AdaptorEscrowClient::connect(config, address, scan).await.map_err(|e| Error::Evm(evm_error(e)))?;
+            let client = AdaptorEscrowClient::connect(config, address, scan).await.map_err(evm_error)?;
+            client.verify_escrow_code().await.map_err(|e| code_error(chain, "adaptorEscrow", e))?;
             Some(Arc::new(AdaptorEscrow::new(chain, client)?) as Arc<dyn AdaptorEvmClient>)
         }
         None => None,
@@ -356,13 +527,28 @@ pub async fn connect_evm_chain(
     Ok((htlc, adaptor))
 }
 
-fn evm_error(e: paralock_evm::EvmError) -> crate::evm::EvmError {
-    let message = e.to_string();
-    if e.is_transient() { crate::evm::EvmError::transient(message) } else { crate::evm::EvmError::new(message) }
+/// A `paralock-evm` error, with its transaction and source kept.
+fn evm_error(e: paralock_evm::EvmError) -> Error {
+    Error::Evm(crate::evm_adapter::convert(e))
+}
+
+/// A failed escrow code check: a wrong address is the caller's to fix; an RPC failure stays one.
+fn code_error(chain: EvmChain, what: &str, e: paralock_evm::EvmError) -> Error {
+    if matches!(e, paralock_evm::EvmError::CodeMismatch { .. }) {
+        return Error::invalid_request(format!(
+            "{chain}.{what}: the address doesn't hold the Paralock contract this SDK was built for ({e})"
+        ));
+    }
+    evm_error(e)
 }
 
 /// Builds a [`Taker`] from plain configuration: the Zcash backend, the EVM escrow clients (one account per chain,
-/// plus an optional relayer), the maker (a URL or any [`MakerApi`]) and the store.
+/// plus an optional relayer and an optional second RPC endpoint for the final lock check), the maker (a URL or any
+/// [`MakerApi`]) and the store (a private directory on mainnet).
+///
+/// **Trust:** the taker reveals its secret after checking the maker's lock through the configured EVM RPC endpoint;
+/// use your own node or a provider you trust, and [`EvmChainOptions::verify_rpc_url`] for a quorum of two (see the
+/// [module docs](self)).
 ///
 /// ```no_run
 /// # async fn run() -> paralock::Result<()> {
@@ -370,28 +556,21 @@ fn evm_error(e: paralock_evm::EvmError) -> crate::evm::EvmError {
 /// use paralock::{EvmChain, Hex, Network, SwapMode, SwapOptions, TakerPriceCheck};
 /// use std::sync::Arc;
 ///
-/// let taker = create_taker(CreateTakerOptions {
-///     zcash: ZcashOptions {
-///         network: Network::Mainnet,
-///         backend: ZcashBackend::Rpc { url: "http://127.0.0.1:8232".into(), auth: None },
-///         key: std::env::var("ZEC_KEY").unwrap_or_default().into(),
-///     },
-///     return_address: None,
-///     evm: vec![(EvmChain::Base, TakerEvmChainOptions {
-///         evm: EvmChainOptions::new("https://base.example", 8453, Hex::new("0x…htlc").unwrap(), std::env::var("EVM_KEY").unwrap_or_default()),
-///         tokens: vec![],
-///         token_decimals: None,
-///         relayer: None,
-///         claim_limits: None,
-///     })],
-///     maker: MakerEndpoint::Url("https://maker.example".into()),
-///     store: StoreOption::Dir("./paralock-taker".into()),
-///     limits: Default::default(),
-///     timeouts: Default::default(),
+/// let zcash = ZcashOptions::new(
+///     Network::Mainnet,
+///     ZcashBackend::Rpc { url: "http://127.0.0.1:8232".into(), auth: None },
+///     std::env::var("ZEC_KEY").unwrap_or_default(),
+/// );
+/// let base = EvmChainOptions::new("https://base.example", 8453, Hex::new("0x…htlc").unwrap(), std::env::var("EVM_KEY").unwrap_or_default());
+/// let options = CreateTakerOptions::new(
+///     zcash,
+///     MakerEndpoint::Url("https://maker.example".into()),
+///     StoreOption::Dir("./paralock-taker".into()),
 ///     // Your own USD/ZEC price (e.g. `paralock::CoinGecko` with the `price-feed` feature, or your oracle).
-///     price: TakerPriceCheck::Source(Arc::new(paralock::PriceFn::new(|| async { Ok(52.0) }))),
-/// })
-/// .await?;
+///     TakerPriceCheck::Source(Arc::new(paralock::PriceFn::new(|| async { Ok(52.0) }))),
+/// )
+/// .with_chain(EvmChain::Base, TakerEvmChainOptions::new(base, vec![])); // the chain's known stablecoins
+/// let taker = create_taker(options).await?;
 /// let quote = taker.quote(100_000_000, EvmChain::Base, SwapMode::Adaptor).await?;
 /// let swap = taker.swap(&quote, SwapOptions::default()).await?;
 /// # Ok(()) }
@@ -429,22 +608,46 @@ pub async fn create_taker(options: CreateTakerOptions) -> Result<Taker> {
                 o.evm.chain_id
             )));
         }
-        let (htlc, adaptor) = connect_evm_chain(*chain, &o.evm, &o.evm.account).await?;
+        // Receipts are never awaited longer than half the claim window, leaving time to react (the claim itself is
+        // followed and fee-bumped by the taker).
+        let mut evm = o.evm.clone();
+        if evm.receipt_timeout.is_none() {
+            let window = o.claim_limits.unwrap_or(options.limits.claim).min_claim_window_seconds();
+            evm.receipt_timeout = Some(Duration::from_secs((window / 2).clamp(5, 60)));
+        }
+        let (htlc, adaptor) = connect_evm_chain(*chain, &evm, &evm.account).await?;
         let mut taker_chain = TakerChain::new(htlc, tokens);
         taker_chain.adaptor = adaptor;
         taker_chain.token_decimals = o.token_decimals;
         taker_chain.claim_limits = o.claim_limits;
         if let Some(relayer) = &o.relayer {
-            let (htlc, adaptor) = connect_evm_chain(*chain, &o.evm, relayer).await?;
+            let (htlc, adaptor) = connect_evm_chain(*chain, &evm, relayer).await?;
             taker_chain.relayer = Some(RelayerClients { htlc, adaptor });
+        }
+        if let Some(url) = &evm.verify_rpc_url {
+            if url == &evm.rpc_url {
+                return Err(Error::invalid_request(format!(
+                    "{chain}.verifyRpcUrl must be a different endpoint than {chain}.rpcUrl"
+                )));
+            }
+            // Read-only use: the account is never used to send anything through it.
+            let (htlc, adaptor) = connect_escrows(*chain, &evm, url, &evm.account).await?;
+            taker_chain.verifier = Some(VerifierClients { htlc, adaptor });
         }
         config.chains.insert(*chain, taker_chain);
     }
+    config.allow_unknown_upgrades = options.allow_unknown_upgrades;
+    config.on_update = options.on_update.clone();
+    config.on_fresh_recipient = options.on_fresh_recipient.clone();
+    config.mine_zcash = options.mine_zcash.clone();
     Taker::new(config)
 }
 
 /// Builds a [`Maker`] from plain configuration. Call [`Maker::start`] to resume unfinished swaps, then serve it with
 /// `maker_router` (feature `server`).
+///
+/// **Trust:** the maker locks its stablecoins on what its Zcash backend reports about the taker's funding; use your
+/// own full node for real funds (lightwalletd does no proof-of-work verification; see the [module docs](self)).
 pub async fn create_maker(options: CreateMakerOptions) -> Result<Maker> {
     let network = options.zcash.network;
     let key = key_pair(&options.zcash.key)?;
@@ -484,6 +687,8 @@ pub async fn create_maker(options: CreateMakerOptions) -> Result<Maker> {
     config.limits = options.limits.unwrap_or(paralock_core::protocol::DEFAULT_MAKER_LIMITS);
     config.poll_interval = options.poll_interval;
     config.after_claim = options.after_claim.clone();
+    config.allow_unknown_upgrades = options.allow_unknown_upgrades;
+    config.on_update = options.on_update.clone();
     Maker::new(config)
 }
 
@@ -502,18 +707,16 @@ mod tests {
             Hex::new(format!("0x{}", "11".repeat(20))).unwrap(),
             key,
         );
-        let chain = TakerEvmChainOptions {
-            evm,
-            tokens: vec![],
-            token_decimals: None,
-            relayer: Some(relayer.to_owned().into()),
-            claim_limits: None,
-        };
-        let zcash = ZcashOptions {
-            network: Network::Regtest,
-            backend: ZcashBackend::Rpc { url: "http://u:p@127.0.0.1:1".into(), auth: Some(("u".into(), "pw".into())) },
-            key: key.to_owned().into(),
-        };
+        let mut chain = TakerEvmChainOptions::new(evm, vec![]);
+        chain.relayer = Some(relayer.to_owned().into());
+        let zcash = ZcashOptions::new(
+            Network::Regtest,
+            ZcashBackend::Rpc {
+                url: "http://u:p@127.0.0.1:1".into(),
+                auth: Some(("u".into(), Zeroizing::new("pw".into()))),
+            },
+            key,
+        );
         let printed = format!("{chain:?} {zcash:?}");
         assert!(
             !printed.contains(&key[2..]) && !printed.contains(&relayer[2..]) && !printed.contains("pw"),

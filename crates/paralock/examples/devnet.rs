@@ -21,7 +21,7 @@ use paralock::builder::{
 use paralock::price::{CoinGecko, CoinGeckoOptions};
 use paralock::{
     DEVNET_POLICY, EvmChain, Hex, MakerLimits, Network, PriceSource, ServerOptions, SwapMode, SwapOptions,
-    TakerPriceCheck, maker_router,
+    TakerPriceCheck,
 };
 use paralock_core::keys::{KeyPair, PrivateKey};
 use paralock_core::zcash::TransparentAddress;
@@ -51,7 +51,15 @@ fn zcash_key(name: &str) -> String {
     std::fs::create_dir_all(state_dir()).unwrap();
     let key = KeyPair::random(&mut paralock_core::OsRng);
     let hex = paralock_core::encoding::to_hex(&*key.private_key().to_bytes());
-    std::fs::write(&path, &hex).unwrap();
+    // Readable by its owner only: it is a private key.
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    std::io::Write::write_all(&mut options.open(&path).unwrap(), hex.as_bytes()).unwrap();
     hex
 }
 
@@ -152,31 +160,26 @@ async fn taker(
     } else {
         ZcashBackend::Rpc { url: cfg["zcash"]["rpc"].as_str().unwrap().into(), auth: None }
     };
-    let taker = create_taker(CreateTakerOptions {
-        zcash: ZcashOptions { network: Network::Regtest, backend, key: key.into() },
-        return_address: None,
-        evm: vec![(
-            chain,
-            TakerEvmChainOptions {
-                evm: evm_options(cfg, chain, cfg["taker"]["evmKey"].as_str().unwrap()),
-                tokens: vec![token],
-                token_decimals: Some(6),
-                relayer: Some(cfg["relayer"]["evmKey"].as_str().unwrap().to_owned().into()),
-                claim_limits: None,
-            },
-        )],
-        maker: MakerEndpoint::Url(maker_url.into()),
-        store: StoreOption::Dir(state_dir().join("taker-store")),
-        limits: Default::default(),
-        timeouts: paralock::TakerTimeouts {
-            poll_interval: Duration::from_secs(1),
-            funding_confirmation: Duration::from_secs(180),
-            maker_lock: Duration::from_secs(180),
-            follow_maker: Duration::from_secs(60),
-        },
-        price: TakerPriceCheck::Source(price()),
-    })
-    .await?;
+    let timeouts = paralock::TakerTimeouts {
+        poll_interval: Duration::from_secs(1),
+        funding_confirmation: Duration::from_secs(180),
+        maker_lock: Duration::from_secs(180),
+        follow_maker: Duration::from_secs(60),
+        claim_bump_after: Duration::from_secs(10),
+    };
+    let mut chain_options =
+        TakerEvmChainOptions::new(evm_options(cfg, chain, cfg["taker"]["evmKey"].as_str().unwrap()), vec![token]);
+    chain_options.token_decimals = Some(6);
+    chain_options.relayer = Some(cfg["relayer"]["evmKey"].as_str().unwrap().to_owned().into());
+    let mut options = CreateTakerOptions::new(
+        ZcashOptions::new(Network::Regtest, backend, key),
+        MakerEndpoint::Url(maker_url.into()),
+        StoreOption::Dir(state_dir().join("taker-store")),
+        TakerPriceCheck::Source(price()),
+    )
+    .with_chain(chain, chain_options);
+    options.timeouts = timeouts;
+    let taker = create_taker(options).await?;
     println!("taker {address} → maker {maker_url}: {mode:?} on {chain}");
     let quote = taker.quote(zat, chain, mode).await?;
     println!(
@@ -232,15 +235,9 @@ async fn maker(cfg: &Value, port: u16) -> paralock::Result<()> {
     let mut evm = Vec::new();
     for chain in [EvmChain::Tempo, EvmChain::Base] {
         let (token, symbol) = quote_token(cfg, chain);
-        evm.push((
-            chain,
-            MakerEvmChainOptions {
-                evm: evm_options(cfg, chain, RUST_MAKER_EVM_KEY),
-                token,
-                token_symbol: symbol,
-                token_decimals: Some(6),
-            },
-        ));
+        let mut chain_options = MakerEvmChainOptions::new(evm_options(cfg, chain, RUST_MAKER_EVM_KEY), token, symbol);
+        chain_options.token_decimals = Some(6);
+        evm.push((chain, chain_options));
     }
     let limits = MakerLimits {
         quote_ttl_seconds: 120,
@@ -249,23 +246,18 @@ async fn maker(cfg: &Value, port: u16) -> paralock::Result<()> {
         max_concurrent_swaps: 25,
         ..paralock_core::protocol::DEFAULT_MAKER_LIMITS
     };
-    let maker = create_maker(CreateMakerOptions {
-        zcash: ZcashOptions {
-            network: Network::Regtest,
-            backend: ZcashBackend::Rpc { url: cfg["zcash"]["rpc"].as_str().unwrap().into(), auth: None },
-            key: key.clone().into(),
-        },
-        payout_address: None,
-        evm,
-        price: price(),
-        spread_bps: Some(50.0),
-        policy: Some(DEVNET_POLICY),
-        limits: Some(limits),
-        store: StoreOption::Dir(state_dir().join("maker-store")),
-        poll_interval: Some(Duration::from_millis(600)),
-        after_claim: None,
-    })
-    .await?;
+    let backend = ZcashBackend::Rpc { url: cfg["zcash"]["rpc"].as_str().unwrap().into(), auth: None };
+    let mut options = CreateMakerOptions::new(
+        ZcashOptions::new(Network::Regtest, backend, key.clone()),
+        price(),
+        StoreOption::Dir(state_dir().join("maker-store")),
+    );
+    options.evm = evm;
+    options.spread_bps = Some(50.0);
+    options.policy = Some(DEVNET_POLICY);
+    options.limits = Some(limits);
+    options.poll_interval = Some(Duration::from_millis(600));
+    let maker = create_maker(options).await?;
     maker.start().await?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.expect("bind");
     println!(
@@ -273,7 +265,7 @@ async fn maker(cfg: &Value, port: u16) -> paralock::Result<()> {
         address_of(&key)
     );
     let options = ServerOptions { cors: Some(paralock::CorsOrigins::Any), ..ServerOptions::default() };
-    axum::serve(listener, maker_router(maker, options)).await.expect("serve");
+    paralock::serve(listener, maker, options).await.expect("serve");
     Ok(())
 }
 

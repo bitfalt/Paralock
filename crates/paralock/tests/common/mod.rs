@@ -935,6 +935,8 @@ impl World {
         cfg.policy = POLICY;
         cfg.limits = self.maker_limits;
         cfg.poll_interval = Some(Duration::from_millis(5));
+        // The tests change balances between calls; the cache has its own test.
+        cfg.balance_cache = Duration::ZERO;
         cfg
     }
 
@@ -1040,7 +1042,7 @@ impl MakerApi for Proxy {
     async fn get_swap(&self, id: &str) -> paralock::Result<Option<Swap>> {
         match &self.get_swap {
             Some(hook) => hook(self.current(), id.to_owned()).await,
-            None => Ok(self.current().get_swap(id)),
+            None => self.current().get_swap(id).await,
         }
     }
     async fn propose_adaptor(&self, p: &AdaptorProposal) -> paralock::Result<AdaptorProposalAccepted> {

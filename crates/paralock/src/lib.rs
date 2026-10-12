@@ -10,7 +10,13 @@
 //! transactions, signatures, adaptor signatures, ids, digests, wire messages and the safety checks) comes from
 //! [`paralock_core`]; this crate adds I/O: node clients, stores, HTTP, and the persisted state machines.
 //!
-//! > **Status:** experimental and not audited. The Zcash leg is transparent in both modes.
+//! > **Status:** experimental and not formally audited. The Zcash leg is transparent in both modes.
+//!
+//! **Trust model.** The protocol protects each party from the other, but each one trusts its own nodes: the taker
+//! reveals its secret after checking the maker's lock through its EVM RPC endpoint (see [`TakerChain::verifier`] for a
+//! quorum of two), and the maker locks its stablecoins on what its Zcash backend reports about the funding (a
+//! lightwalletd / Zaino server does no proof-of-work verification). Run your own nodes for real funds; `builder`'s
+//! module docs (feature `evm`) have the details.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -28,6 +34,7 @@ pub mod maker;
 pub mod price;
 pub mod records;
 pub mod runtime;
+mod status;
 pub mod store;
 pub mod taker;
 pub mod zcash;
@@ -46,28 +53,34 @@ pub use builder::{create_maker, create_taker};
 pub use error::{Error, Result};
 pub use evm::{
     AdaptorEvmClient, AdaptorOutcome, ChainClients, ChainInfo, EvmClient, EvmError, EvmLock, HtlcOutcome,
-    RelayerClients, TakerChain, TxHash,
+    RelayerClients, SentTx, TakerChain, TxHash, TxStatus, VerifierClients,
 };
 #[cfg(feature = "server")]
-pub use http::{CorsOrigins, ServerOptions, maker_router};
+pub use http::{ClientAddress, CorsOrigins, RateLimit, ServerOptions, maker_router, serve, serve_with_shutdown};
 #[cfg(feature = "client")]
 pub use http::{HttpMakerApi, HttpMakerApiOptions};
 #[cfg(feature = "lightwalletd")]
 pub use lightwalletd::{Lightwalletd, LightwalletdOptions};
-pub use maker::{AfterClaim, Maker, MakerConfig, MakerStage, MakerSwapRecord, public_view};
+pub use maker::{AfterClaim, Inventory, Maker, MakerConfig, MakerStage, MakerSwapRecord, MakerUpdateHook, public_view};
 pub use paralock_core;
 pub use paralock_core::protocol::{
     ClaimLimits, DEVNET_POLICY, EvmChain, Hex, MAINNET_POLICY, MakerLimits, ParalockError, ParalockErrorCode,
     PrivacyOptions, Quote, QuoteLimits, Swap, SwapMode, SwapStatus, TimeoutPolicy, TimeoutPolicyParams,
 };
 pub use paralock_core::zcash::Network;
+/// The EVM layer this crate builds on (feature `evm`), re-exported so its types (`EvmConfig`, `TxStatus`, …) need no
+/// separate dependency.
+#[cfg(feature = "evm")]
+pub use paralock_evm;
 #[cfg(feature = "price-feed")]
 pub use price::{CoinGecko, CoinGeckoOptions};
 pub use price::{FixedPrice, PriceFn, PriceSource};
-pub use runtime::{Clock, Entropy, OsEntropy, SystemClock};
+pub use runtime::{Clock, DEFAULT_USER_AGENT, Entropy, OsEntropy, SystemClock};
+pub use status::SwapStatusExt;
 pub use store::{FileStore, MemoryStore, StoreError, SwapStore};
 pub use taker::{
-    DEFAULT_TAKER_LIMITS, DEFAULT_TAKER_TIMEOUTS, ResumeOptions, SwapOptions, Taker, TakerConfig, TakerLimits,
-    TakerPriceCheck, TakerStage, TakerSwapRecord, TakerTimeouts,
+    DEFAULT_MAKER_FEE_ZAT, DEFAULT_TAKER_LIMITS, DEFAULT_TAKER_TIMEOUTS, ResumeOptions, SwapOptions, Taker,
+    TakerConfig, TakerLimits, TakerPriceCheck, TakerStage, TakerSwapRecord, TakerTimeouts,
 };
+
 pub use zcash::{NodeError, ZcashNode, ZcashRpc, ZcashRpcOptions};

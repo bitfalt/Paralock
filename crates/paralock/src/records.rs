@@ -1,13 +1,78 @@
-//! Serde building blocks shared by the taker's and the maker's persisted records.
+//! Serde building blocks shared by the taker's and the maker's persisted records, and their versioning.
+//!
+//! Every record carries a format `version`. Loading a record reads it first and runs the migrations from that version
+//! to the current one before decoding: a future change of a record's format adds a migration step instead of breaking
+//! the records already on disk. A record written by a newer version of the SDK is left alone, and one that can't be
+//! read at all is quarantined ([`crate::SwapStore::quarantine`]).
 
 use core::fmt;
 
 use paralock_core::evm::{AdaptorSwap, EvmAddress, HtlcSwap, U256};
 use paralock_core::protocol::Hex;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::Value;
 use zeroize::Zeroize;
 
 use crate::{Error, Result};
+
+/// A record type the engines persist.
+pub(crate) trait StoredRecord: DeserializeOwned {
+    /// What it is, for logs ("maker swap").
+    const WHAT: &'static str;
+    /// The format version this SDK writes (and the newest it reads).
+    const VERSION: u32;
+}
+
+/// Why a stored record could not be loaded.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum RecordError {
+    /// Written by a newer version of the SDK.
+    #[error("record version {version} is newer than this SDK supports")]
+    Newer {
+        /// Its version.
+        version: u32,
+    },
+    /// Not valid JSON, an unknown version, or a shape (or value) the decoder refuses.
+    #[error("{0}")]
+    Invalid(String),
+}
+
+/// Decodes a stored record: its `version` (1 when absent, as in records written before versions existed), the
+/// migrations up to [`StoredRecord::VERSION`], then the typed decoder (which re-validates quotes and wire messages).
+pub(crate) fn decode_record<T: StoredRecord>(json: &str) -> core::result::Result<T, RecordError> {
+    let value: Value = serde_json::from_str(json).map_err(|e| RecordError::Invalid(e.to_string()))?;
+    let version = match value.get("version") {
+        None => 1,
+        Some(v) => v
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(|v| *v >= 1)
+            .ok_or_else(|| RecordError::Invalid("version is not a positive integer".into()))?,
+    };
+    if version > T::VERSION {
+        return Err(RecordError::Newer { version });
+    }
+    let value = migrate(T::WHAT, value, version, T::VERSION)?;
+    serde_json::from_value(value).map_err(|e| RecordError::Invalid(e.to_string()))
+}
+
+/// The migration hook: upgrades a record of kind `what` from format `from` to format `to`, one version at a time.
+/// From version 1 to version 1 (the only format so far) it is the identity.
+pub(crate) fn migrate(what: &str, mut value: Value, from: u32, to: u32) -> core::result::Result<Value, RecordError> {
+    for version in from..to {
+        value = migrate_step(what, version, value)?;
+    }
+    Ok(value)
+}
+
+/// One migration step: a record of kind `what` from `version` to `version + 1`. A change to a record's format bumps
+/// its [`StoredRecord::VERSION`] and adds its step here, so the records already on disk keep loading. There are none
+/// yet: every record format is at version 1.
+fn migrate_step(what: &str, version: u32, value: Value) -> core::result::Result<Value, RecordError> {
+    drop(value);
+    Err(RecordError::Invalid(format!("no migration for a {what} record from version {version}")))
+}
 
 /// A secret string (hex of a private key or a swap secret) in a record: zeroized on drop, never printed by `Debug`.
 #[derive(Clone, PartialEq, Eq)]

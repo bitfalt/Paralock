@@ -11,4 +11,6 @@ pub use client::{
     parse_swap_response,
 };
 #[cfg(feature = "server")]
-pub use server::{CorsOrigins, ServerOptions, maker_router, serve};
+pub use server::{
+    ClientAddress, CorsOrigins, DEFAULT_RATE_LIMIT, RateLimit, ServerOptions, maker_router, serve, serve_with_shutdown,
+};
