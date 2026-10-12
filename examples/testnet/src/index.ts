@@ -40,7 +40,9 @@ const MODERATO = {
   fromBlock: deployment.startBlock as number,
   feeToken: PATH_USD,
 };
-const EXPLORER = { zcash: "https://blockexplorer.one/zcash/testnet/tx/", tempo: "https://explore.testnet.tempo.xyz/tx/" };
+// No public explorer indexes the NU7 testnet chain yet, so Zcash steps print the txid (look it up through any
+// lightwalletd on the same chain, e.g. `LightwalletdClient.getRawTransaction`). Tempo steps link to its explorer.
+const EXPLORER = { zcash: "zcash testnet tx ", tempo: "https://explore.testnet.tempo.xyz/tx/" };
 
 // Testnet blocks come every ~75 s: the ZEC stays refundable for ~2 h, the OUSD lock lasts 30 min.
 const TESTNET_POLICY: TimeoutPolicy = { zcashLockBlocks: 96, evmLockSeconds: 1800, zcashBlockSeconds: 75, minZcashConfirmations: 1, safetyFactor: 2 };
