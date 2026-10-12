@@ -51,6 +51,52 @@ const STEPS = [
   { where: "Zcash", title: "The maker claims the ZEC", text: "It uses the secret your claim revealed. Both sides are paid, and nobody held anyone else's money." },
 ];
 
+// The landing's short roadmap. The full one, with the reason for each item, is content/docs/roadmap.md: keep them in
+// sync (same items, same order).
+const ROADMAP = [
+  {
+    status: "shipped",
+    label: "Shipped",
+    items: [
+      { title: "TypeScript SDK", text: "@paralock/* on npm: taker, maker, both modes, crash-safe recovery" },
+      { title: "Rust SDK and binary", text: "Four crates on crates.io, and a native paralock CLI" },
+      { title: "Private mode", text: "Adaptor signatures: no shared hash links the two legs" },
+      { title: "Pay and payment links", text: "Exact dollars to any address, from shielded ZEC" },
+      { title: "Six EVM testnets", text: "Both escrows deployed with verified source" },
+      { title: "Public testnet swaps", text: "Three runs on Zcash testnet and Tempo, one safe refund" },
+      { title: "Protocol spec v1.1", text: "Cross-language test vectors shared by TypeScript and Rust" },
+      { title: "One-command devnet", text: "npx paralock dev: Zcash regtest, anvils, contracts, a maker" },
+      { title: "Docs for agents", text: "llms.txt, Markdown pages, an MCP server and a skill" },
+    ],
+  },
+  {
+    status: "next",
+    label: "Next",
+    items: [
+      { title: "Bindings from the Rust core", text: "Node.js, browsers, Swift, Kotlin, Python and Go" },
+      { title: "A hosted testnet maker", text: "Try a public-network swap without running a maker" },
+      { title: "Third-party security audit", text: "Contracts, protocol and core" },
+      { title: "Mainnet, after the audit", text: "Starting with OUSD on Tempo" },
+      { title: "A maker network", text: "Many makers compete for each swap" },
+      { title: "Dollars to ZEC", text: "The reverse direction" },
+      { title: "Shielded refunds", text: "Refunds straight to a shielded address" },
+      { title: "Wallet integrations", text: "Pay in dollars from the Zcash wallet you use" },
+      { title: "MPP payments", text: "Agents pay HTTP 402 APIs from shielded ZEC" },
+      { title: "Solana", text: "Same hashlock; private mode via secp256k1_recover" },
+    ],
+  },
+  {
+    status: "research",
+    label: "In research",
+    items: [
+      {
+        title: "A fully shielded Zcash leg",
+        text: "FROST 2-of-2 on shielded notes, Schnorr adaptor signatures and a cross-curve proof",
+      },
+    ],
+  },
+] as const;
+
 const PACKAGES = [
   { name: "@paralock/sdk", where: "npm", href: "https://www.npmjs.com/package/@paralock/sdk", text: "createTaker and createMaker: both modes, exact-amount payments, privacy options, crash-safe recovery." },
   { name: "@paralock/zcash", where: "npm", href: "https://www.npmjs.com/package/@paralock/zcash", text: "HTLC and 2-of-2 locks, v5 transactions, ZIP 244 signing and ZIP 317 fees. Runs in browsers." },
@@ -549,6 +595,48 @@ export default function Landing() {
                 </li>
               ))}
             </ul>
+          </div>
+        </section>
+
+        {/* Roadmap */}
+        <section className="section" id="roadmap" aria-labelledby="roadmap-title">
+          <div className="container">
+            <header className="sec-head" data-reveal>
+              <h2 id="roadmap-title">Roadmap.</h2>
+              <p>
+                What ships today, what comes next and what is still research, at a glance. No dates: each item ships when
+                it is built, tested and reviewed.
+              </p>
+            </header>
+            <div className="rm">
+              {ROADMAP.map((col, i) => (
+                <div key={col.status} className="rm__col" data-status={col.status} data-reveal style={stagger(i)}>
+                  <h3 className="rm__head">
+                    <span className="rm__dot" aria-hidden="true" />
+                    {col.label}
+                    <span className="rm__count">{col.items.length}</span>
+                  </h3>
+                  <ul className="rm__list">
+                    {col.items.map((it) => (
+                      <li key={it.title}>
+                        <span className="rm__title">{it.title}</span>
+                        <span className="rm__text">{it.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {col.status === "research" && (
+                    <p className="rm__note">
+                      Mainnet comes after a third-party audit, not before. Until then the escrows run on public testnets
+                      only.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+            <Link className="textlink rm__more" href="/docs/roadmap" prefetch={false} data-reveal>
+              The full roadmap, with the reason for each item
+              <Icon name="arrowRight" size={13} />
+            </Link>
           </div>
         </section>
 

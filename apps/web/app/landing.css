@@ -3138,3 +3138,122 @@
     transform: none !important;
   }
 }
+
+/* Roadmap: three status columns. Markers match the docs roadmap: solid = shipped, hollow = next, dashed = research. */
+.rm {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 5fr) minmax(0, 3fr);
+  gap: 48px;
+  align-items: start;
+}
+
+.rm__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.rm__count {
+  margin-left: auto;
+  color: var(--fg-4);
+}
+
+.rm__dot,
+.rm__list li::before {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border: 1.5px solid var(--fg);
+  border-radius: 2px;
+  background: var(--fg);
+}
+
+.rm__col[data-status="next"] .rm__dot,
+.rm__col[data-status="next"] .rm__list li::before {
+  border-color: var(--fg-3);
+  background: var(--bg);
+}
+
+.rm__col[data-status="research"] .rm__dot,
+.rm__col[data-status="research"] .rm__list li::before {
+  border: 1.5px dashed var(--fg-4);
+  background: var(--bg);
+}
+
+.rm__list li {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 11px 0 11px 22px;
+  border-bottom: 1px solid var(--line);
+  transition: background-color 0.2s var(--ease);
+}
+
+.rm__list li::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 17px;
+  width: 7px;
+  height: 7px;
+}
+
+.rm__list li:hover {
+  background: linear-gradient(90deg, var(--bg-1), transparent);
+}
+
+.rm__title {
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+.rm__text {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg-3);
+}
+
+.rm__note {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r);
+  background: var(--bg-1);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg-2);
+}
+
+.rm__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 40px;
+}
+
+@media (max-width: 1000px) {
+  .rm {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .rm__col[data-status="research"] {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .rm {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+  }
+}

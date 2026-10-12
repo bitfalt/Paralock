@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/#privacy", label: "Privacy" },
   { href: "/#testnets", label: "Testnets", wide: true },
   { href: "/#developers", label: "Developers" },
+  { href: "/#roadmap", label: "Roadmap", wide: true },
   { href: "/docs", label: "Docs", page: "docs" },
 ] as const;
 
