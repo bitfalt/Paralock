@@ -1,0 +1,80 @@
+name: Release
+
+# Publishes every package whose version isn't on its registry yet, in dependency order. Run it by hand after bumping
+# versions on main. Uses trusted publishing (GitHub OIDC): no npm or crates.io token is stored in the repository.
+# One-time setup per package: npmjs.com → package → Settings → Trusted publishing → GitHub Actions
+# (bitfalt/Paralock, workflow release.yml); crates.io → crate → Settings → Trusted Publishing (same repo/workflow).
+
+on:
+  workflow_dispatch:
+    inputs:
+      npm:
+        description: Publish the npm packages
+        type: boolean
+        default: true
+      crates:
+        description: Publish the Rust crates
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    if: inputs.npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: npm with trusted publishing support
+        run: npm install -g npm@^11.5.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build && pnpm check:deps
+      - name: Publish (dependency order, skipping published versions)
+        run: |
+          set -euo pipefail
+          mkdir -p .release
+          for dir in zcash adaptor evm lightwalletd sdk cli; do
+            name=$(node -p "require('./packages/$dir/package.json').name")
+            version=$(node -p "require('./packages/$dir/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "::notice::$name@$version is already published"
+              continue
+            fi
+            # pnpm pack turns workspace:* into real versions; npm publish handles OIDC and provenance.
+            tarball=$(cd "packages/$dir" && pnpm pack --pack-destination "$GITHUB_WORKSPACE/.release" | tail -1)
+            npm publish "$tarball" --access public --provenance
+            echo "::notice::published $name@$version"
+          done
+
+  crates:
+    if: inputs.crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish (dependency order, skipping published versions)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          for crate in paralock-core paralock-evm paralock paralock-cli; do
+            [ -d "crates/$crate" ] || continue
+            version=$(cargo metadata --no-deps --format-version 1 | jq -r --arg n "$crate" '.packages[] | select(.name == $n) | .version')
+            if curl -sf -A "paralock-release (github.com/bitfalt/Paralock)" "https://crates.io/api/v1/crates/$crate/$version" >/dev/null; then
+              echo "::notice::$crate $version is already published"
+              continue
+            fi
+            cargo publish -p "$crate"
+            echo "::notice::published $crate $version"
+          done
