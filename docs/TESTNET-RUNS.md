@@ -14,6 +14,18 @@ const node = new LightwalletdClient("testnet.zec.rocks:443");
 console.log(await node.getRawTransaction("8a05579a55e0b90b41ef2757264ec300b6c31646a7c6013b5a7596d67b464c89"));
 ```
 
+## 2026-10-12, run 3: the Rust SDK, htlc, 0.003 TAZ → 3.72 OUSD, completed in about 4 minutes
+
+The same flow driven by the Rust SDK ([`examples/rust/rust-testnet`](../examples/rust/rust-testnet)): a Rust taker and
+an in-process Rust maker, lightwalletd at `testnet.zec.rocks:443`, and the Moderato escrows embedded in `paralock-evm`.
+
+| Step | Transaction |
+|---|---|
+| Taker locks 0.003 TAZ in the Zcash HTLC | `d9438c7467297a351656f38ced672c958179a4ce2ca27bd23ef906c07c91e63a` |
+| Maker locks 3.72 OUSD on Tempo | [`0xe168bfa9…12fe8`](https://explore.testnet.tempo.xyz/tx/0xe168bfa9857e0ef3731afecefd1e067662534f3c1c8d735dcc21d48437112fe8) |
+| A relayer claims the OUSD for the taker, revealing the secret | [`0xc78954a5…37c98`](https://explore.testnet.tempo.xyz/tx/0xc78954a5fa9cbece5ed20cb3997c92d7ee7d099170d96b2726d7764d59737c98) |
+| Maker claims the TAZ with the secret | `4555de5f6a9261cb0b5af6c033c9db1ea82d14325628c7bb59bb2ea645e13d39` |
+
 ## 2026-10-12, run 2: htlc, 0.015 TAZ → 19.39 OUSD, completed in 3 min 39 s
 
 With the fix from run 1: the maker reserved the swap before any ZEC moved.
