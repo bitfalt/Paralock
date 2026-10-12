@@ -1,0 +1,60 @@
+[package]
+name = "paralock-evm"
+description = "EVM layer of Paralock: alloy clients for the ParalockHTLC and ParalockAdaptorEscrow escrows (lock, claim, refund, outcomes), escrow ids and claim digests, Tempo fee-token transactions, a verified network registry with the public testnet deployments, and a local deployment helper."
+version.workspace = true
+edition.workspace = true
+# alloy 2.x needs 1.94.1 and tempo-alloy 1.95 (the workspace default of 1.85 is for paralock-core).
+rust-version = "1.95"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/paralock-evm"
+authors.workspace = true
+readme = "README.md"
+keywords = ["evm", "htlc", "atomic-swap", "tempo", "alloy"]
+categories = ["cryptography::cryptocurrencies", "api-bindings", "network-programming"]
+include = ["src/**/*.rs", "artifacts/*.json", "build.rs", "Cargo.toml", "README.md", "LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["tempo"]
+## Tempo transactions (type 0x76) that pay gas in a chosen TIP-20 fee token, through Tempo's official `tempo-alloy`.
+## Without it, Tempo chains still work with plain EIP-1559 transactions (the protocol then picks the fee token: the
+## account's FeeManager preference, else pathUSD), and `EvmConfig::fee_token` is rejected.
+tempo = ["dep:tempo-alloy"]
+
+[dependencies]
+alloy = { workspace = true, features = [
+    "std",
+    "reqwest",
+    "reqwest-rustls-tls",
+    "provider-http",
+    "rpc-types",
+    "network",
+    "consensus",
+    "eips",
+    "k256",
+    "signers",
+    "signer-local",
+    "sol-types",
+    "json-abi",
+    "getrandom",
+    "json-rpc",
+] }
+tempo-alloy = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tower = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time", "sync"] }
+proptest = { workspace = true }
+
+[lints]
+workspace = true
