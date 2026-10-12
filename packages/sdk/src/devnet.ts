@@ -1,36 +1,46 @@
-import { HtlcTimeoutError, SwapRefundedError, type TempoHtlc, createTempoHtlc } from "@paralock/tempo";
+import {
+  type AdaptorEscrow,
+  type EvmHtlc,
+  HtlcTimeoutError,
+  SwapRefundedError,
+  createAdaptorEscrow,
+  createEvmHtlc,
+} from "@paralock/evm";
 import { ZcashRpc, keyAddress } from "@paralock/zcash";
+import type { AdaptorEvmClient, ChainClients, EvmClient } from "./evm-client.js";
 import { HttpMakerApi } from "./http.js";
 import { Maker } from "./maker.js";
 import { DEVNET_POLICY } from "./policy.js";
 import { zecUsdPrice } from "./pricing.js";
-import { Taker } from "./taker.js";
-import type { TempoClient } from "./tempo-leg.js";
+import { Taker, type TakerChain, type TakerConfig } from "./taker.js";
 import { ThsClient } from "./ths.js";
-import type { DevnetConfig, Hex, Swap } from "./types.js";
+import type { DevnetConfig, EvmChain, EvmNetwork, Hex } from "./types.js";
 
 /** `.paralock/devnet.json`, written by `paralock devnet up`. */
 export interface DevnetFile extends DevnetConfig {
   thsMnemonic: string;
-  /** Block the HTLC was deployed in; event scans start here. */
-  startBlock: number;
-  maker: { url: string; thsAccount: number; tempoKey: Hex };
+  /** ths account 5 on Zcash; anvil dev account 0 on every EVM chain. */
+  maker: { url: string; thsAccount: number; evmKey: Hex };
   /**
    * `thsAccount` is the taker's wallet (shielded savings; change and refunds come back here and are shielded again).
-   * `swapAccount` holds the unshielded amount Paralock spends into the HTLC; ths never spends from it.
+   * `swapAccount` holds the unshielded amount Paralock spends into the Zcash lock; ths never spends from it.
    */
-  taker: { thsAccount: number; swapAccount?: number; tempoKey: Hex };
-  /** Stablecoin symbol the devnet maker quotes (a key of `tempo.tokens`). */
-  quoteToken: string;
+  taker: { thsAccount: number; swapAccount: number; evmKey: Hex };
+  /** Submits claims for the taker, so a fresh recipient needs no gas. */
+  relayer: { evmKey: Hex };
 }
 
-/** Adapts the viem-based `@paralock/tempo` client to the engines' `TempoClient`. */
-export function tempoClientFrom(htlc: TempoHtlc): TempoClient {
-  const account = htlc.walletClient?.account.address;
-  if (!account) throw new Error("Tempo client needs an account");
+const latestTimestamp = async (c: EvmHtlc | AdaptorEscrow) => (await c.publicClient.getBlock({ blockTag: "latest" })).timestamp;
+
+/** Adapts `@paralock/evm`'s HTLC client to the engines' `EvmClient`. */
+export function evmClientFrom(chain: EvmChain, htlc: EvmHtlc): EvmClient {
+  const address = htlc.walletClient?.account.address;
+  if (!address) throw new Error("EVM client needs an account");
   return {
+    chain,
+    chainId: htlc.chain.id,
     contract: htlc.address,
-    address: account,
+    address,
     async lock(swap) {
       await htlc.approveIfNeeded(swap.token, swap.amount);
       return (await htlc.lock(swap)).hash;
@@ -50,45 +60,78 @@ export function tempoClientFrom(htlc: TempoHtlc): TempoClient {
         throw err;
       }
     },
-    async now() {
-      return (await htlc.publicClient.getBlock()).timestamp;
-    },
+    now: () => latestTimestamp(htlc),
   };
 }
 
-function tempoFor(cfg: DevnetFile, key: Hex): TempoClient {
-  return tempoClientFrom(
-    createTempoHtlc({
-      rpcUrl: cfg.tempo.rpc,
-      chainId: cfg.tempo.chainId,
-      account: key,
-      contract: cfg.tempo.htlc,
-      fromBlock: BigInt(cfg.startBlock),
-    }),
-  );
+/** Adapts `@paralock/evm`'s adaptor escrow client to the engines' `AdaptorEvmClient`. */
+export function adaptorClientFrom(chain: EvmChain, escrow: AdaptorEscrow): AdaptorEvmClient {
+  const address = escrow.walletClient?.account.address;
+  if (!address) throw new Error("EVM client needs an account");
+  return {
+    chain,
+    chainId: escrow.chainId,
+    contract: escrow.address,
+    address,
+    idOf: (swap) => escrow.idOf(swap),
+    claimDigest: async (id) => escrow.claimDigest(id),
+    async lock(swap) {
+      await escrow.approveIfNeeded(swap.token, swap.amount);
+      const { hash, id } = await escrow.lock(swap);
+      return { hash, id };
+    },
+    async claim(swap, sig) {
+      return (await escrow.claim(swap, sig)).hash;
+    },
+    async refund(swap) {
+      return (await escrow.refund(swap)).hash;
+    },
+    getLockedSwap: (id) => escrow.getLockedSwap(id),
+    async waitForClaimSignature(id, opts) {
+      try {
+        const { v, r, s } = await escrow.waitForClaimSignature(id, { timeoutMs: opts.timeoutMs });
+        return { v: Number(v), r, s };
+      } catch (err) {
+        if (err instanceof HtlcTimeoutError || err instanceof SwapRefundedError) return undefined;
+        throw err;
+      }
+    },
+    now: () => latestTimestamp(escrow),
+  };
 }
 
-function quoteToken(cfg: DevnetFile): Hex {
-  const token = cfg.tempo.tokens[cfg.quoteToken];
-  if (!token) throw new Error(`devnet has no ${cfg.quoteToken} token`);
-  return token;
+function connect(net: EvmNetwork, key: Hex) {
+  const common = { rpcUrl: net.rpc, chainId: net.chainId, account: key, fromBlock: BigInt(net.startBlock) };
+  return {
+    htlc: evmClientFrom(net.chain, createEvmHtlc({ ...common, contract: net.htlc })),
+    adaptor: net.adaptorEscrow ? adaptorClientFrom(net.chain, createAdaptorEscrow({ ...common, contract: net.adaptorEscrow })) : undefined,
+  };
 }
 
-/** The devnet maker: ths account 5 on Zcash, anvil dev account 0 on Tempo. Claimed ZEC is shielded again. */
+function networks(cfg: DevnetFile): EvmNetwork[] {
+  return Object.values(cfg.evm).filter((n): n is EvmNetwork => !!n);
+}
+
+function chainClients(net: EvmNetwork, key: Hex): ChainClients {
+  const token = net.tokens[net.quoteToken];
+  if (!token) throw new Error(`${net.chain} has no ${net.quoteToken} token`);
+  return { chain: net.chain, chainId: net.chainId, token, tokenSymbol: net.quoteToken, tokenDecimals: 6, ...connect(net, key) };
+}
+
+/** The devnet maker: ths account 5 on Zcash, anvil dev account 0 on every EVM chain. Claimed ZEC is shielded again. */
 export async function devnetMaker(cfg: DevnetFile, opts: { log?: (m: string) => void } = {}) {
   const zcash = new ZcashRpc(cfg.zcash.rpc);
   const ths = new ThsClient(cfg.zcash.dashboard);
   const zcashKey = await ths.accountKey(cfg.thsMnemonic, cfg.maker.thsAccount);
+  const chains: Partial<Record<EvmChain, ChainClients>> = {};
+  for (const net of networks(cfg)) chains[net.chain] = chainClients(net, cfg.maker.evmKey);
   const maker = new Maker({
     network: "regtest",
     zcash,
     zcashKey,
     zcashPayoutAddress: keyAddress(zcashKey, "regtest"),
-    tempo: tempoFor(cfg, cfg.maker.tempoKey),
-    token: quoteToken(cfg),
-    tokenSymbol: cfg.quoteToken,
-    tokenDecimals: 6,
-    price: zecUsdPrice({ fallback: 45 }),
+    chains,
+    price: zecUsdPrice({ fallback: 1270 }),
     spreadBps: 50,
     policy: DEVNET_POLICY,
     log: opts.log,
@@ -96,8 +139,7 @@ export async function devnetMaker(cfg: DevnetFile, opts: { log?: (m: string) => 
       // Shield the claimed ZEC back into the maker's Ironwood balance.
       try {
         await ths.mine(1);
-        const account = await ths.account(cfg.maker.thsAccount);
-        const transparent = BigInt(account.transparent_zatoshi);
+        const transparent = BigInt((await ths.account(cfg.maker.thsAccount)).transparent_zatoshi);
         if (transparent > 50_000n) await ths.shield(cfg.maker.thsAccount, transparent - 30_000n);
         opts.log?.("[maker] shielded claimed ZEC into Ironwood");
       } catch (err) {
@@ -111,25 +153,28 @@ export async function devnetMaker(cfg: DevnetFile, opts: { log?: (m: string) => 
 /**
  * The devnet taker. Savings live in ths account 1 (Ironwood); each swap unshields exactly what it needs into ths
  * account 2's transparent address, which only Paralock spends from. Change and refunds go back to account 1's
- * transparent address and are shielded again. Keeping the two apart keeps the ths wallet's view consistent.
+ * transparent address and are shielded again. On EVM chains it uses anvil dev account 1, with dev account 2 relaying.
  */
-export async function devnetTaker(cfg: DevnetFile, opts: { onUpdate?: (swap: Swap) => void } = {}) {
+export async function devnetTaker(cfg: DevnetFile, opts: Pick<TakerConfig, "onUpdate" | "onFreshRecipient"> = {}) {
   const zcash = new ZcashRpc(cfg.zcash.rpc);
   const ths = new ThsClient(cfg.zcash.dashboard);
   const wallet = cfg.taker.thsAccount;
   const swapAccount = cfg.taker.swapAccount ?? 2;
   const zcashKey = await ths.accountKey(cfg.thsMnemonic, swapAccount);
   const returnAddress = (await ths.account(wallet)).transparent_address;
+  const chains: Partial<Record<EvmChain, TakerChain>> = {};
+  for (const net of networks(cfg)) chains[net.chain] = { ...connect(net, cfg.taker.evmKey), relayer: connect(net, cfg.relayer.evmKey) };
   const maker = new HttpMakerApi(cfg.maker.url);
   const taker = new Taker({
     network: "regtest",
     zcash,
     zcashKey,
     returnAddress,
-    tempo: tempoFor(cfg, cfg.taker.tempoKey),
+    chains,
     maker,
     mineZcash: (n) => zcash.generate(n),
     onUpdate: opts.onUpdate,
+    onFreshRecipient: opts.onFreshRecipient,
   });
   const address = keyAddress(zcashKey, "regtest");
 

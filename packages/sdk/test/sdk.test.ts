@@ -8,7 +8,7 @@ import type { Swap } from "../src/types.js";
 describe("timeout policy", () => {
   it("accepts the default policies", () => {
     for (const p of [MAINNET_POLICY, DEVNET_POLICY]) {
-      expect(() => assertSafeWindows(p, p.zcashLockBlocks - 1, p.tempoLockSeconds)).not.toThrow();
+      expect(() => assertSafeWindows(p, p.zcashLockBlocks - 1, p.evmLockSeconds)).not.toThrow();
     }
   });
 
