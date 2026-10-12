@@ -1,0 +1,28 @@
+{
+  "name": "@paralock/tempo",
+  "version": "0.1.0",
+  "description": "Paralock HTLC client for Tempo (TIP-20 escrow) built on viem.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "generate:abi": "forge build --root ../../contracts && node scripts/generate-abi.ts"
+  },
+  "dependencies": {
+    "viem": "^2.57.4"
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}
