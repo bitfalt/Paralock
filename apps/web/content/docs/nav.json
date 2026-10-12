@@ -88,6 +88,19 @@
       ]
     },
     {
+      "title": "Rust",
+      "pages": [
+        {
+          "slug": "rust",
+          "title": "Rust SDK"
+        },
+        {
+          "slug": "rust-cli",
+          "title": "Rust CLI"
+        }
+      ]
+    },
+    {
       "title": "Trust",
       "pages": [
         {
