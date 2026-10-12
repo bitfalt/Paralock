@@ -29,3 +29,6 @@ examples/*/.payroll/
 
 # Vercel CLI link
 .vercel
+
+# Rust
+/target
